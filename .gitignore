@@ -52,3 +52,7 @@ app/src/main/jniLibs/
 
 # filter-branch leftover
 .git-rewrite/
+
+# 不需要的文件
+openlist-integration-details.md
+《凡人修仙传》第001话 凡人风起天南1重制版.xml
