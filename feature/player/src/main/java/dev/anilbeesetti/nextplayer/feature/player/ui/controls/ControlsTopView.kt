@@ -1,0 +1,111 @@
+package dev.anilbeesetti.nextplayer.feature.player.ui.controls
+
+import androidx.annotation.OptIn
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.displayCutoutPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.media3.common.util.UnstableApi
+import dev.anilbeesetti.nextplayer.core.ui.R
+import dev.anilbeesetti.nextplayer.core.ui.extensions.copy
+import dev.anilbeesetti.nextplayer.feature.player.buttons.PlayerButton
+
+@OptIn(UnstableApi::class)
+@Composable
+fun ControlsTopView(
+    modifier: Modifier = Modifier,
+    title: String,
+    danmakuEnabled: Boolean = false,
+    danmakuHasData: Boolean = false,
+    onAudioClick: () -> Unit = {},
+    onSubtitleClick: () -> Unit = {},
+    onDanmakuToggleClick: () -> Unit = {},
+    onDanmakuSearchClick: () -> Unit = {},
+    onDanmakuSettingsClick: () -> Unit = {},
+    onBackClick: () -> Unit,
+) {
+    val systemBarsPadding = WindowInsets.systemBars.union(WindowInsets.displayCutout).asPaddingValues()
+    Row(
+        modifier = modifier
+            .padding(systemBarsPadding.copy(bottom = 0.dp))
+            .padding(horizontal = 8.dp)
+            .padding(bottom = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        PlayerButton(onClick = onBackClick) {
+            Icon(
+                painter = painterResource(R.drawable.ic_arrow_left),
+                contentDescription = null,
+            )
+        }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PlayerButton(onClick = onAudioClick) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_audio_track),
+                    contentDescription = null,
+                )
+            }
+            PlayerButton(onClick = onSubtitleClick) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_subtitle_track),
+                    contentDescription = null,
+                )
+            }
+            // 弹幕搜索/本地文件按钮（始终可见）
+            PlayerButton(onClick = onDanmakuSearchClick) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_search),
+                    contentDescription = null,
+                )
+            }
+            // 弹幕开关按钮（仅在有数据时可用）
+            if (danmakuHasData) {
+                PlayerButton(onClick = onDanmakuToggleClick) {
+                    Icon(
+                        painter = painterResource(
+                            if (danmakuEnabled) R.drawable.ic_danmaku
+                            else R.drawable.ic_danmaku_off
+                        ),
+                        contentDescription = null,
+                    )
+                }
+            }
+            PlayerButton(onClick = onDanmakuSettingsClick) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_settings),
+                    contentDescription = null,
+                )
+            }
+        }
+    }
+}

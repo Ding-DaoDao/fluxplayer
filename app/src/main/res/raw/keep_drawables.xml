@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_file_folder,@drawable/ic_file_video,@drawable/ic_file_audio,@drawable/ic_file_doc,@drawable/ic_file_image,@drawable/ic_file_archive,@drawable/ic_file_unknown,@drawable/ic_provider_webdav,@drawable/ic_provider_pan123,@drawable/ic_provider_openlist,@drawable/ic_provider_quark,@drawable/ic_provider_uc,@drawable/ic_provider_cloud189,@drawable/ic_provider_yun139,@drawable/ic_provider_alipan,@drawable/ic_provider_baidu" />
+

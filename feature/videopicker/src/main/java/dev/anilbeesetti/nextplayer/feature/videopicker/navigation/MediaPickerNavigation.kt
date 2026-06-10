@@ -1,0 +1,40 @@
+package dev.anilbeesetti.nextplayer.feature.videopicker.navigation
+
+import android.net.Uri
+import androidx.navigation.NavController
+import androidx.navigation.NavGraphBuilder
+import androidx.navigation.NavOptions
+import androidx.navigation.compose.composable
+import dev.anilbeesetti.nextplayer.feature.videopicker.screens.mediapicker.MediaPickerRoute
+
+internal const val folderIdArg = "folderId"
+
+fun NavController.navigateToMediaPickerScreen(
+    folderId: String,
+    navOptions: NavOptions? = null,
+) {
+    val encodedFolderId = Uri.encode(folderId)
+    this.navigate(MediaPickerRoute(encodedFolderId), navOptions)
+}
+
+fun NavGraphBuilder.mediaPickerScreen(
+    onNavigateUp: () -> Unit,
+    onPlayVideo: (uri: Uri, title: String?) -> Unit,
+    onPlayVideos: (uris: List<Uri>, startUri: Uri) -> Unit,
+    onFolderClick: (folderPath: String) -> Unit,
+    onSettingsClick: () -> Unit,
+    onSearchClick: () -> Unit,
+    onWebDavClick: () -> Unit = {},
+) {
+    composable<MediaPickerRoute> {
+        MediaPickerRoute(
+            onPlayVideo = onPlayVideo,
+            onPlayVideos = onPlayVideos,
+            onNavigateUp = onNavigateUp,
+            onFolderClick = onFolderClick,
+            onSettingsClick = onSettingsClick,
+            onSearchClick = onSearchClick,
+            onWebDavClick = onWebDavClick,
+        )
+    }
+}

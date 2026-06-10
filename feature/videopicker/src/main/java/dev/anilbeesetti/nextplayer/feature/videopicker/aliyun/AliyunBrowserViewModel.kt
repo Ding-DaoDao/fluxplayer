@@ -1,0 +1,667 @@
+package dev.anilbeesetti.nextplayer.feature.videopicker.aliyun
+
+import android.app.Application
+import android.content.Context
+import android.util.Log
+import android.widget.Toast
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.anilbeesetti.nextplayer.core.common.CloudPlayHeaders
+import dev.anilbeesetti.nextplayer.core.common.CloudPlaylistCache
+import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunApiClient
+import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunAuthProvider
+import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
+import dev.anilbeesetti.nextplayer.core.model.WebDavResource
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import javax.inject.Inject
+
+data class AliyunBreadcrumb(val label: String, val fileId: String)
+
+@HiltViewModel
+class AliyunBrowserViewModel @Inject constructor(
+    application: Application,
+    private val preferencesRepository: PreferencesRepository
+) : androidx.lifecycle.AndroidViewModel(application) {
+
+    companion object {
+        private const val TAG = "AliyunBrowserVM"
+        private const val PREF_NAME = "alipan"
+    }
+
+    // region ==================== API Client & Auth ====================
+
+    val apiClient = AliyunApiClient()
+    val authProvider = AliyunAuthProvider
+
+    // endregion
+
+    // region ==================== 状态 ====================
+
+    private val _uiState = MutableStateFlow(AliyunBrowserUiState())
+    val uiState: StateFlow<AliyunBrowserUiState> = _uiState.asStateFlow()
+
+    private var loadSequence: Int = 0
+    private var loadDirectoryJob: kotlinx.coroutines.Job? = null
+    private var loadingMore: Boolean = false
+
+    // endregion
+
+    // region ==================== 登录 — loginWithAuthorization ====================
+
+    fun loginWithAuthorization(auth: String) {
+        apiClient.authorization = auth
+        AliyunAuthProvider.authorization = auth
+        AliyunAuthProvider.isActive = true
+
+        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString("authorization", auth).apply()
+
+        updateUiState { it.copy(isLoggedIn = true) }
+        viewModelScope.launch {
+            refreshDriveInfo()
+            loadDirectory("root")
+        }
+    }
+
+    // endregion
+
+    // region ==================== 登录 — loginWithTokenJson（完整JSON解析） ====================
+
+    fun loginWithTokenJson(tokenJsonStr: String) {
+        try {
+            val json = JSONObject(tokenJsonStr)
+            val accessToken = json.optString("access_token", "")
+            if (accessToken.isBlank()) {
+                Log.e(TAG, "loginWithTokenJson: no access_token in json")
+                return
+            }
+            val tokenType = json.optString("token_type", "Bearer")
+            val auth = "$tokenType $accessToken"
+            val defaultDriveId = json.optString("default_drive_id", "")
+            val refreshToken = json.optString("refresh_token", "")
+            var deviceId = json.optString("device_id", "")
+            if (deviceId.isBlank()) deviceId = apiClient.getDeviceId()
+            var signature = json.optString("x_signature", "")
+            if (signature.isBlank()) signature = apiClient.getSignature()
+
+            apiClient.authorization = auth
+            apiClient.driveId = defaultDriveId
+            AliyunAuthProvider.authorization = auth
+            AliyunAuthProvider.isActive = true
+
+            if (deviceId.isNotBlank()) apiClient.setDeviceId(deviceId)
+            if (signature.isNotBlank()) apiClient.setSignature(signature)
+
+            val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("authorization", auth)
+                .putString("drive_id", defaultDriveId)
+                .putString("refresh_token", refreshToken)
+                .putString("device_id", apiClient.getDeviceId())
+                .putString("signature", apiClient.getSignature())
+                .apply()
+
+            val initialOptions = mutableListOf<DriveOption>()
+            if (defaultDriveId.isNotBlank()) {
+                initialOptions.add(DriveOption("我的云盘", defaultDriveId))
+            }
+
+            updateUiState {
+                it.copy(
+                    breadcrumbs = listOf(AliyunBreadcrumb("我的云盘", "root")),
+                    isLoggedIn = true,
+                    driveOptions = initialOptions,
+                    currentDriveId = defaultDriveId
+                )
+            }
+
+            viewModelScope.launch {
+                refreshDriveInfo()
+                loadDirectory("root")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "loginWithTokenJson failed", e)
+        }
+    }
+
+    // endregion
+
+    // region ==================== 登录 — tryRestoreSession（含token验证重试） ====================
+
+    fun tryRestoreSession() {
+        if (_uiState.value.isLoggedIn) return
+
+        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val auth = prefs.getString("authorization", "") ?: ""
+        if (auth.isBlank()) {
+            updateUiState { it.copy(isLoggedIn = false) }
+            return
+        }
+
+        apiClient.authorization = auth
+        val savedDriveId = prefs.getString("drive_id", "") ?: ""
+        if (savedDriveId.isNotBlank()) {
+            apiClient.driveId = savedDriveId
+        }
+        val savedDeviceId = prefs.getString("device_id", "") ?: ""
+        if (savedDeviceId.isNotBlank()) {
+            apiClient.setDeviceId(savedDeviceId)
+        }
+        val savedSignature = prefs.getString("signature", "") ?: ""
+        if (savedSignature.isNotBlank()) {
+            apiClient.setSignature(savedSignature)
+        }
+
+        viewModelScope.launch {
+            var valid = false
+            // 最多3次重试，间隔1.5秒
+            for (i in 0 until 3) {
+                try {
+                    val result = apiClient.getUserDriveInfo()
+                    if (result.isSuccess) {
+                        valid = true
+                        break
+                    }
+                } catch (_: Exception) {}
+                if (i < 2) delay(1500)
+            }
+
+            if (valid) {
+                AliyunAuthProvider.authorization = auth
+                AliyunAuthProvider.isActive = true
+                updateUiState { it.copy(isLoggedIn = true) }
+                refreshDriveInfo()
+                loadDirectory("root")
+            } else {
+                updateUiState { it.copy(isLoggedIn = false, reLoginRequired = true) }
+            }
+        }
+    }
+
+    // endregion
+
+    // region ==================== 登出 ====================
+
+    fun logout() {
+        AliyunAuthProvider.clear()
+        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().clear().apply()
+        _uiState.value = AliyunBrowserUiState()
+    }
+
+    // endregion
+
+    // region ==================== 驱动信息刷新 ====================
+
+    private suspend fun refreshDriveInfo() {
+        val result = apiClient.getUserDriveInfo().getOrNull() ?: return
+        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        if (apiClient.driveId.isBlank() && result.defaultDriveId.isNotBlank()) {
+            apiClient.driveId = result.defaultDriveId
+            prefs.edit().putString("drive_id", result.defaultDriveId).apply()
+        }
+    }
+
+    // endregion
+
+    // region ==================== 切换驱动 ====================
+
+    fun switchDrive(driveId: String) {
+        apiClient.driveId = driveId
+        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString("drive_id", driveId).apply()
+        updateUiState { it.copy(currentDriveId = driveId) }
+        loadDirectory("root")
+    }
+
+    // endregion
+
+    // region ==================== 重新登录触发 ====================
+
+    fun triggerReLogin() {
+        logout()
+    }
+
+    // endregion
+
+    // region ==================== 目录加载 ====================
+
+    fun loadDirectory(parentFileId: String) {
+        loadDirectoryJob?.cancel()
+        loadSequence++
+        val seq = loadSequence
+        updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
+
+        loadDirectoryJob = viewModelScope.launch {
+            val result = apiClient.listFiles(
+                parentFileId,
+                orderBy = _uiState.value.orderBy.substringBefore(":"),
+                orderDirection = _uiState.value.orderBy.substringAfter(":", "ASC")
+            )
+            if (seq != loadSequence) return@launch
+
+            result.fold(
+                onSuccess = { listResult ->
+                    // 缓存文件元数据到 CloudPlaylistCache，供播放器显示标题
+                    listResult.items.forEach { file ->
+                        if (file.category == "video") {
+                            CloudPlaylistCache.putFileMetadata(
+                                "alipan", file.fileId,
+                                CloudPlaylistCache.FileMetadata(fileName = file.fileName)
+                            )
+                        }
+                    }
+                    val resources = listResult.items.map { fileToResource(it) }
+                    updateUiState {
+                        it.copy(
+                            items = resources,
+                            isLoading = false,
+                            nextMarker = listResult.nextMarker.ifEmpty { null }
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    val msg = e.message ?: "未知错误"
+                    val friendly = when {
+                        msg.contains("require login", ignoreCase = true) ||
+                        msg.contains("token", ignoreCase = true) ||
+                        msg.contains("invalid", ignoreCase = true) ||
+                        msg.contains("401") -> {
+                            updateUiState { it.copy(reLoginRequired = true) }
+                            "登录已过期，请重新登录"
+                        }
+                        msg.contains("Failed to connect", ignoreCase = true) ||
+                        msg.contains("Unable to resolve", ignoreCase = true) ->
+                            "无法连接到阿里云盘服务"
+                        else -> "加载失败: $msg"
+                    }
+                    updateUiState { it.copy(error = friendly, isLoading = false) }
+                }
+            )
+        }
+    }
+
+    // endregion
+
+    // region ==================== 加载更多 ====================
+
+    fun loadMore() {
+        val state = _uiState.value
+        if (state.nextMarker == null || loadingMore || state.isLoading) return
+        loadingMore = true
+        updateUiState { it.copy(isLoadingMore = true) }
+
+        viewModelScope.launch {
+            val result = apiClient.listFiles(
+                parentFileId = state.currentFileId,
+                nextMarker = state.nextMarker
+            )
+            result.fold(
+                onSuccess = { listResult ->
+                    val newItems = listResult.items.map { fileToResource(it) }
+                    updateUiState {
+                        it.copy(
+                            items = state.items + newItems,
+                            isLoadingMore = false,
+                            nextMarker = listResult.nextMarker.ifEmpty { null }
+                        )
+                    }
+                    loadingMore = false
+                },
+                onFailure = { e ->
+                    updateUiState {
+                        it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}")
+                    }
+                    loadingMore = false
+                }
+            )
+        }
+    }
+
+    // endregion
+
+    // region ==================== 导航 ====================
+
+    fun navigateToDir(index: Int) {
+        val state = _uiState.value
+        val item = state.items.getOrNull(index) ?: return
+        if (!item.isDirectory) return
+
+        val parentKey = state.breadcrumbs.joinToString("/") { it.label }
+        updateUiState {
+            it.copy(
+                items = emptyList(),
+                breadcrumbs = state.breadcrumbs + AliyunBreadcrumb(item.name, item.path),
+                scrollTargetIndex = index,
+                scrollTargetParentKey = parentKey
+            )
+        }
+        loadDirectory(item.path)
+    }
+
+    fun clearScrollTarget() {
+        updateUiState { it.copy(scrollTargetIndex = -1) }
+    }
+
+    fun navigateUp() {
+        val breadcrumbs = _uiState.value.breadcrumbs
+        if (breadcrumbs.size <= 1) return
+        val target = breadcrumbs[breadcrumbs.size - 2]
+        updateUiState { it.copy(breadcrumbs = breadcrumbs.dropLast(1)) }
+        loadDirectory(target.fileId)
+    }
+
+    fun navigateToBreadcrumb(index: Int) {
+        val breadcrumbs = _uiState.value.breadcrumbs
+        if (index >= breadcrumbs.size) return
+        val target = breadcrumbs[index]
+        if (target.fileId.isEmpty()) return
+        updateUiState { it.copy(breadcrumbs = breadcrumbs.subList(0, index + 1)) }
+        loadDirectory(target.fileId)
+    }
+
+    fun jumpToFolder(fileId: String, label: String) {
+        val state = _uiState.value
+        val segments = label.split("/")
+        val root = state.breadcrumbs.firstOrNull() ?: AliyunBreadcrumb("根目录", "root")
+        val pathCrumbs = segments.map { seg ->
+            val parts = seg.split("|", limit = 2)
+            AliyunBreadcrumb(parts[0], if (parts.size > 1) parts[1] else "")
+        }
+        updateUiState { it.copy(items = emptyList(), breadcrumbs = listOf(root) + pathCrumbs) }
+        loadDirectory(fileId)
+    }
+
+    // endregion
+
+    // region ==================== 排序 ====================
+
+    fun setSort(orderBy: String, orderDirection: String = "") {
+        val dir = orderDirection.ifEmpty {
+            _uiState.value.orderBy.substringAfter(":", "ASC")
+        }
+        updateUiState { it.copy(orderBy = "$orderBy:$dir") }
+        loadDirectory(_uiState.value.currentFileId)
+    }
+
+    // endregion
+
+    // region ==================== 刷新 ====================
+
+    fun refresh() {
+        loadDirectory(_uiState.value.currentFileId)
+    }
+
+    // endregion
+
+    // region ==================== 足迹 ====================
+
+    fun recordFootprint(path: String) {
+        val dir = _uiState.value.currentFileId
+        updateUiState { it.copy(currentFootprint = path) }
+
+        viewModelScope.launch {
+            try {
+                val appPrefs = preferencesRepository.applicationPreferences.value
+                val footprintMap = appPrefs.latestFootprintPerDir.toMutableMap()
+                footprintMap["alipan:$dir"] = path
+                preferencesRepository.updateApplicationPreferences {
+                    it.copy(latestFootprintPerDir = footprintMap)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // endregion
+
+    // region ==================== CRUD ====================
+
+    fun createDirectory(name: String) {
+        viewModelScope.launch {
+            val state = _uiState.value
+            updateUiState { it.copy(isLoading = true) }
+            val result = apiClient.createFolder(name, state.currentFileId)
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(getApplication(), "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                    refresh()
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateUiState { it.copy(isLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun deleteItem(index: Int) {
+        val item = _uiState.value.items.getOrNull(index) ?: return
+        viewModelScope.launch {
+            updateUiState { it.copy(isLoading = true) }
+            val result = apiClient.trashFile(item.path)
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(getApplication(), "删除成功", Toast.LENGTH_SHORT).show()
+                    refresh()
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "删除失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateUiState { it.copy(isLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun renameItem(index: Int, newName: String) {
+        val item = _uiState.value.items.getOrNull(index) ?: return
+        viewModelScope.launch {
+            updateUiState { it.copy(isLoading = true) }
+            val result = apiClient.renameFile(item.path, newName)
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(getApplication(), "重命名成功", Toast.LENGTH_SHORT).show()
+                    refresh()
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "重命名失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateUiState { it.copy(isLoading = false) }
+                }
+            )
+        }
+    }
+
+    // endregion
+
+    // region ==================== 移动 / 复制 ====================
+
+    fun startMove(index: Int) {
+        val item = _uiState.value.items.getOrNull(index) ?: return
+        updateUiState { it.copy(pendingAction = "move", moveFileId = item.path) }
+    }
+
+    fun startCopy(index: Int) {
+        val item = _uiState.value.items.getOrNull(index) ?: return
+        updateUiState { it.copy(pendingAction = "copy", copyFileId = item.path) }
+    }
+
+    fun dismissPicker() {
+        updateUiState {
+            it.copy(
+                pendingAction = null, moveFileId = null, copyFileId = null,
+                pickerFolders = emptyList(), pickerIsLoading = false
+            )
+        }
+    }
+
+    fun loadFoldersForPicker(folderId: String) {
+        viewModelScope.launch {
+            val state = _uiState.value
+            updateUiState { it.copy(pickerIsLoading = true) }
+            val actualFolderId = folderId.ifEmpty { "root" }
+            val result = apiClient.listFiles(actualFolderId)
+            result.fold(
+                onSuccess = { listResult ->
+                    val operatingPath = when (state.pendingAction) {
+                        "move" -> state.moveFileId
+                        "copy" -> state.copyFileId
+                        else -> null
+                    }
+                    val folders = listResult.items
+                        .filter { it.type == "folder" && it.fileId != operatingPath }
+                        .map { fileToResource(it) }
+                    updateUiState { it.copy(pickerFolders = folders, pickerIsLoading = false) }
+                },
+                onFailure = { e ->
+                    updateUiState { it.copy(pickerFolders = emptyList(), pickerIsLoading = false) }
+                    Toast.makeText(getApplication(), "加载文件夹失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    fun createFolderInPicker(parentFolderId: String, name: String) {
+        viewModelScope.launch {
+            updateUiState { it.copy(pickerIsLoading = true) }
+            val actualParentId = parentFolderId.ifEmpty { "root" }
+            val result = apiClient.createFolder(name, actualParentId)
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(getApplication(), "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                    loadFoldersForPicker(parentFolderId)
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateUiState { it.copy(pickerIsLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun moveTo(targetFolderId: String) {
+        val fileId = _uiState.value.moveFileId ?: return
+        viewModelScope.launch {
+            updateUiState { it.copy(isLoading = true) }
+            val result = apiClient.moveFile(fileId, targetFolderId)
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(getApplication(), "移动成功", Toast.LENGTH_SHORT).show()
+                    dismissPicker()
+                    refresh()
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "移动失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateUiState { it.copy(isLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun copyTo(targetFolderId: String) {
+        val copyId = _uiState.value.copyFileId ?: return
+        viewModelScope.launch {
+            updateUiState { it.copy(isLoading = true) }
+            val result = apiClient.copyFile(copyId, targetFolderId)
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(getApplication(), "复制成功", Toast.LENGTH_SHORT).show()
+                    dismissPicker()
+                    refresh()
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "复制失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateUiState { it.copy(isLoading = false) }
+                }
+            )
+        }
+    }
+
+    // endregion
+
+    // region ==================== 视频播放 ====================
+
+    suspend fun resolveVideoUri(item: WebDavResource): android.net.Uri? {
+        // 注册阿里云播放头，播放器会自动注入
+        val headers = AliyunAuthProvider.getPlayHeaders()
+        if (headers.isNotEmpty()) {
+            CloudPlayHeaders.register("vod.alipan.com", headers)
+        }
+
+        val result = apiClient.getVideoPreviewPlayInfo(item.path).getOrNull()
+        if (result != null && result.urls.isNotEmpty()) {
+            val url = result.urls.first() + "#alipanPlay=true#"
+            CloudPlaylistCache.putResolvedUrl("alipan", item.path, url)
+            return android.net.Uri.parse(url)
+        }
+        return null
+    }
+
+    // endregion
+
+    // region ==================== 下载 ====================
+
+    fun downloadFile(index: Int) {
+        val res = _uiState.value.items.getOrNull(index) ?: return
+        viewModelScope.launch {
+            try {
+                val urlResult = apiClient.getDownloadUrl(res.path)
+                urlResult.fold(
+                    onSuccess = { url ->
+                        val dm = getApplication<Application>()
+                            .getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+                        val request = android.app.DownloadManager.Request(android.net.Uri.parse(url)).apply {
+                            setTitle(res.name)
+                            setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                            setDestinationInExternalPublicDir(
+                                android.os.Environment.DIRECTORY_DOWNLOADS, res.name
+                            )
+                        }
+                        dm.enqueue(request)
+                        Toast.makeText(getApplication(), "开始下载: ${res.name}", Toast.LENGTH_SHORT).show()
+                    },
+                    onFailure = { e ->
+                        Toast.makeText(getApplication(), "获取下载链接失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            } catch (e: Exception) {
+                Toast.makeText(getApplication(), "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // endregion
+
+    // region ==================== 工具方法 ====================
+
+    private fun updateUiState(transform: (AliyunBrowserUiState) -> AliyunBrowserUiState) {
+        while (true) {
+            val current = _uiState.value
+            val next = transform(current)
+            if (_uiState.compareAndSet(current, next)) break
+        }
+    }
+
+    private fun fileToResource(file: dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunFileItem): WebDavResource {
+        return WebDavResource(
+            path = file.fileId,
+            name = file.fileName,
+            isDirectory = file.type == "folder",
+            size = file.size,
+            lastModified = file.updatedAt
+        )
+    }
+
+    private fun buildBreadcrumbs(fileId: String, label: String?): List<AliyunBreadcrumb> {
+        val crumbs = mutableListOf(AliyunBreadcrumb("根目录", "root"))
+        if (fileId != "root" && label != null) {
+            crumbs.add(AliyunBreadcrumb(label, fileId))
+        }
+        return crumbs
+    }
+
+    // endregion
+}

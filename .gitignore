@@ -1,0 +1,44 @@
+# ==================== Android / Gradle ====================
+.gradle/
+build/
+*/build/
+*.apk
+*.aab
+*.dex
+*.class
+classes.jar
+local.properties
+
+# ==================== IDE & Tools ====================
+.idea/
+.kotlin/
+.arts/
+.codebuddy/
+.trae/
+.reasonix/
+.nezha/
+
+# ==================== Build & Compile Logs ====================
+*.log
+build_err.txt
+compile_err.txt
+compile_err2.txt
+compile_out.txt
+compile_output.txt
+data_compile.txt
+final_check.txt
+vp_compile.txt
+err.txt
+err3.txt
+hs_err_pid*
+
+# ==================== Temp Files ====================
+temp.hex
+test_import.txt
+*.tmp
+*.bak
+*.swp
+
+# ==================== OS Files ====================
+.DS_Store
+Thumbs.db
