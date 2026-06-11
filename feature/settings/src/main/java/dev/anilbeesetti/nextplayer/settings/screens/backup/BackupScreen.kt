@@ -47,9 +47,9 @@ fun BackupScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // 备份文件创建 → 保存到用户选择的位置
+    // 备份文件创建 → 保存到用户选择的位置（ZIP 包）
     val createBackupLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json"),
+        contract = ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri: Uri? ->
         uri?.let { viewModel.createBackup(it) }
     }
@@ -128,7 +128,7 @@ fun BackupScreen(
 
                 FilledTonalButton(
                     onClick = {
-                        createBackupLauncher.launch("fluxplayer_backup.json")
+                        createBackupLauncher.launch("fluxplayer_backup.zip")
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -142,7 +142,7 @@ fun BackupScreen(
 
                 FilledTonalButton(
                     onClick = {
-                        restoreBackupLauncher.launch(arrayOf("application/json", "*/*"))
+                        restoreBackupLauncher.launch(arrayOf("application/zip", "application/json", "*/*"))
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {

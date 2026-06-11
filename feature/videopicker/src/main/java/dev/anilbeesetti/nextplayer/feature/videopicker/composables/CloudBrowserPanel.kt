@@ -18,7 +18,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import dev.anilbeesetti.nextplayer.core.ui.designsystem.NextIcons
-import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
+import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryState
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -41,7 +41,7 @@ fun <T> CloudBrowserPanel(
     onMenuDismiss: () -> Unit = {},
     menuContent: @Composable ((index: Int, onDismiss: () -> Unit) -> Unit)? = null,
     reLoginRequired: Boolean = false,
-    navigationStack: List<DirectoryStackEntry> = emptyList(),
+    navigationStack: List<DirectoryState> = emptyList(),
 ) {
     // 从 navigationStack 或扁平参数获取当前目录状态
     val topEntry = navigationStack.lastOrNull()
@@ -65,7 +65,7 @@ fun <T> CloudBrowserPanel(
                 Box(modifier = Modifier.weight(1f)) {
                     navigationStack.forEachIndexed { index, entry ->
                         val isTop = index == navigationStack.lastIndex
-                        key(entry.fileId) {
+                        key(entry.key) {
                             val listState = rememberLazyListState()
                             if (isTop) {
                                 DirectoryStackContent(
@@ -250,7 +250,7 @@ private fun <T> BreadcrumbBar(
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun DirectoryStackContent(
-    entry: DirectoryStackEntry,
+    entry: DirectoryState,
     listState: androidx.compose.foundation.lazy.LazyListState,
     isLoadingMore: Boolean,
     onItemClick: (WebDavResource) -> Unit,
@@ -267,10 +267,11 @@ private fun DirectoryStackContent(
             Text("此目录为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     } else if (entry.error != null && entry.items.isEmpty()) {
+        val errorMsg = entry.error!!
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("加载失败", color = MaterialTheme.colorScheme.error)
-                Text(entry.error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(errorMsg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = onRefresh) { Text("重试") }
             }

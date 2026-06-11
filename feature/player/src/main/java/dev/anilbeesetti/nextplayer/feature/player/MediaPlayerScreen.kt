@@ -287,7 +287,7 @@ fun MediaPlayerScreen(
                     onController = { ctrl ->
                         danmakuController = ctrl
                     },
-                    onMediaItemTransitioned = { viewModel.clearDanmaku() },
+                    onMediaItemTransitioned = { indexStep -> viewModel.onMediaItemTransition(indexStep, context) },
                 )
 
                 AnimatedVisibility(

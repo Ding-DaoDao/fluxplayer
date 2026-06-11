@@ -1,5 +1,6 @@
 package dev.anilbeesetti.nextplayer.core.data.aliyun
 
+import android.util.Log
 import dev.anilbeesetti.nextplayer.core.data.BaseCloudApiClient
 import dev.anilbeesetti.nextplayer.core.data.CloudHttpClient
 import okhttp3.MediaType.Companion.toMediaType
@@ -29,26 +30,24 @@ class AliyunApiClient(
     fun getSignature(): String = xSignature
 
     private fun buildHeaders(): Map<String, String> = mapOf(
+        "Accept" to "application/json, text/plain, */*",
         "Authorization" to authorization,
         "Content-Type" to "application/json",
         "User-Agent" to UA,
         "Referer" to "https://www.alipan.com/",
-        "X-Canary" to "client=web,app=adrive,version=v6.7.7",
-        "X-Device-Id" to xDeviceId,
-        "X-Signature" to xSignature
+        "X-Canary" to "client=web,app=adrive,version=v6.8.12",
+        "X-Device-Id" to xDeviceId
     )
 
     private suspend fun apiPost(url: String, body: JSONObject? = null): JSONObject {
         val builder = Request.Builder().url(url)
-        if (body != null) {
-            builder.post(body.toString().toRequestBody(jsonMediaType))
-        } else {
-            builder.post("".toRequestBody(null))
-        }
+        builder.post((body ?: JSONObject()).toString().toRequestBody(jsonMediaType))
         buildHeaders().forEach { (k, v) -> builder.header(k, v) }
 
+        Log.e(TAG, "→ $url  auth=${authorization.take(20)}...  driveId=$driveId")
         val resp = executeRequestAndGetResponse(builder.build())
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
+        Log.e(TAG, "← HTTP ${resp.code}  len=${respBody.length}  body=${respBody.take(200)}")
         if (!resp.isSuccessful) {
             throw IllegalStateException("HTTP ${resp.code} from $url: $respBody")
         }
@@ -204,7 +203,7 @@ class AliyunApiClient(
     }
 
     suspend fun getUserDriveInfo(): Result<AliyunDriveInfo> = runCatching {
-        val json = apiPost("https://api.aliyundrive.com/v2/user/get")
+        val json = apiPost("https://user.aliyundrive.com/v2/user/get")
         AliyunDriveInfo(
             defaultDriveId = json.optString("default_drive_id", ""),
             backupDriveId = json.optString("backup_drive_id", ""),
@@ -213,7 +212,7 @@ class AliyunApiClient(
     }
 
     suspend fun verifyToken(): Result<Boolean> = runCatching {
-        val json = apiPost("https://api.aliyundrive.com/v2/user/get")
+        val json = apiPost("https://user.aliyundrive.com/v2/user/get")
         json.has("default_drive_id")
     }
 }

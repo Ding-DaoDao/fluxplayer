@@ -15,6 +15,7 @@ sealed interface DanmakuDownloadState {
     data class AnimeSelected(
         val anime: AnimeMatch,
         val episodes: List<EpisodeInfo>,
+        val currentEpisode: EpisodeInfo? = null,
         val source: DanmakuSource? = null,
     ) : DanmakuDownloadState
 

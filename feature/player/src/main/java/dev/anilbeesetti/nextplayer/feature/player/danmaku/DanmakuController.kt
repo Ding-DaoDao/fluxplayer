@@ -18,8 +18,8 @@ private const val TAG = "DanmakuController"
  */
 class DanmakuController(
     private val danmakuView: DanmakuView,
-    /** 当播放器切换媒体项时回调，isForward 表示是否向前切换 */
-    val onMediaItemTransitioned: ((Boolean) -> Unit)? = null,
+    /** 当播放器切换媒体项时回调，indexStep = 新索引 - 旧索引（+1=下一集，-1=上一集，绝对值>1=跳集） */
+    val onMediaItemTransitioned: ((Int) -> Unit)? = null,
 ) : Player.Listener {
 
     /** 注入的播放器实例 */
@@ -50,6 +50,12 @@ class DanmakuController(
     /** 标记弹幕数据是否已注入视图（防重复 reset） */
     private var danmakuLoaded = false
 
+    /** 标记控制器是否已释放（防止退出时误触发切集回调） */
+    private var released = false
+
+    /** 抑制切集回调（退出播放时使用，防止 onDispose 之前 ExoPlayer 触发的 transition） */
+    var suppressTransitions = false
+
     /** 上次媒体项索引（用于检测切集） */
     private var previousMediaItemIndex: Int = -1
 
@@ -61,6 +67,7 @@ class DanmakuController(
      * 可被 `update` 块重复调用 —— 列表变化时自动重载。
      */
     fun loadDanmaku(player: Player, list: List<Danmaku>) {
+        suppressTransitions = false
         Log.d(TAG, "loadDanmaku: list.size=${list.size} danmakuLoaded=$danmakuLoaded " +
                 "currentList=${this.danmakuList.size} sameRef=${this.danmakuList === list}")
 
@@ -84,6 +91,7 @@ class DanmakuController(
         // 3) 设置新列表
         this.danmakuList = list
         danmakuLoaded = true
+        previousMediaItemIndex = player.currentMediaItemIndex
         Log.d(TAG, "loadDanmaku: setting ${list.size} items")
         danmakuView.setDanmakuList(list)
         danmakuView.reconfigure()
@@ -101,6 +109,7 @@ class DanmakuController(
      * 释放控制器，停止所有回调。
      */
     fun release() {
+        released = true
         player?.removeListener(this)
         stopPolling()
         pollHandler.removeCallbacksAndMessages(null)
@@ -138,16 +147,17 @@ class DanmakuController(
     // ── Player.Listener ───────────────────────────────────
 
     override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+        if (released || suppressTransitions) return
         val currentIndex = player?.currentMediaItemIndex ?: -1
-        val isForward = currentIndex > previousMediaItemIndex
         Log.d(TAG, "onMediaItemTransition: reason=$reason, " +
-                "prev=$previousMediaItemIndex -> current=$currentIndex (forward=$isForward) — clearing danmaku")
+                "prev=$previousMediaItemIndex -> current=$currentIndex — clearing danmaku")
 
         // 去重：同一媒体项不重复清理
         if (currentIndex == previousMediaItemIndex && previousMediaItemIndex >= 0) {
             Log.d(TAG, "onMediaItemTransition: same mediaItem, skip")
             return
         }
+        val indexStep = if (previousMediaItemIndex >= 0) currentIndex - previousMediaItemIndex else 0
         previousMediaItemIndex = currentIndex
 
         // 切集时清空所有弹幕状态，防止旧弹幕飘在新集上
@@ -156,8 +166,8 @@ class DanmakuController(
         danmakuView.setDanmakuList(emptyList())
         danmakuView.reconfigure()
         stopPolling()
-        // 通知外部切集（传递 isForward）
-        onMediaItemTransitioned?.invoke(isForward)
+        // 通知外部切集（传递步数：±1=相邻切集，绝对值>1=跳集）
+        onMediaItemTransitioned?.invoke(indexStep)
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {

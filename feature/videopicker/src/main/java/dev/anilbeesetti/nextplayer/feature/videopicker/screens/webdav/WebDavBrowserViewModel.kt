@@ -30,10 +30,12 @@ data class WebDavBreadcrumb(val label: String, val path: String)
 data class WebDavDirectoryState(
     val path: String,
     val label: String,
-    val items: List<WebDavResource> = emptyList(),
-    val isLoading: Boolean = false,
-    val error: String? = null,
-)
+    override val items: List<WebDavResource> = emptyList(),
+    override val isLoading: Boolean = false,
+    override val error: String? = null,
+) : dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryState {
+    override val key: String get() = path
+}
 
 /**
  * WebDAV 浏览器 ViewModel

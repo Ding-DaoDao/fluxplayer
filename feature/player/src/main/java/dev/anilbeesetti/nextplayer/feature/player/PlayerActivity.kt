@@ -204,6 +204,8 @@ class PlayerActivity : ComponentActivity() {
             }
         }
 
+        viewModel.onPlayerExit()
+
         controllerFuture?.run {
             MediaController.releaseFuture(this)
             controllerFuture = null

@@ -4,12 +4,14 @@ import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 
 /**
  * 导航栈中每一层目录的状态。
- * 所有 provider（Aliyun、Quark、C189、Pan123、Yun139、OpenList、WebDAV）共用此类型。
+ * 所有 provider（Aliyun、Quark、C189、Pan123、Yun139、OpenList）共用此类型。
  */
 data class DirectoryStackEntry(
     val fileId: String,
     val label: String,
-    val items: List<WebDavResource> = emptyList(),
-    val isLoading: Boolean = false,
-    val error: String? = null,
-)
+    override val items: List<WebDavResource> = emptyList(),
+    override val isLoading: Boolean = false,
+    override val error: String? = null,
+) : DirectoryState {
+    override val key: String get() = fileId
+}

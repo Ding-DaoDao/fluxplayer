@@ -31,7 +31,7 @@ class AliyunBrowserViewModel @Inject constructor(
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
-        private const val TAG = "AliyunBrowserVM"
+        private const val TAG = "AliyunVM"
         private const val PREF_NAME = "alipan"
     }
 
@@ -69,6 +69,7 @@ class AliyunBrowserViewModel @Inject constructor(
     // region ==================== 登录 — loginWithAuthorization ====================
 
     fun loginWithAuthorization(auth: String) {
+        Log.e(TAG, "loginWithAuthorization auth=${auth.take(30)}...")
         apiClient.authorization = auth
         AliyunAuthProvider.authorization = auth
         AliyunAuthProvider.isActive = true
@@ -79,8 +80,8 @@ class AliyunBrowserViewModel @Inject constructor(
         updateUiState { it.copy(isLoggedIn = true) }
         viewModelScope.launch {
             refreshDriveInfo()
-            loadDirectory("root")
         }
+        loadDirectory("root")
     }
 
     // endregion
@@ -92,7 +93,6 @@ class AliyunBrowserViewModel @Inject constructor(
             val json = JSONObject(tokenJsonStr)
             val accessToken = json.optString("access_token", "")
             if (accessToken.isBlank()) {
-                Log.e(TAG, "loginWithTokenJson: no access_token in json")
                 return
             }
             val tokenType = json.optString("token_type", "Bearer")
@@ -126,6 +126,7 @@ class AliyunBrowserViewModel @Inject constructor(
                 initialOptions.add(DriveOption("我的云盘", defaultDriveId))
             }
 
+            Log.e(TAG, "loginWithTokenJson OK: driveId=$defaultDriveId, auth=${auth.take(30)}...")
             updateUiState {
                 it.copy(
                     breadcrumbs = listOf(AliyunBreadcrumb("我的云盘", "root")),
@@ -139,8 +140,8 @@ class AliyunBrowserViewModel @Inject constructor(
                 refreshDriveInfo()
                 loadDirectory("root")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "loginWithTokenJson failed", e)
+        } catch (_: Exception) {
+            // JSON 解析失败，静默忽略
         }
     }
 
@@ -174,7 +175,6 @@ class AliyunBrowserViewModel @Inject constructor(
 
         viewModelScope.launch {
             var valid = false
-            // 最多3次重试，间隔1.5秒
             for (i in 0 until 3) {
                 try {
                     val result = apiClient.getUserDriveInfo()
@@ -193,7 +193,7 @@ class AliyunBrowserViewModel @Inject constructor(
                 refreshDriveInfo()
                 loadDirectory("root")
             } else {
-                updateUiState { it.copy(isLoggedIn = false, reLoginRequired = true) }
+                triggerReLogin()
             }
         }
     }
@@ -216,9 +216,15 @@ class AliyunBrowserViewModel @Inject constructor(
     // region ==================== 驱动信息刷新 ====================
 
     private suspend fun refreshDriveInfo() {
-        val result = apiClient.getUserDriveInfo().getOrNull() ?: return
+        Log.e(TAG, "refreshDriveInfo start, current driveId=${apiClient.driveId}")
+        val result = apiClient.getUserDriveInfo().getOrNull()
+        if (result == null) {
+            Log.e(TAG, "refreshDriveInfo FAILED!")
+            return
+        }
+        Log.e(TAG, "refreshDriveInfo OK: default=${result.defaultDriveId}, backup=${result.backupDriveId}, resource=${result.resourceDriveId}")
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        if (apiClient.driveId.isBlank() && result.defaultDriveId.isNotBlank()) {
+        if (result.defaultDriveId.isNotBlank()) {
             apiClient.driveId = result.defaultDriveId
             prefs.edit().putString("drive_id", result.defaultDriveId).apply()
         }
@@ -241,7 +247,19 @@ class AliyunBrowserViewModel @Inject constructor(
     // region ==================== 重新登录触发 ====================
 
     fun triggerReLogin() {
-        logout()
+        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().clear().apply()
+        AliyunAuthProvider.clear()
+        directoryCache.clear()
+        android.webkit.CookieManager.getInstance().removeAllCookies(null)
+        android.webkit.CookieManager.getInstance().flush()
+        updateUiState {
+            AliyunBrowserUiState(
+                isLoggedIn = false,
+                reLoginRequired = true,
+                error = "登录已过期，请重新登录"
+            )
+        }
     }
 
     // endregion
@@ -252,6 +270,7 @@ class AliyunBrowserViewModel @Inject constructor(
         loadDirectoryJob?.cancel()
         loadSequence++
         val seq = loadSequence
+        Log.e(TAG, "loadDirectory start: parentFileId=$parentFileId, driveId=${apiClient.driveId}")
         updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
 
         loadDirectoryJob = viewModelScope.launch {
@@ -264,6 +283,7 @@ class AliyunBrowserViewModel @Inject constructor(
 
             result.fold(
                 onSuccess = { listResult ->
+                    Log.e(TAG, "loadDirectory OK: ${listResult.items.size} items, nextMarker=${listResult.nextMarker}")
                     // 缓存文件元数据到 CloudPlaylistCache，供播放器显示标题
                     listResult.items.forEach { file ->
                         if (file.category == "video") {
@@ -286,6 +306,7 @@ class AliyunBrowserViewModel @Inject constructor(
                 },
                 onFailure = { e ->
                     val msg = e.message ?: "未知错误"
+                    Log.e(TAG, "loadDirectory FAIL: $msg")
                     val friendly = when {
                         msg.contains("require login", ignoreCase = true) ||
                         msg.contains("token", ignoreCase = true) ||

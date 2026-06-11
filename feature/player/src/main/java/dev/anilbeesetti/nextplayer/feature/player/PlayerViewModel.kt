@@ -89,6 +89,12 @@ class PlayerViewModel @Inject constructor(
     /** 上次搜索结果（用于从剧集列表退回搜索结果） */
     private var lastSearchResults: DanmakuDownloadState.SearchResult? = null
 
+    /** 当前弹幕选择上下文（切集时用于自动加载相邻弹幕） */
+    private var danmakuContext: DanmakuSelectionContext? = null
+
+    /** 标记播放器正在退出，抑制所有切集回调 */
+    private var isExiting = false
+
     // ── 弹幕搜索弹窗 UI 状态（跨 show/hide 持久化） ──
 
     private val _danmakuSearchViewMode = MutableStateFlow(DanmakuSearchViewMode.SEARCH)
@@ -123,6 +129,19 @@ class PlayerViewModel @Inject constructor(
                 danmakuEnabled.value = true
                 danmakuForCurrentEpisode.value = true
                 Toast.makeText(context, "弹幕已加载（${list.size}条）", Toast.LENGTH_SHORT).show()
+                // 保存本地弹幕上下文（用于切集自动加载）
+                val filePath = uri.path?.let { java.io.File(it) }
+                if (filePath != null && filePath.parentFile != null) {
+                    val dir = filePath.parentFile!!
+                    val allDanmakuFiles = dir.listFiles { f ->
+                        f.extension.lowercase() in listOf("xml", "json", "bilibili")
+                    }?.sortedBy { it.name } ?: emptyList()
+                    danmakuContext = DanmakuSelectionContext.LocalFile(
+                        dir = dir,
+                        currentFile = filePath,
+                        allFiles = allDanmakuFiles,
+                    )
+                }
             }
         }
     }
@@ -226,6 +245,16 @@ class PlayerViewModel @Inject constructor(
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(context, "弹幕已加载（${list.size}条）", Toast.LENGTH_SHORT).show()
                             }
+                            // 保存网络弹幕上下文（用于切集自动加载）
+                            lastAnimeInfo = lastAnimeInfo?.copy(currentEpisode = episode)
+                            danmakuContext = lastAnimeInfo?.let {
+                                DanmakuSelectionContext.Network(
+                                    source = source,
+                                    anime = it.anime,
+                                    currentEpisode = episode,
+                                    episodes = it.episodes,
+                                )
+                            }
                         } else {
                             _danmakuDownloadState.value = DanmakuDownloadState.Error("弹幕解析失败", source)
                         }
@@ -262,6 +291,7 @@ class PlayerViewModel @Inject constructor(
         lastAnimeInfo = null
         lastSearchResults = null
         danmakuForCurrentEpisode.value = false
+        danmakuContext = null
     }
 
     /**
@@ -317,6 +347,124 @@ class PlayerViewModel @Inject constructor(
             _danmakuDownloadState.value = it
         }
         danmakuEnabled.value = false
+    }
+
+    /** 退出播放时调用，清除弹幕上下文防止 onMediaItemTransition 误触发弹幕加载 */
+    fun onPlayerExit() {
+        isExiting = true
+        danmakuContext = null
+    }
+
+    /**
+     * 切集时自动加载相邻弹幕。
+     * indexStep = 新索引 - 旧索引。只在步数为 ±1（相邻切集）时自动加载，跳集时不加载。
+     */
+    fun onMediaItemTransition(indexStep: Int, context: Context) {
+        if (isExiting) return
+        val ctx = danmakuContext ?: run {
+            Log.d(TAG, "onMediaItemTransition: no danmaku context, clearing")
+            clearDanmaku()
+            return
+        }
+        Log.d(TAG, "onMediaItemTransition: indexStep=$indexStep, ctx=$ctx")
+
+        // 跳集（步数绝对值 > 1）不自动加载弹幕
+        if (kotlin.math.abs(indexStep) != 1) {
+            Log.d(TAG, "onMediaItemTransition: skip auto-load (jumped $indexStep steps)")
+            clearDanmaku()
+            return
+        }
+
+        val isForward = indexStep > 0
+        when (ctx) {
+            is DanmakuSelectionContext.LocalFile -> {
+                val currentIndex = ctx.allFiles.indexOf(ctx.currentFile)
+                val nextIndex = if (isForward) currentIndex + 1 else currentIndex - 1
+                if (nextIndex in ctx.allFiles.indices) {
+                    val nextFile = ctx.allFiles[nextIndex]
+                    danmakuContext = ctx.copy(currentFile = nextFile)
+                    silentLoadLocalDanmaku(context, nextFile)
+                } else {
+                    Log.d(TAG, "onMediaItemTransition: local file index out of range ($nextIndex)")
+                }
+            }
+            is DanmakuSelectionContext.Network -> {
+                val currentIndex = ctx.episodes.indexOf(ctx.currentEpisode)
+                val nextIndex = if (isForward) currentIndex + 1 else currentIndex - 1
+                if (nextIndex in ctx.episodes.indices) {
+                    val nextEpisode = ctx.episodes[nextIndex]
+                    danmakuContext = ctx.copy(currentEpisode = nextEpisode)
+                    silentLoadNetworkDanmaku(context, ctx.source, nextEpisode)
+                } else {
+                    Log.d(TAG, "onMediaItemTransition: episode index out of range ($nextIndex)")
+                }
+            }
+        }
+    }
+
+    /**
+     * 静默加载本地弹幕文件（切集自动加载时调用）。
+     * 不改变搜索 UI 状态，显示 Toast 提示。
+     */
+    private fun silentLoadLocalDanmaku(context: Context, file: java.io.File) {
+        Log.d(TAG, "silentLoadLocalDanmaku: ${file.name}")
+        viewModelScope.launch {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "正在加载 ${file.name}", Toast.LENGTH_SHORT).show()
+            }
+            val list = withContext(Dispatchers.IO) {
+                DanmakuParser.loadFromUri(context, Uri.fromFile(file))
+            }
+            if (list != null && list.isNotEmpty()) {
+                _danmakuList.value = list
+                _danmakuFileUri.value = Uri.fromFile(file)
+                danmakuEnabled.value = true
+                danmakuForCurrentEpisode.value = true
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "已加载 ${list.size} 条弹幕", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Log.d(TAG, "silentLoadLocalDanmaku: failed to load ${file.name}")
+            }
+        }
+    }
+
+    /**
+     * 静默下载并加载网络弹幕（切集自动加载时调用）。
+     * 不改变搜索 UI 状态，显示 Toast 提示。
+     */
+    private fun silentLoadNetworkDanmaku(context: Context, source: DanmakuSource?, episode: EpisodeInfo) {
+        if (source == null) return
+        Log.d(TAG, "silentLoadNetworkDanmaku: episode=${episode.title} (${episode.episodeId})")
+        viewModelScope.launch {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "正在加载 ${episode.title}", Toast.LENGTH_SHORT).show()
+            }
+            try {
+                val uri = withContext(Dispatchers.IO) {
+                    danmakuRepository.downloadAndCache(source, episode)
+                }
+                if (uri != null) {
+                    val file = java.io.File(uri.path!!)
+                    if (file.exists()) {
+                        val list = withContext(Dispatchers.IO) {
+                            DanmakuParser.parseBilibiliXml(file.inputStream())
+                        }
+                        if (list.isNotEmpty()) {
+                            _danmakuList.value = list
+                            _danmakuFileUri.value = uri
+                            danmakuEnabled.value = true
+                            danmakuForCurrentEpisode.value = true
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "已加载 ${list.size} 条弹幕", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "silentLoadNetworkDanmaku failed", e)
+            }
+        }
     }
 
     /**

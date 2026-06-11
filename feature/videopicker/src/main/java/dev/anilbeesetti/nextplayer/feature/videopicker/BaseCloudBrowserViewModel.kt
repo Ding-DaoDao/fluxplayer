@@ -154,10 +154,10 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
 
     /** 导航栈 —— 每层目录的独立状态，用于栈式叠加导航 */
-    private val _navigationStack = MutableStateFlow(
-        listOf(DirectoryStackEntry(fileId = rootFileId, label = rootLabel))
-    )
-    val navigationStack: StateFlow<List<DirectoryStackEntry>> = _navigationStack.asStateFlow()
+    private val _navigationStack by lazy {
+        MutableStateFlow(listOf(DirectoryStackEntry(fileId = rootFileId, label = rootLabel)))
+    }
+    val navigationStack: StateFlow<List<DirectoryStackEntry>> by lazy { _navigationStack.asStateFlow() }
 
     /** 同步栈顶与扁平状态 */
     private fun syncStackTop(transform: (DirectoryStackEntry) -> DirectoryStackEntry) {

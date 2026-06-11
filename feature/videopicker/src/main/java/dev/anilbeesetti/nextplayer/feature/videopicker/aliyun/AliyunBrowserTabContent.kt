@@ -174,10 +174,9 @@ fun AliyunLoginScreen(
                             isLoading = false
                             statusText = "请在页面中完成登录（扫码或账号密码）"
 
-                            // 1. 检查 URL 回调中的 token
-                            tryExtractFromUrl(url)
+                            // 参考海阔视界：仅在登录成功跳转到 alipan.com/drive 后提取 token
+                            if (!url.contains("alipan.com/drive")) return
 
-                            // 2. 检查 localStorage 中的 token
                             view.evaluateJavascript(
                                 "(function(){" +
                                 " try{var t=localStorage.getItem('token');if(t)return t;}catch(e){}" +
@@ -185,49 +184,33 @@ fun AliyunLoginScreen(
                                 "})()"
                             ) { result ->
                                 if (loginTriggered) return@evaluateJavascript
-                                val token = result?.trim('"') ?: ""
-                                if (token.isNotBlank() && token != "null" && token.length > 50) {
+                                val raw = result?.trim('"') ?: ""
+                                if (raw.isNotBlank() && raw != "null" && raw.length > 50) {
                                     try {
-                                        val json = JSONObject(token)
-                                        if (json.optString("access_token", "").isNotBlank()) {
+                                        val json = JSONObject(raw)
+                                        val at = json.optString("access_token", "")
+                                        if (at.isNotBlank()) {
                                             loginTriggered = true
                                             statusText = "登录成功，正在获取凭证..."
-                                            onLoginWithTokenJson(token)
+                                            onLoginWithTokenJson(raw)
                                         }
                                     } catch (_: Exception) {
-                                        loginTriggered = true
-                                        statusText = "登录成功，正在获取凭证..."
-                                        onLoginWithAuthorization(token)
+                                        // JSON 解析失败，尝试提取 access_token
+                                        val idx = raw.indexOf("access_token")
+                                        if (idx >= 0) {
+                                            val start = raw.indexOf('"', idx + 14)
+                                            if (start >= 0) {
+                                                val end = raw.indexOf('"', start + 1)
+                                                if (end > start) {
+                                                    loginTriggered = true
+                                                    statusText = "登录成功，正在获取凭证..."
+                                                    onLoginWithAuthorization("Bearer ${raw.substring(start + 1, end)}")
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
-
-                        private fun tryExtractFromUrl(url: String) {
-                            if (loginTriggered) return
-                            if (!url.contains("access_token=") && !url.contains("refresh_token=")) return
-                            try {
-                                val uri = android.net.Uri.parse(url)
-                                val combined = (uri.fragment ?: "") + (uri.query ?: "")
-                                if (!combined.contains("access_token=")) return
-                                val params = combined.split("&").associate {
-                                    val kv = it.split("=", limit = 2)
-                                    kv[0] to (kv.getOrNull(1) ?: "")
-                                }
-                                val accessToken = params["access_token"] ?: ""
-                                if (accessToken.isBlank()) return
-                                loginTriggered = true
-                                statusText = "登录成功，正在获取凭证..."
-                                val tokenJson = JSONObject().apply {
-                                    put("access_token", accessToken)
-                                    params["refresh_token"]?.let { put("refresh_token", it) }
-                                    params["default_drive_id"]?.let { put("default_drive_id", it) }
-                                    params["token_type"]?.let { put("token_type", it) }
-                                    params["device_id"]?.let { put("device_id", it) }
-                                    params["x_signature"]?.let { put("x_signature", it) }
-                                }
-                                onLoginWithTokenJson(tokenJson.toString())
-                            } catch (_: Exception) {}
                         }
                     }
                     loadUrl("https://www.alipan.com/sign/in?spm=aliyundrive.index.0.0.7db16f60GgbJVZ")

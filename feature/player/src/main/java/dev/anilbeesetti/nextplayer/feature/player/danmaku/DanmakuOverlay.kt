@@ -31,7 +31,7 @@ fun DanmakuOverlay(
     enabled: Boolean,
     modifier: Modifier = Modifier,
     onController: ((DanmakuController) -> Unit)? = null,
-    onMediaItemTransitioned: ((Boolean) -> Unit)? = null,
+    onMediaItemTransitioned: ((Int) -> Unit)? = null,
 ) {
     var danmakuView by remember { mutableStateOf<DanmakuView?>(null) }
     var controller by remember { mutableStateOf<DanmakuController?>(null) }
@@ -146,11 +146,6 @@ fun DanmakuOverlay(
             if (latestCtl != null && player != null && enabled && danmakuList != null) {
                 Log.d(TAG, "update: calling loadDanmaku (list=${danmakuList.size}, player=$player)")
                 latestCtl.loadDanmaku(player, danmakuList)
-            } else if (latestCtl != null && player != null && (!enabled || danmakuList == null)) {
-                Log.d(TAG, "update: no danmaku data, releasing controller player link")
-                latestCtl.release()
-            } else {
-                Log.w(TAG, "update: skipping - controller=${latestCtl != null} player=${player != null} enabled=$enabled list=${danmakuList != null}")
             }
         },
     )
@@ -158,6 +153,7 @@ fun DanmakuOverlay(
     DisposableEffect(Unit) {
         onDispose {
             Log.d(TAG, "Disposing DanmakuOverlay permanently")
+            controller?.suppressTransitions = true  // 先抑制回调，防止退出时 ExoPlayer 触发切集
             controller?.release()
             controller = null
             danmakuView = null
