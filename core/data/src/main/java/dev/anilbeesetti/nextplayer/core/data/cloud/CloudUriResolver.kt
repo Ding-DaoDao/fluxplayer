@@ -3,13 +3,16 @@ package dev.anilbeesetti.nextplayer.core.data.cloud
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import dev.anilbeesetti.nextplayer.core.common.CloudPlayHeaders
 import dev.anilbeesetti.nextplayer.core.common.CloudPlaylistCache
 import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
+import dev.anilbeesetti.nextplayer.core.common.VideoQualityCache
 import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunApiClient
 import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunAuthProvider
 import dev.anilbeesetti.nextplayer.core.data.cloud189.C189ApiClient
 import dev.anilbeesetti.nextplayer.core.data.cloud189.C189AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.pan123.Pan123ApiClient
+import dev.anilbeesetti.nextplayer.core.data.pan123.Pan123AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkApiClient
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkAuthProvider
 import dev.anilbeesetti.nextplayer.core.data.yun139.Yun139ApiClient
@@ -20,7 +23,8 @@ import javax.inject.Singleton
 
 @Singleton
 class CloudUriResolver @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val videoQualityCache: VideoQualityCache
 ) {
     companion object {
         private const val TAG = "CloudUriResolver"
@@ -64,6 +68,15 @@ class CloudUriResolver @Inject constructor(
         val client = Pan123ApiClient()
         client.setToken("Bearer $token")
 
+        // 注册 pan123 播放认证，播放器数据源自动注入
+        Pan123AuthProvider.authorization = "Bearer $token"
+        Pan123AuthProvider.isActive = true
+        val playHeaders = Pan123AuthProvider.getPlayHeaders()
+        if (playHeaders.isNotEmpty()) {
+            CloudPlayHeaders.register("vod.123pan.cn", playHeaders)
+            CloudPlayHeaders.register("download.123pan.cn", playHeaders)
+        }
+
         // Try cached metadata first
         val fileMetadata = CloudPlaylistCache.getFileMetadata("pan123", fileId)
         if (fileMetadata != null) {
@@ -84,11 +97,18 @@ class CloudUriResolver @Inject constructor(
             // Try video play first
             val playResult = client.getVideoPlayInfo(item).getOrNull()
             if (playResult != null && playResult.urls.isNotEmpty()) {
-                return playResult.urls.first() + "#isVideo=true#"
+                // 缓存所有清晰度选项，供播放器切换
+                if (playResult.urls.size > 1) {
+                    val options = playResult.urls.zip(playResult.names).map { (u, n) ->
+                        VideoQualityCache.QualityOption(label = n, url = u)
+                    }
+                    videoQualityCache.cacheQualityOptions("pan123", fileId, fileId, options)
+                }
+                return playResult.urls.first() + "#pan123Play=true#"
             }
             // Fallback to download
             val dlUrl = client.getFileDownloadUrl(item).getOrNull()
-            if (dlUrl != null) return dlUrl + "#isVideo=true#"
+            if (dlUrl != null) return dlUrl + "#pan123Play=true#"
         }
         return null
     }
@@ -109,7 +129,14 @@ class CloudUriResolver @Inject constructor(
 
         val playResult = client.getVideoPlayInfo(fileId).getOrNull()
         if (playResult != null && playResult.urls.isNotEmpty()) {
-            Log.d(TAG, "resolveQuark: playUrl=${playResult.urls.first()}")
+            Log.d(TAG, "resolveQuark: playUrl=${playResult.urls.first()}, qualities=${playResult.urls.size}")
+            // 缓存所有清晰度选项，供播放器切换
+            if (playResult.urls.size > 1) {
+                val options = playResult.urls.zip(playResult.names).map { (u, n) ->
+                    VideoQualityCache.QualityOption(label = n, url = u)
+                }
+                videoQualityCache.cacheQualityOptions("quark", fileId, fileId, options)
+            }
             return playResult.urls.first() + "#quarkPlay=true#"
         }
 
@@ -132,6 +159,13 @@ class CloudUriResolver @Inject constructor(
 
         val playResult = client.getVideoPlayInfo(fileId).getOrNull()
         if (playResult != null && playResult.urls.isNotEmpty()) {
+            // 缓存所有清晰度选项，供播放器切换
+            if (playResult.urls.size > 1) {
+                val options = playResult.urls.zip(playResult.names).map { (u, n) ->
+                    VideoQualityCache.QualityOption(label = n, url = u)
+                }
+                videoQualityCache.cacheQualityOptions("uc", fileId, fileId, options)
+            }
             return playResult.urls.first() + "#ucPlay=true#"
         }
         val dlUrl = client.getDownloadUrl(fileId).getOrNull()
@@ -195,6 +229,13 @@ class CloudUriResolver @Inject constructor(
 
         val playResult = client.getVideoPreviewPlayInfo(fileId).getOrNull()
         if (playResult != null && playResult.urls.isNotEmpty()) {
+            // 缓存所有清晰度选项，供播放器切换
+            if (playResult.urls.size > 1) {
+                val options = playResult.urls.zip(playResult.names).map { (u, n) ->
+                    VideoQualityCache.QualityOption(label = n, url = u)
+                }
+                videoQualityCache.cacheQualityOptions("alipan", fileId, fileId, options)
+            }
             return playResult.urls.first() + "#alipanPlay=true#"
         }
 

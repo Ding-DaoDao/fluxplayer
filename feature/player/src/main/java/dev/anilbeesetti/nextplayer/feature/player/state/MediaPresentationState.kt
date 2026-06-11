@@ -46,9 +46,13 @@ class MediaPresentationState(
     var isBuffering: Boolean by mutableStateOf(false)
         private set
 
+    var bufferedPosition: Long by mutableLongStateOf(0L)
+        private set
+
     suspend fun observe() {
         updatePosition()
         updateDuration()
+        updateBufferedPosition()
         isPlaying = player.isPlaying
         isLoading = player.isLoading
         isBuffering = player.playbackState == Player.STATE_BUFFERING
@@ -75,6 +79,7 @@ class MediaPresentationState(
 
                     if (events.contains(Player.EVENT_POSITION_DISCONTINUITY)) {
                         updatePosition()
+                        updateBufferedPosition()
                     }
 
                     if (events.containsAny(Player.EVENT_IS_LOADING_CHANGED)) {
@@ -87,6 +92,7 @@ class MediaPresentationState(
                 delay(tickIntervalMs)
                 if (player.isPlaying) {
                     updatePosition()
+                    updateBufferedPosition()
                 }
             }
         }
@@ -99,6 +105,10 @@ class MediaPresentationState(
     private fun updateDuration() {
         duration = player.duration.coerceAtLeast(0L)
     }
+
+    private fun updateBufferedPosition() {
+        bufferedPosition = player.bufferedPosition.coerceAtLeast(0L)
+    }
 }
 
 val MediaPresentationState.positionFormatted: String
@@ -109,3 +119,6 @@ val MediaPresentationState.durationFormatted: String
 
 val MediaPresentationState.pendingPositionFormatted: String
     get() = (duration - position).milliseconds.formatted()
+
+val MediaPresentationState.bufferedFraction: Float
+    get() = if (duration > 0f) (bufferedPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f

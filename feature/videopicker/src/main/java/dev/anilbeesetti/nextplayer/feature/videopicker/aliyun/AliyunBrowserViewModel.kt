@@ -2,14 +2,15 @@ package dev.anilbeesetti.nextplayer.feature.videopicker.aliyun
 
 import android.app.Application
 import android.content.Context
-import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.anilbeesetti.nextplayer.core.common.CloudPlayHeaders
 import dev.anilbeesetti.nextplayer.core.common.CloudPlaylistCache
+import dev.anilbeesetti.nextplayer.core.common.VideoQualityCache
 import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunApiClient
 import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunAuthProvider
+import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunTokenExpiredException
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import kotlinx.coroutines.delay
@@ -19,6 +20,7 @@ import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import javax.inject.Inject
 
@@ -27,11 +29,11 @@ data class AliyunBreadcrumb(val label: String, val fileId: String)
 @HiltViewModel
 class AliyunBrowserViewModel @Inject constructor(
     application: Application,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    private val videoQualityCache: VideoQualityCache
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
-        private const val TAG = "AliyunVM"
         private const val PREF_NAME = "alipan"
     }
 
@@ -68,20 +70,59 @@ class AliyunBrowserViewModel @Inject constructor(
 
     // region ==================== 登录 — loginWithAuthorization ====================
 
-    fun loginWithAuthorization(auth: String) {
-        Log.e(TAG, "loginWithAuthorization auth=${auth.take(30)}...")
+    fun loginWithAuthorization(auth: String, defaultDriveId: String = "", refreshToken: String = "") {
         apiClient.authorization = auth
         AliyunAuthProvider.authorization = auth
         AliyunAuthProvider.isActive = true
+        if (defaultDriveId.isNotBlank()) apiClient.driveId = defaultDriveId
 
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString("authorization", auth).apply()
-
-        updateUiState { it.copy(isLoggedIn = true) }
+        updateUiState { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
-            refreshDriveInfo()
+            val result = withTimeoutOrNull(20_000L) { apiClient.getUserDriveInfo() }
+            when {
+                result == null -> {
+                    updateUiState { it.copy(isLoggedIn = false, isLoading = false, error = "连接超时，请检查网络后重试") }
+                }
+                result.isSuccess -> {
+                    val driveInfo = result.getOrNull()
+                    val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                    val driveId = defaultDriveId.ifEmpty { driveInfo?.let { resolveDefaultDrive(it) } ?: "" }
+                    apiClient.driveId = driveId
+                    prefs.edit()
+                        .putString("authorization", auth)
+                        .putString("drive_id", driveId)
+                        .putString("refresh_token", refreshToken)
+                        .putString("device_id", apiClient.getDeviceId())
+                        .putString("signature", apiClient.getSignature())
+                        .apply()
+
+                    val driveOptions = if (driveInfo != null) buildDriveOptionsFromInfo(driveInfo)
+                        else emptyList()
+
+                    updateUiState {
+                        it.copy(
+                            breadcrumbs = listOf(AliyunBreadcrumb("我的云盘", "root")),
+                            isLoggedIn = true,
+                            isLoading = false,
+                            driveOptions = driveOptions,
+                            currentDriveId = driveId
+                        )
+                    }
+                    refreshDriveInfo()
+                    loadDirectory("root")
+                }
+                else -> {
+                    val errMsg = result.exceptionOrNull()?.message ?: "未知错误"
+                    val friendly = when {
+                        errMsg.contains("AccessTokenInvalid", ignoreCase = true) -> "token已失效，请重新登录"
+                        errMsg.contains("Failed to connect", ignoreCase = true) ||
+                        errMsg.contains("Unable to resolve", ignoreCase = true) -> "无法连接到阿里云盘服务"
+                        else -> "token验证失败: $errMsg"
+                    }
+                    updateUiState { it.copy(isLoggedIn = false, isLoading = false, error = friendly) }
+                }
+            }
         }
-        loadDirectory("root")
     }
 
     // endregion
@@ -93,55 +134,25 @@ class AliyunBrowserViewModel @Inject constructor(
             val json = JSONObject(tokenJsonStr)
             val accessToken = json.optString("access_token", "")
             if (accessToken.isBlank()) {
+                updateUiState { it.copy(error = "未能获取access_token，请返回重试") }
                 return
             }
             val tokenType = json.optString("token_type", "Bearer")
             val auth = "$tokenType $accessToken"
-            val defaultDriveId = json.optString("default_drive_id", "")
             val refreshToken = json.optString("refresh_token", "")
             var deviceId = json.optString("device_id", "")
             if (deviceId.isBlank()) deviceId = apiClient.getDeviceId()
             var signature = json.optString("x_signature", "")
             if (signature.isBlank()) signature = apiClient.getSignature()
 
-            apiClient.authorization = auth
-            apiClient.driveId = defaultDriveId
-            AliyunAuthProvider.authorization = auth
-            AliyunAuthProvider.isActive = true
-
+            // 设置额外参数
             if (deviceId.isNotBlank()) apiClient.setDeviceId(deviceId)
             if (signature.isNotBlank()) apiClient.setSignature(signature)
 
-            val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            prefs.edit()
-                .putString("authorization", auth)
-                .putString("drive_id", defaultDriveId)
-                .putString("refresh_token", refreshToken)
-                .putString("device_id", apiClient.getDeviceId())
-                .putString("signature", apiClient.getSignature())
-                .apply()
-
-            val initialOptions = mutableListOf<DriveOption>()
-            if (defaultDriveId.isNotBlank()) {
-                initialOptions.add(DriveOption("我的云盘", defaultDriveId))
-            }
-
-            Log.e(TAG, "loginWithTokenJson OK: driveId=$defaultDriveId, auth=${auth.take(30)}...")
-            updateUiState {
-                it.copy(
-                    breadcrumbs = listOf(AliyunBreadcrumb("我的云盘", "root")),
-                    isLoggedIn = true,
-                    driveOptions = initialOptions,
-                    currentDriveId = defaultDriveId
-                )
-            }
-
-            viewModelScope.launch {
-                refreshDriveInfo()
-                loadDirectory("root")
-            }
+            // 不传 defaultDriveId，由 loginWithAuthorization 从 getUserDriveInfo 解析（首次默认资源盘）
+            loginWithAuthorization(auth, defaultDriveId = "", refreshToken)
         } catch (_: Exception) {
-            // JSON 解析失败，静默忽略
+            updateUiState { it.copy(error = "登录信息解析失败，请重试") }
         }
     }
 
@@ -207,6 +218,13 @@ class AliyunBrowserViewModel @Inject constructor(
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         directoryCache.clear()
+        // 清除 WebView 痕迹（cookie、localStorage、缓存等）
+        try {
+            val cookieManager = android.webkit.CookieManager.getInstance()
+            cookieManager.removeAllCookies(null)
+            cookieManager.flush()
+            android.webkit.WebStorage.getInstance().deleteAllData()
+        } catch (_: Exception) {}
         _uiState.value = AliyunBrowserUiState()
         _navigationStack.value = listOf(DirectoryStackEntry(fileId = "root", label = "根目录"))
     }
@@ -216,17 +234,38 @@ class AliyunBrowserViewModel @Inject constructor(
     // region ==================== 驱动信息刷新 ====================
 
     private suspend fun refreshDriveInfo() {
-        Log.e(TAG, "refreshDriveInfo start, current driveId=${apiClient.driveId}")
-        val result = apiClient.getUserDriveInfo().getOrNull()
-        if (result == null) {
-            Log.e(TAG, "refreshDriveInfo FAILED!")
-            return
-        }
-        Log.e(TAG, "refreshDriveInfo OK: default=${result.defaultDriveId}, backup=${result.backupDriveId}, resource=${result.resourceDriveId}")
+        val result = apiClient.getUserDriveInfo().getOrNull() ?: return
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        if (result.defaultDriveId.isNotBlank()) {
-            apiClient.driveId = result.defaultDriveId
-            prefs.edit().putString("drive_id", result.defaultDriveId).apply()
+        val savedDriveId = prefs.getString("drive_id", "")
+        val driveId = if (savedDriveId.isNullOrBlank()) resolveDefaultDrive(result) else savedDriveId
+        apiClient.driveId = driveId
+        prefs.edit().putString("drive_id", driveId).apply()
+        updateUiState { it.copy(currentDriveId = driveId) }
+        // 同步驱动选项，只包含备份盘和资源盘
+        updateDriveOptions(result)
+    }
+
+    private fun buildDriveOptionsFromInfo(info: dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunDriveInfo): List<DriveOption> {
+        val options = mutableListOf<DriveOption>()
+        // 默认盘（我的云盘）不放入下拉选项，面包屑已显示
+        if (info.backupDriveId.isNotBlank()) {
+            options.add(DriveOption("备份盘", info.backupDriveId))
+        }
+        if (info.resourceDriveId.isNotBlank()) {
+            options.add(DriveOption("资源盘", info.resourceDriveId))
+        }
+        return options
+    }
+
+    private fun resolveDefaultDrive(info: dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunDriveInfo): String {
+        // 默认选中资源盘
+        return info.resourceDriveId.ifEmpty { info.backupDriveId.ifEmpty { info.defaultDriveId } }
+    }
+
+    private fun updateDriveOptions(info: dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunDriveInfo) {
+        val options = buildDriveOptionsFromInfo(info)
+        if (options.isNotEmpty()) {
+            updateUiState { it.copy(driveOptions = options) }
         }
     }
 
@@ -251,8 +290,12 @@ class AliyunBrowserViewModel @Inject constructor(
         prefs.edit().clear().apply()
         AliyunAuthProvider.clear()
         directoryCache.clear()
-        android.webkit.CookieManager.getInstance().removeAllCookies(null)
-        android.webkit.CookieManager.getInstance().flush()
+        try {
+            val cookieManager = android.webkit.CookieManager.getInstance()
+            cookieManager.removeAllCookies(null)
+            cookieManager.flush()
+            android.webkit.WebStorage.getInstance().deleteAllData()
+        } catch (_: Exception) {}
         updateUiState {
             AliyunBrowserUiState(
                 isLoggedIn = false,
@@ -270,7 +313,6 @@ class AliyunBrowserViewModel @Inject constructor(
         loadDirectoryJob?.cancel()
         loadSequence++
         val seq = loadSequence
-        Log.e(TAG, "loadDirectory start: parentFileId=$parentFileId, driveId=${apiClient.driveId}")
         updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
 
         loadDirectoryJob = viewModelScope.launch {
@@ -283,7 +325,6 @@ class AliyunBrowserViewModel @Inject constructor(
 
             result.fold(
                 onSuccess = { listResult ->
-                    Log.e(TAG, "loadDirectory OK: ${listResult.items.size} items, nextMarker=${listResult.nextMarker}")
                     // 缓存文件元数据到 CloudPlaylistCache，供播放器显示标题
                     listResult.items.forEach { file ->
                         if (file.category == "video") {
@@ -305,20 +346,20 @@ class AliyunBrowserViewModel @Inject constructor(
                     syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
                 },
                 onFailure = { e ->
-                    val msg = e.message ?: "未知错误"
-                    Log.e(TAG, "loadDirectory FAIL: $msg")
-                    val friendly = when {
-                        msg.contains("require login", ignoreCase = true) ||
-                        msg.contains("token", ignoreCase = true) ||
-                        msg.contains("invalid", ignoreCase = true) ||
-                        msg.contains("401") -> {
-                            updateUiState { it.copy(reLoginRequired = true) }
-                            "登录已过期，请重新登录"
+                    val friendly = when (e) {
+                        is AliyunTokenExpiredException -> {
+                            triggerReLogin()
+                            return@fold
                         }
-                        msg.contains("Failed to connect", ignoreCase = true) ||
-                        msg.contains("Unable to resolve", ignoreCase = true) ->
-                            "无法连接到阿里云盘服务"
-                        else -> "加载失败: $msg"
+                        else -> {
+                            val msg = e.message ?: "未知错误"
+                            when {
+                                msg.contains("Failed to connect", ignoreCase = true) ||
+                                msg.contains("Unable to resolve", ignoreCase = true) ->
+                                    "无法连接到阿里云盘服务"
+                                else -> "加载失败: $msg"
+                            }
+                        }
                     }
                     updateUiState { it.copy(error = friendly, isLoading = false) }
                     syncStackTop { it.copy(error = friendly, isLoading = false) }
@@ -631,16 +672,27 @@ class AliyunBrowserViewModel @Inject constructor(
     // region ==================== 视频播放 ====================
 
     suspend fun resolveVideoUri(item: WebDavResource): android.net.Uri? {
-        // 注册阿里云播放头，播放器会自动注入
-        val headers = AliyunAuthProvider.getPlayHeaders()
-        if (headers.isNotEmpty()) {
-            CloudPlayHeaders.register("vod.alipan.com", headers)
-        }
+        // 注册阿里云播放头（lambda 实时读取，避免 stale token）
+        CloudPlayHeaders.register("vod.alipan.com") { AliyunAuthProvider.getPlayHeaders() }
 
         val result = apiClient.getVideoPreviewPlayInfo(item.path).getOrNull()
         if (result != null && result.urls.isNotEmpty()) {
             val url = result.urls.first() + "#alipanPlay=true#"
             CloudPlaylistCache.putResolvedUrl("alipan", item.path, url)
+
+            // 缓存清晰度选项，加速后续切换
+            if (result.urls.size > 1) {
+                val qualityOptions = result.urls.zip(result.names).map { (u, n) ->
+                    VideoQualityCache.QualityOption(label = n, url = u)
+                }
+                videoQualityCache.cacheQualityOptions(
+                    provider = "alipan",
+                    fileId = item.path,
+                    videoName = item.name,
+                    options = qualityOptions
+                )
+            }
+
             return android.net.Uri.parse(url)
         }
         return null

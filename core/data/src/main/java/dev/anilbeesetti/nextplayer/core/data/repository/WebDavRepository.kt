@@ -35,4 +35,12 @@ interface WebDavRepository {
         username: String,
         password: String,
     ): Result<Boolean>
+
+    suspend fun createFolder(baseUrl: String, path: String, authHeader: String): Result<Unit>
+
+    suspend fun delete(baseUrl: String, path: String, authHeader: String): Result<Unit>
+
+    suspend fun move(baseUrl: String, sourcePath: String, destinationPath: String, authHeader: String): Result<Unit>
+
+    suspend fun copy(baseUrl: String, sourcePath: String, destinationPath: String, authHeader: String): Result<Unit>
 }

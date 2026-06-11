@@ -42,6 +42,8 @@ import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
 import dev.anilbeesetti.nextplayer.core.common.CloudPlaylistCache
 import dev.anilbeesetti.nextplayer.core.common.extensions.getFilenameFromUri
 import dev.anilbeesetti.nextplayer.core.data.cloud.CloudUriResolver
+import dev.anilbeesetti.nextplayer.core.data.cache.PlaybackCacheManager
+import dev.anilbeesetti.nextplayer.core.common.CloudAwareCacheKeyRegistry
 import dev.anilbeesetti.nextplayer.core.common.extensions.getLocalSubtitles
 import dev.anilbeesetti.nextplayer.core.common.extensions.getPath
 import dev.anilbeesetti.nextplayer.core.common.extensions.subtitleCacheDir
@@ -110,6 +112,12 @@ class PlayerService : MediaSessionService() {
 
     @Inject
     lateinit var imageLoader: ImageLoader
+
+    @Inject
+    lateinit var playbackCacheManager: PlaybackCacheManager
+
+    @Inject
+    lateinit var cacheKeyRegistry: CloudAwareCacheKeyRegistry
 
     private val playerPreferences: PlayerPreferences
         get() = preferencesRepository.playerPreferences.value
@@ -583,8 +591,8 @@ class PlayerService : MediaSessionService() {
             .setBufferDurationsMs(
                 DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,      // 15000: 最少缓冲 15 秒即可开始播放
                 DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,      // 60000: 最大缓冲 60 秒
-                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,   // 3000: 起播缓冲 3 秒
-                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS, // 10000: 重缓冲后 10 秒恢复
+                2500,    // 起播缓冲 2.5 秒（云盘流媒体加速起播）
+                5000,    // 重缓冲后 5 秒恢复（原 10 秒，减少卡顿等待）
             )
             .setBackBuffer(5000, false)
             .setTargetBufferBytes(DefaultLoadControl.DEFAULT_TARGET_BUFFER_BYTES)
@@ -594,7 +602,13 @@ class PlayerService : MediaSessionService() {
         val mediaSourceFactory = CloudAwareMediaSourceFactory(
             authAwareFactory = AuthAwareDataSourceFactory(applicationContext),
             cloudUriResolver = cloudUriResolver,
-        )
+            cacheKeyRegistry = cacheKeyRegistry,
+            playbackCacheManager = playbackCacheManager,
+        ).also {
+            if (playerPreferences.playbackCacheEnabled) {
+                it.updateCacheSettings(playerPreferences.playbackCacheMaxSize.bytes)
+            }
+        }
 
         val player = ExoPlayer.Builder(applicationContext)
             .setRenderersFactory(renderersFactory)

@@ -6,6 +6,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -42,6 +44,8 @@ fun <T> CloudBrowserPanel(
     menuContent: @Composable ((index: Int, onDismiss: () -> Unit) -> Unit)? = null,
     reLoginRequired: Boolean = false,
     navigationStack: List<DirectoryState> = emptyList(),
+    breadcrumbActions: @Composable (RowScope.() -> Unit)? = null,
+    onCreateFolder: (() -> Unit)? = null,
 ) {
     // 从 navigationStack 或扁平参数获取当前目录状态
     val topEntry = navigationStack.lastOrNull()
@@ -49,15 +53,17 @@ fun <T> CloudBrowserPanel(
     val curLoading = topEntry?.isLoading ?: isLoading
     val curError = topEntry?.error ?: error
 
-    Column(modifier = modifier.fillMaxSize()) {
-        if (!isConfigured) {
-            loginContent()
-        } else {
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (!isConfigured) {
+                loginContent()
+            } else {
             // 面包屑
             BreadcrumbBar(
                 breadcrumbs = breadcrumbs,
                 breadcrumbLabel = breadcrumbLabel,
                 onNavigateToBreadcrumb = onBreadcrumbClick,
+                actions = breadcrumbActions,
             )
 
             if (navigationStack.isNotEmpty()) {
@@ -202,8 +208,22 @@ fun <T> CloudBrowserPanel(
                 }
             }
         }
-    }
+        }
 
+        // 新建文件夹 FAB
+        if (isConfigured && onCreateFolder != null) {
+            FloatingActionButton(
+                onClick = onCreateFolder,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "新建文件夹")
+            }
+        }
+    }
 }
 
 @Composable
@@ -211,38 +231,47 @@ private fun <T> BreadcrumbBar(
     breadcrumbs: List<T>,
     breadcrumbLabel: (T) -> String,
     onNavigateToBreadcrumb: (Int) -> Unit,
+    actions: @Composable (RowScope.() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        breadcrumbs.forEachIndexed { index, crumb ->
-            TextButton(
-                onClick = { onNavigateToBreadcrumb(index) },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            ) {
-                Text(
-                    text = breadcrumbLabel(crumb),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = if (index == breadcrumbs.lastIndex) FontWeight.Bold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (index == breadcrumbs.lastIndex)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            breadcrumbs.forEachIndexed { index, crumb ->
+                TextButton(
+                    onClick = { onNavigateToBreadcrumb(index) },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = breadcrumbLabel(crumb),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (index == breadcrumbs.lastIndex) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (index == breadcrumbs.lastIndex)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (index < breadcrumbs.lastIndex) {
+                    Text(
+                        text = "›",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
             }
-            if (index < breadcrumbs.lastIndex) {
-                Text(
-                    text = "›",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
+        }
+        if (actions != null) {
+            actions()
         }
     }
 }

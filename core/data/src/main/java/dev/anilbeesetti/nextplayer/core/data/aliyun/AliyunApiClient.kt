@@ -1,6 +1,5 @@
 package dev.anilbeesetti.nextplayer.core.data.aliyun
 
-import android.util.Log
 import dev.anilbeesetti.nextplayer.core.data.BaseCloudApiClient
 import dev.anilbeesetti.nextplayer.core.data.CloudHttpClient
 import okhttp3.MediaType.Companion.toMediaType
@@ -9,6 +8,8 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+
+class AliyunTokenExpiredException(message: String) : IllegalStateException(message)
 
 class AliyunApiClient(
     client: OkHttpClient = CloudHttpClient.DEFAULT
@@ -20,7 +21,6 @@ class AliyunApiClient(
     private var xSignature: String = "ca8bfac0991f986648e8783319e6570c181a6442785179a90fa2515cce32375b52d0b38020c0aad8861c95f7f5a8369529d698b39322b6e74b199184913414a000"
 
     companion object {
-        private const val TAG = "AliyunApi"
         private const val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     }
 
@@ -31,12 +31,21 @@ class AliyunApiClient(
 
     private fun buildHeaders(): Map<String, String> = mapOf(
         "Accept" to "application/json, text/plain, */*",
+        "Accept-Language" to "zh-CN,zh;q=0.9",
         "Authorization" to authorization,
         "Content-Type" to "application/json",
-        "User-Agent" to UA,
+        "Priority" to "u=1, i",
         "Referer" to "https://www.alipan.com/",
-        "X-Canary" to "client=web,app=adrive,version=v6.8.12",
-        "X-Device-Id" to xDeviceId
+        "Sec-CH-UA" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
+        "Sec-CH-UA-Mobile" to "?0",
+        "Sec-CH-UA-Platform" to "\"Windows\"",
+        "Sec-Fetch-Dest" to "empty",
+        "Sec-Fetch-Mode" to "cors",
+        "Sec-Fetch-Site" to "cross-site",
+        "User-Agent" to UA,
+        "X-Canary" to "client=web,app=adrive,version=v6.7.7",
+        "X-Device-Id" to xDeviceId,
+        "X-Signature" to xSignature
     )
 
     private suspend fun apiPost(url: String, body: JSONObject? = null): JSONObject {
@@ -44,27 +53,29 @@ class AliyunApiClient(
         builder.post((body ?: JSONObject()).toString().toRequestBody(jsonMediaType))
         buildHeaders().forEach { (k, v) -> builder.header(k, v) }
 
-        Log.e(TAG, "→ $url  auth=${authorization.take(20)}...  driveId=$driveId")
         val resp = executeRequestAndGetResponse(builder.build())
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
-        Log.e(TAG, "← HTTP ${resp.code}  len=${respBody.length}  body=${respBody.take(200)}")
         if (!resp.isSuccessful) {
             throw IllegalStateException("HTTP ${resp.code} from $url: $respBody")
         }
         AliyunAuthProvider.isActive = true
-        return JSONObject(respBody)
+        val json = JSONObject(respBody)
+        if (json.optString("code", "") == "AccessTokenInvalid") {
+            throw AliyunTokenExpiredException("AccessTokenInvalid")
+        }
+        return json
     }
 
     private fun buildListBody(
         parentFileId: String,
-        limit: Int = 200,
+        page: Int = 1,
         orderBy: String = "name",
         orderDirection: String = "ASC",
         nextMarker: String? = null
     ): JSONObject = JSONObject().apply {
         put("drive_id", driveId)
         put("parent_file_id", parentFileId)
-        put("limit", limit)
+        put("limit", minOf(page * 20, 200))
         put("all", false)
         put("url_expire_sec", 14400)
         put("image_thumbnail_process", "image/resize,w_256/format,avif")
@@ -78,11 +89,12 @@ class AliyunApiClient(
 
     suspend fun listFiles(
         parentFileId: String,
+        page: Int = 1,
         orderBy: String = "name",
         orderDirection: String = "ASC",
         nextMarker: String? = null
     ): Result<AliyunListResult> = runCatching {
-        val body = buildListBody(parentFileId, orderBy = orderBy, orderDirection = orderDirection, nextMarker = nextMarker)
+        val body = buildListBody(parentFileId, page = page, orderBy = orderBy, orderDirection = orderDirection, nextMarker = nextMarker)
         val json = apiPost("https://api.aliyundrive.com/adrive/v3/file/list", body)
         val itemsArray = json.optJSONArray("items") ?: JSONArray()
         val items = (0 until itemsArray.length()).map { i ->

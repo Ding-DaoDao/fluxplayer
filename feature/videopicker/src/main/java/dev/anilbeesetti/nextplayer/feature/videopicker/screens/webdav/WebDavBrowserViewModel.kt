@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import android.util.Log
+import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -252,6 +253,87 @@ class WebDavBrowserViewModel @Inject constructor(
             WebDavBreadcrumb(it.label, it.path)
         }
         _stateFlow.update { it.copy(breadcrumbs = crumbs) }
+    }
+
+    // endregion
+
+    // region ==================== 文件操作 ====================
+
+    fun createDirectory(name: String) {
+        val server = _extraState.value.selectedServer ?: return
+        val current = _navigationStack.value.lastOrNull() ?: return
+        val parentPath = current.path.trimEnd('/')
+        val newPath = "$parentPath/$name"
+
+        viewModelScope.launch {
+            val result = webDavRepository.createFolder(
+                baseUrl = server.normalizedUrl,
+                path = newPath,
+                authHeader = server.basicAuthHeader,
+            )
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(context, "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                    directoryCache.remove(current.path)
+                    loadDirectory(current.path)
+                },
+                onFailure = { e ->
+                    Toast.makeText(context, "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    fun renameItem(index: Int, newName: String) {
+        val server = _extraState.value.selectedServer ?: return
+        val current = _navigationStack.value.lastOrNull() ?: return
+        val item = current.items.getOrNull(index) ?: return
+
+        val parentPath = current.path.trimEnd('/')
+        val destPath = "$parentPath/$newName"
+
+        viewModelScope.launch {
+            val result = webDavRepository.move(
+                baseUrl = server.normalizedUrl,
+                sourcePath = item.path,
+                destinationPath = destPath,
+                authHeader = server.basicAuthHeader,
+            )
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(context, "重命名成功", Toast.LENGTH_SHORT).show()
+                    directoryCache.remove(current.path)
+                    loadDirectory(current.path)
+                },
+                onFailure = { e ->
+                    Toast.makeText(context, "重命名失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    fun deleteItem(index: Int) {
+        val server = _extraState.value.selectedServer ?: return
+        val current = _navigationStack.value.lastOrNull() ?: return
+        val item = current.items.getOrNull(index) ?: return
+
+        viewModelScope.launch {
+            val result = webDavRepository.delete(
+                baseUrl = server.normalizedUrl,
+                path = item.path,
+                authHeader = server.basicAuthHeader,
+            )
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(context, "删除成功", Toast.LENGTH_SHORT).show()
+                    directoryCache.remove(current.path)
+                    loadDirectory(current.path)
+                },
+                onFailure = { e ->
+                    Toast.makeText(context, "删除失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
     }
 
     // endregion

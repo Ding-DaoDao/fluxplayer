@@ -10,6 +10,7 @@ import androidx.media3.datasource.DataSource
 import dev.anilbeesetti.nextplayer.core.common.CloudPlayHeaders
 import dev.anilbeesetti.nextplayer.core.data.openlist.OpenListTokenProvider
 import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunAuthProvider
+import dev.anilbeesetti.nextplayer.core.data.pan123.Pan123AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkAuthProvider
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -33,8 +34,8 @@ class AuthAwareDataSourceFactory(
 
     private val httpFactory = DefaultHttpDataSource.Factory()
         .setUserAgent(userAgent)
-        .setConnectTimeoutMs(30_000)
-        .setReadTimeoutMs(30_000)
+        .setConnectTimeoutMs(15_000)
+        .setReadTimeoutMs(10_000)
         .setAllowCrossProtocolRedirects(true)
 
     override fun createDataSource(): DataSource {
@@ -153,6 +154,18 @@ private class AuthAwareDataSource(
             http.setRequestProperty("Referer", "https://www.alipan.com/")
             http.setRequestProperty("User-Agent", AliyunAuthProvider.userAgent)
             return
+        }
+
+        // 123 云盘播放认证：video CDN 自带签名，只需基础 Referer + UA
+        if ("pan123Play" in fragment && Pan123AuthProvider.isActive) {
+            Log.d(TAG, "pan123Play auth: domain=${uri.host}")
+            http.setRequestProperty("Referer", Pan123AuthProvider.referer)
+            http.setRequestProperty("User-Agent", Pan123AuthProvider.userAgent)
+            http.setRequestProperty("X-MF-PAN-RANGE", "1")
+            return
+        }
+        if ("pan123Play" in fragment && !Pan123AuthProvider.isActive) {
+            Log.w(TAG, "pan123Play detected but Pan123AuthProvider.isActive=false!")
         }
 
         val userInfo = uri.userInfo

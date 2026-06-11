@@ -257,5 +257,149 @@ class WebDavClient(
         return results
     }
 
+    /**
+     * 创建文件夹（MKCOL 方法）。
+     */
+    suspend fun createFolder(
+        baseUrl: String,
+        path: String,
+        authHeader: String,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val normalizedBase = baseUrl.trimEnd('/')
+            val url = if (path.startsWith("/")) "$normalizedBase$path" else "$normalizedBase/$path"
+            val targetUrl = if (url.endsWith("/")) url else "$url/"
+
+            val request = Request.Builder()
+                .url(targetUrl)
+                .header("Authorization", authHeader)
+                .method("MKCOL", null)
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful || response.code == 201) {
+                Result.success(Unit)
+            } else {
+                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "createFolder failed for path=$path", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 删除资源（DELETE 方法）。
+     */
+    suspend fun delete(
+        baseUrl: String,
+        path: String,
+        authHeader: String,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val normalizedBase = baseUrl.trimEnd('/')
+            val url = if (path.startsWith("/")) "$normalizedBase$path" else "$normalizedBase/$path"
+
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", authHeader)
+                .delete()
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful || response.code == 204) {
+                Result.success(Unit)
+            } else {
+                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "delete failed for path=$path", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 移动资源（MOVE 方法）。
+     */
+    suspend fun move(
+        baseUrl: String,
+        sourcePath: String,
+        destinationPath: String,
+        authHeader: String,
+        overwrite: Boolean = false,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val normalizedBase = baseUrl.trimEnd('/')
+            val sourceUrl = if (sourcePath.startsWith("/")) "$normalizedBase$sourcePath" else "$normalizedBase/$sourcePath"
+            val destUrl = buildEncodedDestUrl(normalizedBase, destinationPath)
+
+            val request = Request.Builder()
+                .url(sourceUrl)
+                .header("Authorization", authHeader)
+                .header("Destination", destUrl)
+                .header("Overwrite", if (overwrite) "T" else "F")
+                .method("MOVE", null)
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful || response.code in 200..299) {
+                Result.success(Unit)
+            } else {
+                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "move failed from $sourcePath to $destinationPath", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 复制资源（COPY 方法）。
+     */
+    suspend fun copy(
+        baseUrl: String,
+        sourcePath: String,
+        destinationPath: String,
+        authHeader: String,
+        overwrite: Boolean = false,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val normalizedBase = baseUrl.trimEnd('/')
+            val sourceUrl = if (sourcePath.startsWith("/")) "$normalizedBase$sourcePath" else "$normalizedBase/$sourcePath"
+            val destUrl = buildEncodedDestUrl(normalizedBase, destinationPath)
+
+            val request = Request.Builder()
+                .url(sourceUrl)
+                .header("Authorization", authHeader)
+                .header("Destination", destUrl)
+                .header("Overwrite", if (overwrite) "T" else "F")
+                .method("COPY", null)
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful || response.code in 200..299) {
+                Result.success(Unit)
+            } else {
+                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "copy failed from $sourcePath to $destinationPath", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 构建 URL 编码的 Destination 头。
+     * 对路径中的每一段单独编码，避免中文等非 ASCII 字符导致 HTTP 解析失败。
+     */
+    private fun buildEncodedDestUrl(baseUrl: String, path: String): String {
+        val normalizedBase = baseUrl.trimEnd('/')
+        val normalizedPath = if (path.startsWith("/")) path else "/$path"
+        val encodedPath = normalizedPath.split("/").joinToString("/") { segment ->
+            if (segment.isEmpty()) "" else Uri.encode(segment)
+        }
+        return "$normalizedBase$encodedPath"
+    }
+
     class WebDavException(message: String) : Exception(message)
 }

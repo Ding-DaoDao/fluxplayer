@@ -315,4 +315,14 @@
     <string name="webdav_settings_description">配置 WebDAV 服务器，浏览远程视频文件</string>
     <string name="openlist_settings">OpenList</string>
     <string name="openlist_settings_description">配置 OpenList 本地文件服务器</string>
+    <string name="playback_cache">播放缓存</string>
+    <string name="playback_cache_description">缓存网络视频到本地，再次播放秒开</string>
+    <string name="cache_size">缓存大小</string>
+    <string name="clear_cache">清除缓存</string>
+    <string name="clear_cache_description">已使用 %1$s</string>
+    <string name="clear_cache_confirmation">确定要清除播放缓存吗？</string>
+    <string name="confirm">确定</string>
+    <string name="logout">退出登录</string>
+    <string name="logout_confirmation_title">退出登录</string>
+    <string name="logout_confirmation_message">确定要退出登录吗？</string>
 </resources>

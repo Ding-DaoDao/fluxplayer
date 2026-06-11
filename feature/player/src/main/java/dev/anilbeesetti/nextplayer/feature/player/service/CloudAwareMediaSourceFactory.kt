@@ -26,10 +26,12 @@ class CloudAwareMediaSourceFactory(
     private val nonCachedFactory = DefaultMediaSourceFactory(authAwareFactory)
     private var storedDrmSessionManagerProvider: DrmSessionManagerProvider? = null
     private var storedLoadErrorHandlingPolicy: LoadErrorHandlingPolicy? = null
+    private var simpleCache: SimpleCache? = null
 
     fun updateCacheSettings(maxSizeBytes: Long) {
         val manager = playbackCacheManager ?: return
         val cache: SimpleCache = manager.getCache(maxSizeBytes)
+        simpleCache = cache
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(cache)
             .setUpstreamDataSourceFactory(authAwareFactory)
@@ -37,11 +39,20 @@ class CloudAwareMediaSourceFactory(
         val registry = cacheKeyRegistry
         if (registry != null) {
             cacheDataSourceFactory.setCacheKeyFactory { spec ->
-                val uri = spec.uri
-                if (CloudUriScheme.isCloudUri(uri)) {
-                    registry.getOriginalUri(uri.toString()) ?: spec.key ?: spec.uri.toString()
+                val resolvedUrl = spec.uri.toString()
+                val originalUri = registry.getOriginalUri(resolvedUrl)
+                if (originalUri != null) {
+                    // 复合缓存键 = cloud URI + URL 路径
+                    // 不同画质的 URL 路径不同 → 缓存键不同 → 互不干扰
+                    // 同画质跨会话 CDN 域名可能变但路径不变 → 缓存可复用
+                    val urlPath = try {
+                        Uri.parse(resolvedUrl).path ?: resolvedUrl
+                    } catch (_: Exception) {
+                        resolvedUrl
+                    }
+                    "$originalUri|$urlPath"
                 } else {
-                    spec.key ?: spec.uri.toString()
+                    spec.key ?: resolvedUrl
                 }
             }
         }
@@ -56,6 +67,7 @@ class CloudAwareMediaSourceFactory(
 
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
         val uri = mediaItem.localConfiguration?.uri ?: Uri.EMPTY
+        Log.d(TAG, "createMediaSource: uri=$uri, fragment=${uri.fragment}, mediaId=${mediaItem.mediaId}")
 
         // 云盘 URI (cloud://) 需要先解析为真实的 HTTP URL
         if (CloudUriScheme.isCloudUri(uri)) {

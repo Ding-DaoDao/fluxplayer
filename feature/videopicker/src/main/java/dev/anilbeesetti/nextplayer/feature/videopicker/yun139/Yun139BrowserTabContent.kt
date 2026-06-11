@@ -23,6 +23,8 @@ import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -51,6 +53,8 @@ fun Yun139BrowserTabContent(
     }
 
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
+    var renameIndex by remember { mutableStateOf(-1) }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -83,7 +87,7 @@ fun Yun139BrowserTabContent(
                     onMove = { onDismiss(); viewModel.startMove(index) },
                     onCopy = { onDismiss(); viewModel.startCopy(index) },
                     onDelete = { onDismiss(); viewModel.deleteItem(index) },
-                    onRename = { onDismiss() },
+                    onRename = { renameIndex = index; onDismiss() },
                     onDownload = { onDismiss(); viewModel.downloadFile(index) },
                 )
             }
@@ -96,8 +100,25 @@ fun Yun139BrowserTabContent(
             Yun139LoginScreen(
                 onLoginWithWeb = { auth, udId -> viewModel.loginWithWeb(auth, udId) }
             )
-        }
+        },
+        onCreateFolder = { showCreateFolderDialog = true }
     )
+
+    val renameItem = state.items.getOrNull(renameIndex)
+    if (renameItem != null) {
+        RenameDialog(
+            name = renameItem.name,
+            onDismiss = { renameIndex = -1 },
+            onDone = { newName -> viewModel.renameItem(renameIndex, newName); renameIndex = -1 },
+        )
+    }
+
+    if (showCreateFolderDialog) {
+        CreateFolderDialog(
+            onDismiss = { showCreateFolderDialog = false },
+            onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
+        )
+    }
 }
 
 /**

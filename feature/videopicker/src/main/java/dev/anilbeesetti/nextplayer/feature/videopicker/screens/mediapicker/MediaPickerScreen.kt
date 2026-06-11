@@ -182,6 +182,7 @@ internal fun MediaPickerScreen(
 
     var selectedProvider by rememberSaveable { mutableStateOf<String?>(null) }
     var providerLogout by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var showLogoutConfirmation by rememberSaveable { mutableStateOf(false) }
 
     val selectedItemsSize = selectionManager.selectedFolders.size + selectionManager.selectedVideos.size
     val totalItemsSize = (uiState.mediaDataState as? DataState.Success)?.value?.run { folderList.size + mediaList.size } ?: 0
@@ -207,7 +208,7 @@ internal fun MediaPickerScreen(
                     },
                     actions = {
                         if (providerLogout != null) {
-                            IconButton(onClick = { providerLogout?.invoke() }) {
+                            IconButton(onClick = { showLogoutConfirmation = true }) {
                                 Icon(
                                     imageVector = NextIcons.Logout,
                                     contentDescription = "退出登录",
@@ -607,6 +608,16 @@ internal fun MediaPickerScreen(
         )
     }
 
+    if (showLogoutConfirmation) {
+        LogoutConfirmationDialog(
+            onConfirm = {
+                providerLogout?.invoke()
+                showLogoutConfirmation = false
+            },
+            onCancel = { showLogoutConfirmation = false },
+        )
+    }
+
     if (showDeleteVideosConfirmation) {
         DeleteConfirmationDialog(
             selectedVideos = selectionManager.selectedVideos,
@@ -619,6 +630,39 @@ internal fun MediaPickerScreen(
             onCancel = { showDeleteVideosConfirmation = false },
         )
     }
+}
+
+@Composable
+private fun LogoutConfirmationDialog(
+    modifier: Modifier = Modifier,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    NextDialog(
+        onDismissRequest = onCancel,
+        title = {
+            Text(
+                text = stringResource(R.string.logout_confirmation_title),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                modifier = modifier,
+            ) {
+                Text(text = stringResource(R.string.logout))
+            }
+        },
+        dismissButton = { CancelButton(onClick = onCancel) },
+        modifier = modifier,
+        content = {
+            Text(
+                text = stringResource(R.string.logout_confirmation_message),
+                style = MaterialTheme.typography.titleSmall,
+            )
+        },
+    )
 }
 
 @Composable

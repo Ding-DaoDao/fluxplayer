@@ -1,12 +1,14 @@
 package dev.anilbeesetti.nextplayer.feature.videopicker.openlist
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -34,6 +36,7 @@ fun OpenListBrowserTabContent(
         viewModel.navigateUp()
     }
 
+    val context = LocalContext.current
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
 
     SharedCloudBrowserPanel(
@@ -65,10 +68,10 @@ fun OpenListBrowserTabContent(
                 ContextActionMenu(
                     item = item,
                     onDismiss = onDismiss,
-                    onMove = {},
-                    onCopy = {},
-                    onDelete = {},
-                    onRename = {},
+                    onMove = { onDismiss(); Toast.makeText(context, "暂不支持移动", Toast.LENGTH_SHORT).show() },
+                    onCopy = { onDismiss(); Toast.makeText(context, "暂不支持复制", Toast.LENGTH_SHORT).show() },
+                    onDelete = { onDismiss(); Toast.makeText(context, "暂不支持删除", Toast.LENGTH_SHORT).show() },
+                    onRename = { onDismiss(); Toast.makeText(context, "暂不支持重命名", Toast.LENGTH_SHORT).show() },
                     onDownload = { onDismiss(); viewModel.downloadFile(index) },
                 )
             }

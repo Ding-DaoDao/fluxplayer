@@ -17,8 +17,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
+import android.widget.Toast
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
 import kotlinx.coroutines.launch
 
 /**
@@ -29,10 +32,11 @@ fun QuarkBrowserTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
     onPlayVideos: (List<Uri>, Uri) -> Unit,
     onLogoutReady: (() -> Unit) -> Unit = {},
+    driveType: String = "quark",
     modifier: Modifier = Modifier,
     viewModel: QuarkBrowserViewModel = hiltViewModel()
 ) {
-    LaunchedEffect(Unit) { viewModel.setDriveType("quark") }
+    LaunchedEffect(Unit) { viewModel.setDriveType(driveType) }
     LaunchedEffect(Unit) { onLogoutReady { viewModel.logout() } }
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -44,6 +48,8 @@ fun QuarkBrowserTabContent(
     }
 
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
+    var renameIndex by remember { mutableStateOf(-1) }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -80,9 +86,9 @@ fun QuarkBrowserTabContent(
                     item = item,
                     onDismiss = onDismiss,
                     onMove = { onDismiss(); viewModel.startMove(index) },
-                    onCopy = { onDismiss() },
+                    onCopy = { onDismiss(); Toast.makeText(viewModel.getApplication(), "暂不支持复制", Toast.LENGTH_SHORT).show() },
                     onDelete = { onDismiss(); viewModel.deleteItem(index) },
-                    onRename = { onDismiss() },
+                    onRename = { renameIndex = index; onDismiss() },
                     onDownload = { onDismiss(); viewModel.downloadFile(index) },
                 )
             }
@@ -94,10 +100,29 @@ fun QuarkBrowserTabContent(
         loginContent = {
             QuarkLoginScreen(
                 driveType = state.driveType,
-                onLoginWithCookie = { cookie, dt -> viewModel.loginWithCookie(cookie, dt) }
+                onLoginWithCookie = { cookie, dt -> viewModel.loginWithCookie(cookie, dt) },
+                loginUrl = if (driveType == "uc") "https://drive.uc.cn/" else "https://pan.quark.cn/",
+                cookieDomains = if (driveType == "uc") listOf("drive.uc.cn") else listOf("pan.quark.cn", "drive-pc.quark.cn"),
             )
-        }
+        },
+        onCreateFolder = { showCreateFolderDialog = true }
     )
+
+    val renameItem = state.items.getOrNull(renameIndex)
+    if (renameItem != null) {
+        RenameDialog(
+            name = renameItem.name,
+            onDismiss = { renameIndex = -1 },
+            onDone = { newName -> viewModel.renameItem(renameIndex, newName); renameIndex = -1 },
+        )
+    }
+
+    if (showCreateFolderDialog) {
+        CreateFolderDialog(
+            onDismiss = { showCreateFolderDialog = false },
+            onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
+        )
+    }
 }
 
 /**
@@ -110,8 +135,11 @@ fun QuarkBrowserTabContent(
 fun QuarkLoginScreen(
     driveType: String,
     onLoginWithCookie: (String, String) -> Unit,
+    loginUrl: String = "https://pan.quark.cn/",
+    cookieDomains: List<String> = listOf("pan.quark.cn", "drive-pc.quark.cn"),
     modifier: Modifier = Modifier
 ) {
+    val providerName = if (driveType == "uc") "UC网盘" else "夸克网盘"
     var statusText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     var loginTriggered by remember { mutableStateOf(false) }
@@ -131,7 +159,7 @@ fun QuarkLoginScreen(
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
-                    text = statusText.ifEmpty { "正在加载夸克网盘登录页面..." },
+                    text = statusText.ifEmpty { "正在加载${providerName}登录页面..." },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
@@ -145,7 +173,10 @@ fun QuarkLoginScreen(
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                    CookieManager.getInstance().removeAllCookies(null)
+                    // 清除所有旧 Cookie，确保夸克/UC 登录凭证完全隔离
+                    val cm = CookieManager.getInstance()
+                    cm.removeAllCookies(null)
+                    cm.flush()
 
                     webViewClient = object : WebViewClient() {
                         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
@@ -158,12 +189,10 @@ fun QuarkLoginScreen(
                             isLoading = false
                             statusText = "请在页面中完成登录（扫码或账号密码）"
 
-                            // 获取 pan.quark.cn 的 cookie
-                            val panCookies = CookieManager.getInstance().getCookie("https://pan.quark.cn") ?: ""
-                            // 也获取 drive-pc.quark.cn 的 cookie（登录后可能同时设置）
-                            val driveCookies = CookieManager.getInstance().getCookie("https://drive-pc.quark.cn") ?: ""
-
-                            val allCookies = listOf(panCookies, driveCookies)
+                            val allCookies = cookieDomains
+                                .map { domain ->
+                                    CookieManager.getInstance().getCookie("https://$domain") ?: ""
+                                }
                                 .filter { it.isNotBlank() }
                                 .joinToString("; ")
 
@@ -174,7 +203,7 @@ fun QuarkLoginScreen(
                             }
                         }
                     }
-                    loadUrl("https://pan.quark.cn/")
+                    loadUrl(loginUrl)
                 }
             },
             modifier = Modifier.fillMaxSize()

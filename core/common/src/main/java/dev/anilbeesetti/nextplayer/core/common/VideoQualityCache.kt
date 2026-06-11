@@ -45,10 +45,14 @@ class VideoQualityCache @Inject constructor(
         }
         prefs.edit().putString(key, json.toString()).apply()
 
-        // 同时建立 URL -> fileId 反向索引，加速播放器端查找
+        // 为每个清晰度 URL 建立反向索引，加速播放器端查找
         if (options.isNotEmpty()) {
-            val urlKey = "url_index_${provider}_${options.first().url.hashCode()}"
-            prefs.edit().putString(urlKey, key).apply()
+            val editor = prefs.edit()
+            options.forEach { opt ->
+                val urlKey = "url_index_${provider}_${opt.url.hashCode()}"
+                editor.putString(urlKey, key)
+            }
+            editor.apply()
         }
     }
 

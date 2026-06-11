@@ -125,7 +125,7 @@ fun FolderPickerDialog(
  * 新建文件夹对话框
  */
 @Composable
-private fun CreateFolderDialog(
+fun CreateFolderDialog(
     onDismiss: () -> Unit,
     onCreate: (String) -> Unit,
 ) {

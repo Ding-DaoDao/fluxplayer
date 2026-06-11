@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import dev.anilbeesetti.nextplayer.core.ui.R
 import dev.anilbeesetti.nextplayer.core.ui.components.CancelButton
 import dev.anilbeesetti.nextplayer.core.ui.components.DoneButton
@@ -27,15 +29,17 @@ fun RenameDialog(
     onDismiss: () -> Unit,
     onDone: (String) -> Unit,
 ) {
-    var mediaName by rememberSaveable { mutableStateOf(name) }
+    var textFieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(text = name, selection = TextRange(name.length)))
+    }
     val focusRequester = remember { FocusRequester() }
     NextDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.rename_to)) },
         content = {
             OutlinedTextField(
-                value = mediaName,
-                onValueChange = { mediaName = it },
+                value = textFieldValue,
+                onValueChange = { textFieldValue = it },
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester),
@@ -43,8 +47,8 @@ fun RenameDialog(
         },
         confirmButton = {
             DoneButton(
-                enabled = mediaName.isNotBlank(),
-                onClick = { onDone(mediaName) },
+                enabled = textFieldValue.text.isNotBlank(),
+                onClick = { onDone(textFieldValue.text) },
             )
         },
         dismissButton = { CancelButton(onClick = onDismiss) },

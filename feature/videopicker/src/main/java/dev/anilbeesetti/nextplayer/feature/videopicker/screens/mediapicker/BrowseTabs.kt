@@ -5,8 +5,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -14,12 +12,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import dev.anilbeesetti.nextplayer.feature.videopicker.aliyun.AliyunBrowserTabContent
 import dev.anilbeesetti.nextplayer.feature.videopicker.cloud189.C189BrowserTabContent
 import dev.anilbeesetti.nextplayer.feature.videopicker.openlist.OpenListBrowserTabContent
@@ -44,6 +40,7 @@ internal val providers = listOf(
     BrowseProvider("pan123", "123云盘", "123云盘文件浏览", UiR.drawable.ic_provider_pan123),
     BrowseProvider("quark", "夸克网盘", "夸克网盘文件浏览", UiR.drawable.ic_provider_quark),
     BrowseProvider("cloud189", "天翼云盘", "天翼云盘文件浏览", UiR.drawable.ic_provider_cloud189),
+    BrowseProvider("uc", "UC网盘", "UC网盘文件浏览", UiR.drawable.ic_provider_uc),
 )
 
 /**
@@ -65,14 +62,13 @@ fun BrowseTabs(
     }
 
     if (selectedProvider == null) {
-        // 平台选择列表
-        val containerShape = RoundedCornerShape(16.dp)
-        Surface(
+        // 平台选择列表 — 所有 provider 在同一个白色圆角卡片内
+        Card(
             modifier = modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            shape = containerShape,
-            color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         ) {
             Column {
                 providers.forEachIndexed { index, provider ->
@@ -80,7 +76,7 @@ fun BrowseTabs(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onProviderSelected(provider.id) }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Image(
@@ -111,7 +107,7 @@ fun BrowseTabs(
                     }
                     if (index < providers.lastIndex) {
                         HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                             color = MaterialTheme.colorScheme.outlineVariant,
                             thickness = 0.5.dp,
                         )
@@ -141,6 +137,12 @@ fun BrowseTabs(
                     onLogoutReady = onProviderLogoutChanged,
                 )
                 "quark" -> QuarkBrowserTabContent(
+                    onPlayVideo = onPlayVideo,
+                    onPlayVideos = onPlayVideos,
+                    onLogoutReady = onProviderLogoutChanged,
+                )
+                "uc" -> QuarkBrowserTabContent(
+                    driveType = "uc",
                     onPlayVideo = onPlayVideo,
                     onPlayVideos = onPlayVideos,
                     onLogoutReady = onProviderLogoutChanged,

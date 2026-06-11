@@ -325,4 +325,14 @@
     <string name="thumbnail_setting_change_confirmation">Changing this setting will clear the thumbnail cache. Thumbnails will be generated again when media list is opened. Continue?</string>
     <string name="material_you_controls">Material You controls</string>
     <string name="material_you_controls_description">Use material you style controls</string>
+    <string name="playback_cache">Playback cache</string>
+    <string name="playback_cache_description">Cache network videos locally for instant replay</string>
+    <string name="cache_size">Cache size</string>
+    <string name="clear_cache">Clear cache</string>
+    <string name="clear_cache_description">Currently using %1$s</string>
+    <string name="clear_cache_confirmation">Are you sure you want to clear the playback cache?</string>
+    <string name="confirm">Confirm</string>
+    <string name="logout">Logout</string>
+    <string name="logout_confirmation_title">Logout</string>
+    <string name="logout_confirmation_message">Are you sure you want to log out?</string>
 </resources>

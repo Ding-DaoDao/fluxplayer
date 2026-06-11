@@ -16,6 +16,9 @@ abstract class BaseCloudApiClient(
     protected suspend fun executeRequest(request: Request): String {
         return withContext(Dispatchers.IO) {
             val resp = client.newCall(request).execute()
+            if (!resp.isSuccessful) {
+                throw IllegalStateException("HTTP ${resp.code} from ${request.url}")
+            }
             resp.body?.string() ?: throw IllegalStateException("Empty response from ${request.url}")
         }
     }

@@ -66,4 +66,20 @@ class LocalWebDavRepository @Inject constructor(
     ): Result<Boolean> {
         return webDavClient.testConnection(baseUrl, username, password)
     }
+
+    override suspend fun createFolder(baseUrl: String, path: String, authHeader: String): Result<Unit> {
+        return webDavClient.createFolder(baseUrl, path, authHeader)
+    }
+
+    override suspend fun delete(baseUrl: String, path: String, authHeader: String): Result<Unit> {
+        return webDavClient.delete(baseUrl, path, authHeader)
+    }
+
+    override suspend fun move(baseUrl: String, sourcePath: String, destinationPath: String, authHeader: String): Result<Unit> {
+        return webDavClient.move(baseUrl, sourcePath, destinationPath, authHeader)
+    }
+
+    override suspend fun copy(baseUrl: String, sourcePath: String, destinationPath: String, authHeader: String): Result<Unit> {
+        return webDavClient.copy(baseUrl, sourcePath, destinationPath, authHeader)
+    }
 }

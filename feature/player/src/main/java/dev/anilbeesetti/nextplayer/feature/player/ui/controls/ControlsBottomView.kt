@@ -3,6 +3,7 @@ package dev.anilbeesetti.nextplayer.feature.player.ui.controls
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -49,6 +51,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.LayoutDirection
@@ -65,6 +68,7 @@ import dev.anilbeesetti.nextplayer.feature.player.buttons.ShuffleButton
 import dev.anilbeesetti.nextplayer.feature.player.extensions.drawableRes
 import dev.anilbeesetti.nextplayer.feature.player.extensions.noRippleClickable
 import dev.anilbeesetti.nextplayer.feature.player.state.MediaPresentationState
+import dev.anilbeesetti.nextplayer.feature.player.state.bufferedFraction
 import dev.anilbeesetti.nextplayer.feature.player.state.durationFormatted
 import dev.anilbeesetti.nextplayer.feature.player.state.pendingPositionFormatted
 import dev.anilbeesetti.nextplayer.feature.player.state.positionFormatted
@@ -81,9 +85,9 @@ fun ControlsBottomView(
     isPipSupported: Boolean,
     onVideoContentScaleClick: () -> Unit,
     onVideoContentScaleLongClick: () -> Unit,
-    onLockControlsClick: () -> Unit,
+    onLockControlsClick: () -> Unit = {},
     onPictureInPictureClick: () -> Unit,
-    onRotateClick: () -> Unit,
+    onRotateClick: () -> Unit = {},
     onPlaybackSpeedClick: () -> Unit = {},
     onPlaylistClick: () -> Unit = {},
     onSeek: (Long) -> Unit,
@@ -91,6 +95,12 @@ fun ControlsBottomView(
     qualityOptions: List<QualityOption> = emptyList(),
     currentQualityLabel: String = "",
     onQualitySelected: (QualityOption) -> Unit = {},
+    introLabel: String = "",
+    onIntroClick: (() -> Unit)? = null,
+    onIntroLongClick: (() -> Unit)? = null,
+    outroLabel: String = "",
+    onOutroClick: (() -> Unit)? = null,
+    onOutroLongClick: (() -> Unit)? = null,
 ) {
     val systemBarsPadding = WindowInsets.systemBars.union(WindowInsets.displayCutout).asPaddingValues()
     Column(
@@ -132,22 +142,11 @@ fun ControlsBottomView(
                     color = Color.White,
                 )
             }
-
-            Spacer(modifier = Modifier.weight(1f))
-            PlayerButton(
-                modifier = modifier.size(30.dp),
-                onClick = onRotateClick,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_screen_rotation),
-                    contentDescription = null,
-                    modifier = Modifier.size(12.dp),
-                )
-            }
         }
         PlayerSeekbar(
             position = mediaPresentationState.position.toFloat(),
             duration = mediaPresentationState.duration.toFloat(),
+            bufferedFraction = mediaPresentationState.bufferedFraction,
             onSeek = { onSeek(it.toLong()) },
             onSeekFinished = { onSeekEnd() },
         )
@@ -156,12 +155,6 @@ fun ControlsBottomView(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp, alignment = Alignment.Start),
         ) {
-            PlayerButton(onClick = onLockControlsClick) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_lock_open),
-                    contentDescription = null,
-                )
-            }
             PlayerButton(
                 onClick = onVideoContentScaleClick,
                 onLongClick = onVideoContentScaleLongClick,
@@ -186,6 +179,20 @@ fun ControlsBottomView(
                 )
             }
             LoopButton(player = player)
+            if (introLabel.isNotEmpty()) {
+                IntroOutroButton(
+                    label = introLabel,
+                    onClick = onIntroClick,
+                    onLongClick = onIntroLongClick,
+                )
+            }
+            if (outroLabel.isNotEmpty()) {
+                IntroOutroButton(
+                    label = outroLabel,
+                    onClick = onOutroClick,
+                    onLongClick = onOutroLongClick,
+                )
+            }
             Spacer(modifier = Modifier.weight(1f))
             // 清晰度按钮：只有多个可选清晰度时才显示可点击的 DropdownMenu
             if (currentQualityLabel.isNotEmpty()) {
@@ -195,7 +202,7 @@ fun ControlsBottomView(
                         PlayerButton(onClick = { showQualityMenu = true }) {
                             Text(
                                 text = currentQualityLabel,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = Color.White,
                             )
                         }
@@ -229,7 +236,7 @@ fun ControlsBottomView(
                     ) {
                         Text(
                             text = currentQualityLabel,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = Color.White,
                         )
                     }
@@ -251,6 +258,7 @@ private fun PlayerSeekbar(
     modifier: Modifier = Modifier,
     position: Float,
     duration: Float,
+    bufferedFraction: Float = 0f,
     onSeek: (Float) -> Unit,
     onSeekFinished: () -> Unit,
 ) {
@@ -260,6 +268,7 @@ private fun PlayerSeekbar(
                 modifier = modifier.fillMaxWidth(),
                 value = position,
                 valueRange = 0f..duration,
+                bufferedFraction = bufferedFraction,
                 onValueChange = onSeek,
                 onValueChangeFinished = onSeekFinished,
             )
@@ -268,6 +277,7 @@ private fun PlayerSeekbar(
                 modifier = modifier.fillMaxWidth(),
                 value = position,
                 valueRange = 0f..duration,
+                bufferedFraction = bufferedFraction,
                 onValueChange = onSeek,
                 onValueChangeFinished = onSeekFinished,
             )
@@ -281,13 +291,14 @@ private fun MaterialYouSlider(
     modifier: Modifier = Modifier,
     value: Float,
     valueRange: ClosedFloatingPointRange<Float>,
+    bufferedFraction: Float = 0f,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
     val interactionSource = remember { MutableInteractionSource() }
-    val trackHeight = 8.dp
-    val thumbWidth = 4.dp
+    val trackHeight = 16.dp
+    val thumbWidth = 5.dp
     val trackThumbGapWidth = 12.dp
 
     Slider(
@@ -296,9 +307,10 @@ private fun MaterialYouSlider(
         onValueChange = onValueChange,
         onValueChangeFinished = onValueChangeFinished,
         interactionSource = interactionSource,
-        modifier = modifier.size(24.dp),
+        modifier = modifier.size(36.dp),
         track = { sliderState ->
             val disabledAlpha = 0.4f
+            val bufferedAlpha = 0.25f
 
             Canvas(
                 modifier = Modifier
@@ -310,6 +322,7 @@ private fun MaterialYouSlider(
                 val range = (max - min).takeIf { it > 0f } ?: 1f
                 val playedFraction = ((sliderState.value - min) / range).coerceIn(0f, 1f)
                 val playedPixels = size.width * playedFraction
+                val bufferedPixels = (size.width * bufferedFraction).coerceIn(0f, size.width)
 
                 val endCornerRadius = size.height / 2f
                 val insideCornerRadius = 2.dp.toPx()
@@ -317,29 +330,39 @@ private fun MaterialYouSlider(
                 val leftEnd = (playedPixels - gapHalf).coerceIn(0f, size.width)
                 val rightStart = (playedPixels + gapHalf).coerceIn(0f, size.width)
 
-                // Inactive track left side
-                if (leftEnd > 0f) {
+                // Layer 1: Full-width inactive background
+                drawRoundedRect(
+                    offset = Offset(0f, 0f),
+                    size = Size(size.width, size.height),
+                    color = primaryColor.copy(alpha = disabledAlpha),
+                    startCornerRadius = endCornerRadius,
+                    endCornerRadius = endCornerRadius,
+                )
+
+                // Layer 2: Buffered track (from 0 to bufferedPixels, but not past thumb gap)
+                val bufferedEnd = bufferedPixels.coerceAtMost(rightStart)
+                if (bufferedEnd > 0f) {
                     drawRoundedRect(
                         offset = Offset(0f, 0f),
-                        size = Size(leftEnd, size.height),
-                        color = primaryColor.copy(alpha = disabledAlpha),
+                        size = Size(bufferedEnd, size.height),
+                        color = primaryColor.copy(alpha = disabledAlpha + bufferedAlpha),
                         startCornerRadius = endCornerRadius,
-                        endCornerRadius = insideCornerRadius,
+                        endCornerRadius = if (bufferedEnd >= rightStart) insideCornerRadius else endCornerRadius,
                     )
                 }
-
-                // Inactive track right side
-                if (rightStart < size.width) {
+                // Buffered track on right side of thumb gap
+                if (bufferedPixels > rightStart) {
+                    val bufferedRightEnd = bufferedPixels.coerceAtMost(size.width)
                     drawRoundedRect(
                         offset = Offset(rightStart, 0f),
-                        size = Size(size.width - rightStart, size.height),
-                        color = primaryColor.copy(alpha = disabledAlpha),
+                        size = Size(bufferedRightEnd - rightStart, size.height),
+                        color = primaryColor.copy(alpha = disabledAlpha + bufferedAlpha),
                         startCornerRadius = insideCornerRadius,
-                        endCornerRadius = endCornerRadius,
+                        endCornerRadius = if (bufferedRightEnd >= size.width) endCornerRadius else insideCornerRadius,
                     )
                 }
 
-                // Active track
+                // Layer 3: Active played track
                 if (leftEnd > 0f) {
                     drawRoundedRect(
                         offset = Offset(0f, 0f),
@@ -355,7 +378,7 @@ private fun MaterialYouSlider(
             Box(
                 modifier = Modifier
                     .width(thumbWidth)
-                    .height(20.dp)
+                    .height(28.dp)
                     .background(primaryColor, CircleShape),
             )
         },
@@ -392,6 +415,7 @@ private fun SimpleSlider(
     modifier: Modifier = Modifier,
     value: Float,
     valueRange: ClosedFloatingPointRange<Float>,
+    bufferedFraction: Float = 0f,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit
 ) {
@@ -400,10 +424,10 @@ private fun SimpleSlider(
         valueRange = valueRange,
         onValueChange = onValueChange,
         onValueChangeFinished = onValueChangeFinished,
-        modifier = modifier.height(20.dp),
+        modifier = modifier.height(44.dp),
         thumb = {
             Box(
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(22.dp)
                     .shadow(4.dp, CircleShape)
                     .background(Color.White)
             )
@@ -412,19 +436,57 @@ private fun SimpleSlider(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(MaterialTheme.shapes.extraSmall)
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(6.dp))
                     .background(Color.White.copy(0.5f))
             ) {
                 if (valueRange.endInclusive > 0f) {
+                    val fraction = (value / valueRange.endInclusive).coerceIn(0f, 1f)
+                    // Buffered layer
+                    if (bufferedFraction > fraction) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(bufferedFraction)
+                                .height(12.dp)
+                                .background(Color.White.copy(0.25f))
+                        )
+                    }
+                    // Played layer
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(value / valueRange.endInclusive)
-                            .height(4.dp)
+                            .fillMaxWidth(fraction)
+                            .height(12.dp)
+                            .clip(RoundedCornerShape(6.dp))
                             .background(MaterialTheme.colorScheme.primary)
                     )
                 }
             }
         }
     )
+}
+
+@Composable
+private fun IntroOutroButton(
+    label: String,
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
+) {
+    Box(
+        modifier = Modifier
+            .defaultMinSize(minHeight = 48.dp)
+            .pointerInput(onClick, onLongClick) {
+                detectTapGestures(
+                    onTap = { onClick?.invoke() },
+                    onLongPress = { onLongClick?.invoke() },
+                )
+            }
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = Color.White,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
 }

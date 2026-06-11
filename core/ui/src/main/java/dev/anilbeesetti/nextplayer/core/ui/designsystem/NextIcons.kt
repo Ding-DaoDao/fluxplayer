@@ -66,6 +66,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SmartButton
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.Subtitles
@@ -133,6 +134,7 @@ object NextIcons {
     val Size = Icons.AutoMirrored.Rounded.CompareArrows
     val Sensitivity = Icons.Rounded.Tune
     val Speed = Icons.Rounded.Speed
+    val Storage = Icons.Rounded.Storage
     val SwipeHorizontal = Icons.Rounded.Swipe
     val SwipeVertical = Icons.Rounded.SwipeVertical
     val Tap = Icons.Rounded.TouchApp

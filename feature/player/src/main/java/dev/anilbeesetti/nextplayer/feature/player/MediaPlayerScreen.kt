@@ -34,11 +34,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -103,9 +105,15 @@ import java.io.File
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import android.util.Log
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlin.time.DurationUnit
 
 val LocalControlsVisibilityState = compositionLocalOf<ControlsVisibilityState?> { null }
+
+private const val INTRO_OUTRO_KEY = "current_session"
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -182,32 +190,97 @@ fun MediaPlayerScreen(
 
     // 清晰度选项和标签
     var qualityOptions by remember { mutableStateOf<List<QualityOption>>(emptyList()) }
+    var videoResolution by remember { mutableStateOf(Pair(0, 0)) }
+    var selectedQualityLabel by remember { mutableStateOf<String?>(null) }
+    var isSwitchingQuality by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     // 从 VideoQualityCache 预加载清晰度选项（云盘视频）
     LaunchedEffect(player.currentMediaItem?.mediaId) {
         try {
             val uri = player.currentMediaItem?.localConfiguration?.uri ?: return@LaunchedEffect
             val uriStr = uri.toString()
-            // pan123 云盘视频 URL 格式: ...#pan123Play=true#
-            if (uriStr.contains("#pan123Play=true#")) {
-                val videoQualityCache = dev.anilbeesetti.nextplayer.core.common.VideoQualityCache(context)
-                // 提取实际播放 URL（去掉 fragment）
-                val playUrl = uriStr.substringBefore("#")
-                val cachedOptions = videoQualityCache.getQualityOptionsByUrl("pan123", playUrl)
-                if (cachedOptions != null) {
-                    qualityOptions = cachedOptions.map { opt ->
-                        QualityOption(label = opt.label, uri = android.net.Uri.parse(opt.url))
-                    }
+            val playUrl = uriStr.substringBefore("#")
+            val videoQualityCache = dev.anilbeesetti.nextplayer.core.common.VideoQualityCache(context.applicationContext)
+            var cachedOptions = when {
+                uriStr.contains("#pan123Play=true#") ->
+                    videoQualityCache.getQualityOptionsByUrl("pan123", playUrl)
+                uriStr.contains("#ucPlay=true#") ->
+                    videoQualityCache.getQualityOptionsByUrl("uc", playUrl)
+                uriStr.contains("#quarkPlay=true#") ->
+                    videoQualityCache.getQualityOptionsByUrl("quark", playUrl)
+                uriStr.contains("#alipanPlay=true#") ->
+                    videoQualityCache.getQualityOptionsByUrl("alipan", playUrl)
+                else -> null
+            }
+            // 反向索引查找失败时，直接扫描 SharedPreferences 匹配 URL
+            if (cachedOptions == null) {
+                val provider = when {
+                    uriStr.contains("#pan123Play=true#") -> "pan123"
+                    uriStr.contains("#ucPlay=true#") -> "uc"
+                    uriStr.contains("#quarkPlay=true#") -> "quark"
+                    uriStr.contains("#alipanPlay=true#") -> "alipan"
+                    else -> null
+                }
+                if (provider != null) {
+                    val prefs = context.applicationContext.getSharedPreferences("video_quality_cache", android.content.Context.MODE_PRIVATE)
+                    cachedOptions = prefs.all.entries
+                        .filter { it.key.startsWith("${provider}_") && !it.key.startsWith("url_index_") }
+                        .firstNotNullOfOrNull { (_, value) ->
+                            try {
+                                val json = org.json.JSONObject(value as String)
+                                val arr = json.getJSONArray("options")
+                                val found = (0 until arr.length()).any { i ->
+                                    arr.getJSONObject(i).getString("url") == playUrl
+                                }
+                                if (found) {
+                                    (0 until arr.length()).map { i ->
+                                        val opt = arr.getJSONObject(i)
+                                        dev.anilbeesetti.nextplayer.core.common.VideoQualityCache.QualityOption(
+                                            label = opt.getString("label"),
+                                            url = opt.getString("url")
+                                        )
+                                    }
+                                } else null
+                            } catch (_: Exception) { null }
+                        }
+                }
+            }
+            if (cachedOptions != null) {
+                qualityOptions = cachedOptions.map { opt ->
+                    QualityOption(label = opt.label, uri = android.net.Uri.parse(opt.url))
                 }
             }
         } catch (_: Exception) {}
     }
 
-    // 当前清晰度标签：有 qualityOptions 时取第一个的 label，否则根据视频分辨率计算
-    val currentQualityLabel: String = qualityOptions.firstOrNull()?.label
-        ?: if (player.videoSize.width > 0 && player.videoSize.height > 0) {
-            formatResolution(player.videoSize.width, player.videoSize.height)
+    // 监听视频尺寸变化，确保分辨率信息实时更新
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                videoResolution = Pair(videoSize.width, videoSize.height)
+            }
+        }
+        // 同步当前已解码的视频尺寸
+        val initialSize = player.videoSize
+        if (initialSize.width > 0 && initialSize.height > 0) {
+            videoResolution = Pair(initialSize.width, initialSize.height)
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
+    // 当前清晰度标签：优先 qualityOptions，其次分辨率兜底
+    val currentQualityLabel: String = selectedQualityLabel
+        ?: qualityOptions.firstOrNull()?.label
+        ?: if (videoResolution.first > 0 && videoResolution.second > 0) {
+            formatResolution(videoResolution.first, videoResolution.second)
         } else ""
+
+    // 顶部像素分辨率行：格式 "1920x1080"
+    val videoInfoLine = if (videoResolution.first > 0 && videoResolution.second > 0) {
+        "${videoResolution.first}x${videoResolution.second}"
+    } else ""
 
     // DanmakuController 引用
     var danmakuController by remember { mutableStateOf<DanmakuController?>(null) }
@@ -233,6 +306,48 @@ fun MediaPlayerScreen(
     LaunchedEffect(brightnessState.currentBrightness) {
         if (playerPreferences.rememberPlayerBrightness) {
             viewModel.updatePlayerBrightness(brightnessState.currentBrightness)
+        }
+    }
+
+    // 剧集切换时自动 seek 到片头（使用 Player.Listener 直接监听，不依赖 Compose State）
+    var isFirstItem by remember { mutableStateOf(true) }
+    var skipNextTransitionSeek by remember { mutableStateOf(false) }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                if (skipNextTransitionSeek) {
+                    skipNextTransitionSeek = false
+                    return
+                }
+                if (isFirstItem) {
+                    isFirstItem = false
+                    return
+                }
+                val ts = introOutroState.getTimestamps(INTRO_OUTRO_KEY)
+                if (ts.introMs > 0) {
+                    player.seekTo(ts.introMs)
+                }
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
+    // 播放过程中检测是否到达片尾，自动跳过（保留设置跨剧集生效）
+    var lastSkippedOutroIndex by remember { mutableStateOf(-1) }
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            delay(500)
+            val ts = introOutroState.getTimestamps(INTRO_OUTRO_KEY)
+            val currentIndex = player.currentMediaItemIndex
+            if (ts.outroMs > 0 && currentIndex != lastSkippedOutroIndex
+                && player.isPlaying && player.currentPosition >= ts.outroMs
+            ) {
+                lastSkippedOutroIndex = currentIndex
+                if (player.hasNextMediaItem()) {
+                    player.seekToNextMediaItem()
+                }
+            }
         }
     }
 
@@ -336,19 +451,23 @@ fun MediaPlayerScreen(
                 }
 
                 if (controlsVisibilityState.controlsVisible && controlsVisibilityState.controlsLocked) {
-                    Column(
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .safeDrawingPadding()
-                            .padding(top = 24.dp),
+                            .safeDrawingPadding(),
+                        contentAlignment = Alignment.CenterStart,
                     ) {
                         PlayerButton(
+                            modifier = Modifier
+                                .padding(start = 20.dp)
+                                .size(48.dp),
                             containerColor = Color.Black.copy(0.5f),
-                            onClick = { controlsVisibilityState.unlockControls() }
+                            onClick = { controlsVisibilityState.unlockControls() },
                         ) {
                             Icon(
                                 painter = painterResource(coreUiR.drawable.ic_lock),
                                 contentDescription = stringResource(coreUiR.string.controls_unlock),
+                                modifier = Modifier.size(24.dp),
                             )
                         }
                     }
@@ -362,6 +481,7 @@ fun MediaPlayerScreen(
                             ) {
                                 ControlsTopView(
                                     title = metadataState.title ?: "",
+                                    videoInfoLine = videoInfoLine,
                                     danmakuEnabled = danmakuEnabled,
                                     danmakuHasData = danmakuList != null && danmakuForCurrentEpisode,
                                     onAudioClick = {
@@ -399,7 +519,42 @@ fun MediaPlayerScreen(
                                 seekGestureState.seekAmount != null -> InfoView(info = "${seekGestureState.seekAmountFormatted}\n[${seekGestureState.seekToPositionFormated}]")
                                 videoZoomAndContentScaleState.isZooming -> InfoView(info = "${(videoZoomAndContentScaleState.zoom * 100).toInt()}%")
                                 videoZoomAndContentScaleState.showContentScaleIndicator -> InfoView(info = stringResource(videoZoomAndContentScaleState.videoContentScale.nameRes()))
-                                controlsVisibilityState.controlsVisible -> ControlsMiddleView(player = player)
+                                controlsVisibilityState.controlsVisible -> {
+                                    ControlsMiddleView(player = player)
+                                    // 锁按钮 - 屏幕中间左侧
+                                    PlayerButton(
+                                        modifier = Modifier
+                                            .align(Alignment.CenterStart)
+                                            .padding(start = 20.dp)
+                                            .size(48.dp),
+                                        containerColor = Color.Black.copy(0.5f),
+                                        onClick = {
+                                            controlsVisibilityState.showControls()
+                                            controlsVisibilityState.lockControls()
+                                        },
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(coreUiR.drawable.ic_lock_open),
+                                            contentDescription = stringResource(coreUiR.string.controls_lock),
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                    }
+                                    // 旋转按钮 - 屏幕中间右侧
+                                    PlayerButton(
+                                        modifier = Modifier
+                                            .align(Alignment.CenterEnd)
+                                            .padding(end = 20.dp)
+                                            .size(48.dp),
+                                        containerColor = Color.Black.copy(0.5f),
+                                        onClick = rotationState::rotate,
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(coreUiR.drawable.ic_screen_rotation),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                    }
+                                }
                                 else -> Unit
                             }
                         },
@@ -409,6 +564,12 @@ fun MediaPlayerScreen(
                                 enter = fadeIn(),
                                 exit = fadeOut(),
                             ) {
+                                val timestamps = introOutroState.getTimestamps(INTRO_OUTRO_KEY)
+                                val introLabel = if (timestamps.introMs < 0) "片头"
+                                    else "片头 ${timestamps.introMs.milliseconds.formatted()}"
+                                val outroLabel = if (timestamps.outroMs < 0) "片尾"
+                                    else "片尾 ${timestamps.outroMs.milliseconds.formatted()}"
+
                                 Column {
                                     ControlsBottomView(
                                         player = player,
@@ -429,11 +590,6 @@ fun MediaPlayerScreen(
                                             controlsVisibilityState.hideControls()
                                             overlayView = OverlayView.PLAYLIST
                                         },
-                                        onRotateClick = rotationState::rotate,
-                                        onLockControlsClick = {
-                                            controlsVisibilityState.showControls()
-                                            controlsVisibilityState.lockControls()
-                                        },
                                         onVideoContentScaleClick = {
                                             controlsVisibilityState.showControls()
                                             videoZoomAndContentScaleState.switchToNextVideoContentScale()
@@ -453,8 +609,67 @@ fun MediaPlayerScreen(
                                         qualityOptions = qualityOptions,
                                         currentQualityLabel = currentQualityLabel,
                                         onQualitySelected = { option ->
-                                            viewModel.onQualitySelected(option)
+                                            val currentItem = player.currentMediaItem ?: return@ControlsBottomView
+                                            val currentIndex = player.currentMediaItemIndex
+                                            val currentPosition = player.currentPosition
+                                            val playWhenReady = player.playWhenReady
+                                            val previousLabel = selectedQualityLabel
+                                            isSwitchingQuality = true
+                                            errorState.dismiss()
+                                            selectedQualityLabel = option.label
+                                            skipNextTransitionSeek = true
+                                            val originalFragment = currentItem.localConfiguration?.uri?.fragment
+                                            val newUri = if (!originalFragment.isNullOrEmpty()) {
+                                                android.net.Uri.parse("${option.uri}#${originalFragment}")
+                                            } else {
+                                                option.uri
+                                            }
+                                            Log.d("FluxQuality", "=== 切换清晰度 ===")
+                                            Log.d("FluxQuality", "原始 URL: ${currentItem.localConfiguration?.uri}")
+                                            Log.d("FluxQuality", "原始 fragment: $originalFragment")
+                                            Log.d("FluxQuality", "选择清晰度: ${option.label}")
+                                            Log.d("FluxQuality", "质量 URL: ${option.uri}")
+                                            Log.d("FluxQuality", "新 URL: $newUri")
+                                            Log.d("FluxQuality", "播放位置: $currentPosition, playWhenReady: $playWhenReady")
+                                            val newMediaItem = currentItem.buildUpon()
+                                                .setUri(newUri)
+                                                .build()
+                                            val totalItems = player.mediaItemCount
+                                            val mediaItems = if (totalItems > 1) {
+                                                (0 until totalItems).map { i ->
+                                                    if (i == currentIndex) newMediaItem else player.getMediaItemAt(i)
+                                                }
+                                            } else {
+                                                listOf(newMediaItem)
+                                            }
+                                            player.setMediaItems(mediaItems, currentIndex, currentPosition)
+                                            player.playWhenReady = playWhenReady
+                                            // 切换失败时静默回退到原清晰度
+                                            coroutineScope.launch {
+                                                delay(5000)
+                                                val error = player.playerError
+                                                Log.d("FluxQuality", "5s 后检查: playerError=$error")
+                                                if (error != null) {
+                                                    Log.e("FluxQuality", "切换失败，回退到 $previousLabel, error=${error.message}")
+                                                    selectedQualityLabel = previousLabel
+                                                    val revertItems = (0 until player.mediaItemCount).map { i ->
+                                                        if (i == currentIndex) currentItem else player.getMediaItemAt(i)
+                                                    }
+                                                    player.setMediaItems(revertItems, currentIndex, currentPosition)
+                                                    player.playWhenReady = true
+                                                } else {
+                                                    Log.d("FluxQuality", "切换成功")
+                                                }
+                                                isSwitchingQuality = false
+                                                errorState.dismiss()
+                                            }
                                         },
+                                        introLabel = introLabel,
+                                        onIntroClick = { introOutroState.setIntro(INTRO_OUTRO_KEY, player.currentPosition) },
+                                        onIntroLongClick = { introOutroState.setIntro(INTRO_OUTRO_KEY, -1L) },
+                                        outroLabel = outroLabel,
+                                        onOutroClick = { introOutroState.setOutro(INTRO_OUTRO_KEY, player.currentPosition) },
+                                        onOutroLongClick = { introOutroState.setOutro(INTRO_OUTRO_KEY, -1L) },
                                     )
                                 }
                             }
@@ -538,6 +753,8 @@ fun MediaPlayerScreen(
     }
 
     errorState.error?.let { error ->
+        // 正在切换清晰度时不弹出错误对话框，由 LaunchedEffect 静默回退
+        if (isSwitchingQuality) return@let
         // 自动重试一次
         if (!hasAutoRetried) {
             LaunchedEffect(error) {
@@ -644,55 +861,6 @@ fun PlayerControlsView(
 }
 
 /**
- * 片头片尾设置行。
- * 点击设置当前位置为片头/片尾，长按清除。
- */
-@Composable
-private fun IntroOutroRow(
-    introOutroState: IntroOutroState,
-    player: Player,
-    mediaPresentationState: MediaPresentationState,
-) {
-    val dirKey = getDirectoryKey(player)
-    if (dirKey == null) return
-    val timestamps = introOutroState.getTimestamps(dirKey)
-
-    // 片头
-    val introLabel = if (timestamps.introMs < 0) {
-        "片头"
-    } else {
-        "片头 ${timestamps.introMs.milliseconds.formatted()}"
-    }
-    Text(
-        text = introLabel,
-        color = Color.White,
-        style = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier
-            .noRippleClickable {
-                // 长按清除
-            }
-            .padding(horizontal = 8.dp, vertical = 12.dp),
-    )
-
-    // 片尾
-    val outroLabel = if (timestamps.outroMs < 0) {
-        "片尾"
-    } else {
-        "片尾 ${timestamps.outroMs.milliseconds.formatted()}"
-    }
-    Text(
-        text = outroLabel,
-        color = Color.White,
-        style = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier
-            .noRippleClickable {
-                // 长按清除
-            }
-            .padding(horizontal = 8.dp, vertical = 12.dp),
-    )
-}
-
-/**
  * 格式化视频分辨率显示。
  */
 private fun formatResolution(width: Int, height: Int): String {
@@ -707,17 +875,4 @@ private fun formatResolution(width: Int, height: Int): String {
     }
 }
 
-/**
- * 获取当前播放文件的目录作为片头片尾存储 key。
- */
-private fun getDirectoryKey(player: Player): String? {
-    // 尝试从媒体描述获取文件路径
-    val mediaMetadata = player.currentMediaItem?.mediaMetadata
-    val filePath = mediaMetadata?.description?.toString()
-    if (filePath != null) {
-        val parent = File(filePath).parent
-        if (parent != null) return parent
-    }
-    // 回退到 mediaId
-    return player.currentMediaItem?.mediaId
-}
+

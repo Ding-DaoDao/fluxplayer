@@ -5,7 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.anilbeesetti.nextplayer.core.common.extensions.round
+import dev.anilbeesetti.nextplayer.core.data.cache.PlaybackCacheManager
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
+import dev.anilbeesetti.nextplayer.core.model.CacheMaxSize
 import dev.anilbeesetti.nextplayer.core.model.ControlButtonsPosition
 import dev.anilbeesetti.nextplayer.core.model.DanmakuSource
 import dev.anilbeesetti.nextplayer.core.model.PlayerPreferences
@@ -20,11 +22,13 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class PlayerPreferencesViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
+    private val playbackCacheManager: PlaybackCacheManager,
 ) : ViewModel() {
 
     private val uiStateInternal = MutableStateFlow(
         PlayerPreferencesUiState(
             preferences = preferencesRepository.playerPreferences.value,
+            cacheSizeBytes = playbackCacheManager.getCacheSize(),
         ),
     )
     val uiState = uiStateInternal.asStateFlow()
@@ -53,6 +57,9 @@ class PlayerPreferencesViewModel @Inject constructor(
             PlayerPreferencesUiEvent.ToggleUseMaterialYouControls -> toggleUseMaterialYouControls()
             is PlayerPreferencesUiEvent.UpdateDanmakuSources -> updateDanmakuSources(event.sources)
             is PlayerPreferencesUiEvent.UpdateLocalDanmakuPath -> updateLocalDanmakuPath(event.path)
+            PlayerPreferencesUiEvent.TogglePlaybackCacheEnabled -> togglePlaybackCacheEnabled()
+            is PlayerPreferencesUiEvent.UpdatePlaybackCacheMaxSize -> updatePlaybackCacheMaxSize(event.value)
+            PlayerPreferencesUiEvent.ClearPlaybackCache -> clearPlaybackCache()
         }
     }
 
@@ -167,12 +174,34 @@ class PlayerPreferencesViewModel @Inject constructor(
             }
         }
     }
+
+    private fun togglePlaybackCacheEnabled() {
+        viewModelScope.launch {
+            preferencesRepository.updatePlayerPreferences {
+                it.copy(playbackCacheEnabled = !it.playbackCacheEnabled)
+            }
+        }
+    }
+
+    private fun updatePlaybackCacheMaxSize(value: CacheMaxSize) {
+        viewModelScope.launch {
+            preferencesRepository.updatePlayerPreferences {
+                it.copy(playbackCacheMaxSize = value)
+            }
+        }
+    }
+
+    private fun clearPlaybackCache() {
+        playbackCacheManager.clearCache()
+        uiStateInternal.update { it.copy(cacheSizeBytes = 0) }
+    }
 }
 
 @Stable
 data class PlayerPreferencesUiState(
     val showDialog: PlayerPreferenceDialog? = null,
     val preferences: PlayerPreferences = PlayerPreferences(),
+    val cacheSizeBytes: Long = 0,
 )
 
 sealed interface PlayerPreferenceDialog {
@@ -181,6 +210,8 @@ sealed interface PlayerPreferenceDialog {
     data object ControlButtonsDialog : PlayerPreferenceDialog
     data object DanmakuSourceManagerDialog : PlayerPreferenceDialog
     data object LocalDanmakuPathDialog : PlayerPreferenceDialog
+    data object CacheMaxSizeDialog : PlayerPreferenceDialog
+    data object ClearCacheConfirmDialog : PlayerPreferenceDialog
 }
 
 sealed interface PlayerPreferencesUiEvent {
@@ -198,4 +229,7 @@ sealed interface PlayerPreferencesUiEvent {
     data object ToggleUseMaterialYouControls : PlayerPreferencesUiEvent
     data class UpdateDanmakuSources(val sources: List<DanmakuSource>) : PlayerPreferencesUiEvent
     data class UpdateLocalDanmakuPath(val path: String) : PlayerPreferencesUiEvent
+    data object TogglePlaybackCacheEnabled : PlayerPreferencesUiEvent
+    data class UpdatePlaybackCacheMaxSize(val value: CacheMaxSize) : PlayerPreferencesUiEvent
+    data object ClearPlaybackCache : PlayerPreferencesUiEvent
 }

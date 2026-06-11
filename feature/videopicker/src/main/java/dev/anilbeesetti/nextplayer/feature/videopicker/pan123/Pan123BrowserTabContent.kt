@@ -17,6 +17,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
 import kotlinx.coroutines.launch
 
 /**
@@ -41,6 +43,8 @@ fun Pan123BrowserTabContent(
     }
 
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
+    var renameIndex by remember { mutableStateOf(-1) }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -74,7 +78,7 @@ fun Pan123BrowserTabContent(
                     onMove = { onDismiss(); viewModel.startMove(index) },
                     onCopy = { onDismiss(); viewModel.startCopy(index) },
                     onDelete = { onDismiss(); viewModel.deleteItem(index) },
-                    onRename = { onDismiss() },
+                    onRename = { renameIndex = index; onDismiss() },
                     onDownload = { onDismiss(); viewModel.downloadFile(index) },
                 )
             }
@@ -90,8 +94,25 @@ fun Pan123BrowserTabContent(
                 onLogin = { passport, password -> viewModel.login(passport, password) },
                 onLoginWithToken = { token -> viewModel.loginWithToken(token) }
             )
-        }
+        },
+        onCreateFolder = { showCreateFolderDialog = true }
     )
+
+    val renameItem = state.items.getOrNull(renameIndex)
+    if (renameItem != null) {
+        RenameDialog(
+            name = renameItem.name,
+            onDismiss = { renameIndex = -1 },
+            onDone = { newName -> viewModel.renameItem(renameIndex, newName); renameIndex = -1 },
+        )
+    }
+
+    if (showCreateFolderDialog) {
+        CreateFolderDialog(
+            onDismiss = { showCreateFolderDialog = false },
+            onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
+        )
+    }
 }
 
 /**

@@ -18,6 +18,7 @@ class Pan123ApiClient(
         private const val TAG = "Pan123Api"
         private const val CONFIG_URL = "https://apigate.123795.com/getconfig-api/v1/getconfig?platform=android&version=313&channel=1003&env="
         private const val WEB_API_BASE = "https://api.123278.com/b/api"
+        private const val API_BASE = "https://api.123278.com/api"
 
         private val DEVICE_TYPES = listOf(
             "2312DRAABC", "2312DRAABI", "2312DRAABG", "2310RK86C", "2310RK86I",
@@ -331,20 +332,12 @@ class Pan123ApiClient(
         val urls = mutableListOf<String>()
         val names = mutableListOf<String>()
 
-        // 主播放 URL（原画）
+        // getVideoPlayInfo URL → 原画（默认播放用）
         val videoUrl = data.optString("url", "")
         if (videoUrl.isNotBlank()) {
             urls.add(videoUrl)
             names.add("原画")
             Log.d(TAG, "getVideoPlayInfo: added 原画 url=${videoUrl.take(100)}")
-        }
-
-        // 下载 URL 作为备选（原画2）
-        val dlUrl = item.downloadUrl
-        if (dlUrl.isNotBlank() && dlUrl != videoUrl) {
-            urls.add(dlUrl)
-            names.add("原画2")
-            Log.d(TAG, "getVideoPlayInfo: added 原画2")
         }
 
         // 转码清晰度列表
@@ -395,24 +388,35 @@ class Pan123ApiClient(
     suspend fun createFolder(name: String, parentFileId: String = "0"): Result<Boolean> = runCatching {
         Log.d(TAG, "createFolder: name=$name, parentFileId=$parentFileId")
         loadConfig().getOrThrow()
-        val endpoint = apiEndpoint("createFolder")
+        val endpoint = "$API_BASE/file/upload_request"
         val body = JSONObject().apply {
+            put("driveId", 0)
             put("parentFileId", parentFileId)
-            put("name", name)
+            put("duplicate", 1)
+            put("NotReuse", true)
+            put("etag", "")
+            put("fileName", name)
+            put("size", 0)
+            put("type", 1)
         }
-        apiPost(endpoint, body)
+        val json = apiPost(endpoint, body)
+        Log.d(TAG, "createFolder response: $json")
         true
     }
 
     suspend fun renameFile(fileId: String, newName: String): Result<Boolean> = runCatching {
         Log.d(TAG, "renameFile: fileId=$fileId, newName=$newName")
         loadConfig().getOrThrow()
-        val endpoint = apiEndpoint("renameFile")
+        val endpoint = "$WEB_API_BASE/file/rename"
         val body = JSONObject().apply {
-            put("fileId", fileId)
-            put("name", newName)
+            put("driveId", 0)
+            put("fileId", fileId.toIntOrNull() ?: fileId)
+            put("fileName", newName)
+            put("duplicate", 1)
+            put("RequestSource", JSONObject.NULL)
         }
-        apiPost(endpoint, body)
+        val json = apiPost(endpoint, body)
+        Log.d(TAG, "renameFile response: $json")
         true
     }
 
@@ -422,39 +426,26 @@ class Pan123ApiClient(
     ): Result<Boolean> = runCatching {
         Log.d(TAG, "deleteFile: fileId=$fileId, fileName=$fileName")
         loadConfig().getOrThrow()
-        val endpoint = apiEndpoint("deleteFile")
-        val body = JSONObject().apply {
-            put("fileId", fileId)
-            put("fileName", fileName)
-            put("etag", etag)
-            put("size", size)
-            put("s3keyFlag", s3keyFlag)
-        }
-        apiPost(endpoint, body)
-        true
+        trashFile(listOf(fileId)).getOrThrow()
     }
 
     suspend fun deleteFolder(fileId: String, newName: String): Result<Boolean> = runCatching {
         Log.d(TAG, "deleteFolder: fileId=$fileId")
         loadConfig().getOrThrow()
-        val endpoint = apiEndpoint("deleteFolder")
-        val body = JSONObject().apply {
-            put("fileId", fileId)
-            put("name", newName)
-        }
-        apiPost(endpoint, body)
-        true
+        trashFile(listOf(fileId)).getOrThrow()
     }
 
     suspend fun moveFile(fileId: String, parentFileId: String): Result<Boolean> = runCatching {
         Log.d(TAG, "moveFile: fileId=$fileId -> parentFileId=$parentFileId")
         loadConfig().getOrThrow()
-        val endpoint = apiEndpoint("moveFile")
+        val endpoint = "$API_BASE/file/mod_pid"
+        val fileInfo = JSONObject().apply { put("FileId", fileId) }
         val body = JSONObject().apply {
-            put("fileId", fileId)
+            put("fileIdList", JSONArray(listOf(fileInfo)))
             put("parentFileId", parentFileId)
         }
-        apiPost(endpoint, body)
+        val json = apiPost(endpoint, body)
+        Log.d(TAG, "moveFile response: $json")
         true
     }
 
@@ -464,27 +455,46 @@ class Pan123ApiClient(
     ): Result<Boolean> = runCatching {
         Log.d(TAG, "copyFile: fileId=$fileId -> targetFileId=$targetFileId")
         loadConfig().getOrThrow()
-        val endpoint = apiEndpoint("copyFile")
-        val body = JSONObject().apply {
+        val endpoint = "$API_BASE/restful/goapi/v1/file/copy/async"
+        val fileInfo = JSONObject().apply {
             put("fileId", fileId)
-            put("targetFileId", targetFileId)
-            put("etag", etag)
             put("size", size)
-            put("s3keyFlag", s3keyFlag)
+            put("etag", etag)
+            put("type", 0)
+            put("parentFileId", 0)
+            put("fileName", "")
         }
-        apiPost(endpoint, body)
+        val body = JSONObject().apply {
+            put("fileList", JSONArray(listOf(fileInfo)))
+            put("targetFileId", targetFileId.toString())
+        }
+        val json = apiPost(endpoint, body)
+        Log.d(TAG, "copyFile response: $json")
         true
     }
 
-    /**
-     * 兼容旧接口：trashFile 通过 web API 实现
-     */
     suspend fun trashFile(fileIds: List<String>): Result<Boolean> = runCatching {
         Log.d(TAG, "trashFile: fileIds=$fileIds")
         loadConfig().getOrThrow()
-        val endpoint = apiEndpoint("trashFile")
-        val body = JSONObject().apply { put("fileIds", JSONArray(fileIds)) }
-        apiPost(endpoint, body)
+        val endpoint = "$API_BASE/file/trash"
+        val trashInfoList = JSONArray()
+        for (fid in fileIds) {
+            trashInfoList.put(JSONObject().apply {
+                put("FileId", fid)
+                put("FileName", "")
+                put("Size", 0)
+                put("Etag", "")
+                put("S3KeyFlag", 0)
+                put("Type", 0)
+            })
+        }
+        val body = JSONObject().apply {
+            put("driveId", 0)
+            put("fileTrashInfoList", trashInfoList)
+            put("operation", true)
+        }
+        val json = apiPost(endpoint, body)
+        Log.d(TAG, "trashFile response: $json")
         true
     }
 

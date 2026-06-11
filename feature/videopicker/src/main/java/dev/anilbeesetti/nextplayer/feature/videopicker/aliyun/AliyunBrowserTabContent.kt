@@ -7,10 +7,13 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -19,6 +22,8 @@ import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -46,6 +51,9 @@ fun AliyunBrowserTabContent(
     }
 
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
+    var renameIndex by remember { mutableStateOf(-1) }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var showDriveMenu by remember { mutableStateOf(false) }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -83,7 +91,7 @@ fun AliyunBrowserTabContent(
                     onMove = { onDismiss(); viewModel.startMove(index) },
                     onCopy = { onDismiss(); viewModel.startCopy(index) },
                     onDelete = { onDismiss(); viewModel.deleteItem(index) },
-                    onRename = { onDismiss() },
+                    onRename = { renameIndex = index; onDismiss() },
                     onDownload = { onDismiss(); viewModel.downloadFile(index) },
                 )
             }
@@ -92,14 +100,73 @@ fun AliyunBrowserTabContent(
         onRefresh = { viewModel.refresh() },
         onLoadMore = { viewModel.loadMore() },
         breadcrumbLabel = { it.label },
+        breadcrumbActions = {
+            if (state.driveOptions.size > 1) {
+                val currentName = state.driveOptions.find { it.driveId == state.currentDriveId }?.name
+                    ?: state.driveOptions.firstOrNull()?.name ?: "切换驱动"
+                Box {
+                    TextButton(onClick = { showDriveMenu = true }) {
+                        Text(
+                            text = currentName,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.ArrowDropDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showDriveMenu,
+                        onDismissRequest = { showDriveMenu = false },
+                    ) {
+                        state.driveOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = option.name,
+                                        fontWeight = if (option.driveId == state.currentDriveId)
+                                            FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                },
+                                onClick = {
+                                    showDriveMenu = false
+                                    if (option.driveId != state.currentDriveId) {
+                                        viewModel.switchDrive(option.driveId)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        },
         loginContent = {
             AliyunLoginScreen(
                 onLoginWithAuthorization = { auth -> viewModel.loginWithAuthorization(auth) },
                 onLoginWithTokenJson = { json -> viewModel.loginWithTokenJson(json) },
                 autoOpenWebView = state.reLoginRequired
             )
-        }
+        },
+        onCreateFolder = { showCreateFolderDialog = true }
     )
+
+    val renameItem = state.items.getOrNull(renameIndex)
+    if (renameItem != null) {
+        RenameDialog(
+            name = renameItem.name,
+            onDismiss = { renameIndex = -1 },
+            onDone = { newName -> viewModel.renameItem(renameIndex, newName); renameIndex = -1 },
+        )
+    }
+
+    if (showCreateFolderDialog) {
+        CreateFolderDialog(
+            onDismiss = { showCreateFolderDialog = false },
+            onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
+        )
+    }
 }
 
 /**
@@ -184,7 +251,12 @@ fun AliyunLoginScreen(
                                 "})()"
                             ) { result ->
                                 if (loginTriggered) return@evaluateJavascript
-                                val raw = result?.trim('"') ?: ""
+                                // evaluateJavascript 将返回值包装为 JSON 字符串，需正确解码
+                                val raw = try {
+                                    JSONObject("{ \"_v\": $result }").optString("_v", "")
+                                } catch (_: Exception) {
+                                    result?.trim('"') ?: ""
+                                }
                                 if (raw.isNotBlank() && raw != "null" && raw.length > 50) {
                                     try {
                                         val json = JSONObject(raw)
@@ -193,21 +265,13 @@ fun AliyunLoginScreen(
                                             loginTriggered = true
                                             statusText = "登录成功，正在获取凭证..."
                                             onLoginWithTokenJson(raw)
+                                        } else {
+                                            statusText = "未能获取access_token，请返回重试"
+                                            loginTriggered = false
                                         }
                                     } catch (_: Exception) {
-                                        // JSON 解析失败，尝试提取 access_token
-                                        val idx = raw.indexOf("access_token")
-                                        if (idx >= 0) {
-                                            val start = raw.indexOf('"', idx + 14)
-                                            if (start >= 0) {
-                                                val end = raw.indexOf('"', start + 1)
-                                                if (end > start) {
-                                                    loginTriggered = true
-                                                    statusText = "登录成功，正在获取凭证..."
-                                                    onLoginWithAuthorization("Bearer ${raw.substring(start + 1, end)}")
-                                                }
-                                            }
-                                        }
+                                        statusText = "登录信息解析失败，请返回重试"
+                                        loginTriggered = false
                                     }
                                 }
                             }

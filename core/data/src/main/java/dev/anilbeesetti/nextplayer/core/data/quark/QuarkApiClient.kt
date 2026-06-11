@@ -172,14 +172,18 @@ class QuarkApiClient(
         val names = mutableListOf<String>()
         for (i in 0 until videoList.length()) {
             val v = videoList.getJSONObject(i)
+            val accessible = v.optBoolean("accessable", true)
             val videoInfo = v.optJSONObject("video_info")
             val url = videoInfo?.optString("url", "") ?: ""
+            val resolution = v.optString("resolution", "")
+            Log.d(TAG, "getVideoPlayInfo: [$i] resolution=$resolution, accessable=$accessible, url=${url.take(80)}")
+            if (!accessible) continue
             if (url.isNotBlank()) {
                 urls.add(url)
-                names.add(v.optString("resolution", ""))
+                names.add(resolution)
             }
         }
-        Log.d(TAG, "getVideoPlayInfo: 有效${urls.size}个播放源")
+        Log.d(TAG, "getVideoPlayInfo: 有效${urls.size}个播放源: $names")
         if (urls.isEmpty()) throw IllegalStateException("无可用视频播放源")
         QuarkPlayResult(urls, names)
     }
@@ -217,18 +221,26 @@ class QuarkApiClient(
 
     suspend fun deleteFiles(fids: List<String>): Result<Boolean> = runCatching {
         val body = JSONObject().apply {
-            put("fids", JSONArray(fids))
+            put("action_type", 2)
+            put("filelist", JSONArray(fids))
+            put("exclude_fids", JSONArray())
         }
-        apiPost("$baseUrl/1/clouddrive/file/delete?pr=$pr&fr=pc", body)
-        true
+        val json = apiPost("$baseUrl/1/clouddrive/file/delete?pr=$pr&fr=pc", body)
+        json.optInt("code", -1) == 0 || throw IllegalStateException(
+            json.optString("message", "删除失败")
+        )
     }
 
     suspend fun moveFiles(fids: List<String>, toPdirFid: String): Result<Boolean> = runCatching {
         val body = JSONObject().apply {
-            put("fids", JSONArray(fids))
+            put("action_type", 2)
+            put("filelist", JSONArray(fids))
             put("to_pdir_fid", toPdirFid)
+            put("exclude_fids", JSONArray())
         }
-        apiPost("$baseUrl/1/clouddrive/file/move?pr=$pr&fr=pc", body)
-        true
+        val json = apiPost("$baseUrl/1/clouddrive/file/move?pr=$pr&fr=pc", body)
+        json.optInt("code", -1) == 0 || throw IllegalStateException(
+            json.optString("message", "移动失败")
+        )
     }
 }

@@ -15,6 +15,8 @@ import dev.anilbeesetti.nextplayer.core.model.WebDavServer
 import dev.anilbeesetti.nextplayer.core.ui.designsystem.NextIcons
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
 
 /**
  * WebDAV 浏览标签页内容。
@@ -41,6 +43,8 @@ fun WebDavBrowserTabContent(
 
     val server = extraState.selectedServer
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
+    var renameIndex by remember { mutableStateOf(-1) }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -73,10 +77,10 @@ fun WebDavBrowserTabContent(
                 ContextActionMenu(
                     item = item,
                     onDismiss = onDismiss,
-                    onMove = {},
-                    onCopy = {},
-                    onDelete = {},
-                    onRename = {},
+                    onMove = { onDismiss() },
+                    onCopy = { onDismiss() },
+                    onDelete = { onDismiss(); viewModel.deleteItem(index) },
+                    onRename = { renameIndex = index; onDismiss() },
                     onDownload = { onDismiss(); viewModel.downloadFile(index) },
                 )
             }
@@ -88,7 +92,24 @@ fun WebDavBrowserTabContent(
         loginContent = {
             WebDavNoServerPlaceholder(onSettingsClick = onSettingsClick)
         },
+        onCreateFolder = { showCreateFolderDialog = true }
     )
+
+    val renameItem = currentDir?.items?.getOrNull(renameIndex)
+    if (renameItem != null) {
+        RenameDialog(
+            name = renameItem.name,
+            onDismiss = { renameIndex = -1 },
+            onDone = { newName -> viewModel.renameItem(renameIndex, newName); renameIndex = -1 },
+        )
+    }
+
+    if (showCreateFolderDialog) {
+        CreateFolderDialog(
+            onDismiss = { showCreateFolderDialog = false },
+            onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
+        )
+    }
 }
 
 @Composable

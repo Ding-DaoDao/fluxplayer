@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.anilbeesetti.nextplayer.core.common.CloudPlayHeaders
 import dev.anilbeesetti.nextplayer.core.common.CloudPlaylistCache
+import dev.anilbeesetti.nextplayer.core.common.VideoQualityCache
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkApiClient
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkAuthProvider
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkFileItem
@@ -26,7 +27,8 @@ data class QuarkBreadcrumb(val label: String, val fileId: String)
 @HiltViewModel
 class QuarkBrowserViewModel @Inject constructor(
     application: Application,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    private val videoQualityCache: VideoQualityCache
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
@@ -86,16 +88,24 @@ class QuarkBrowserViewModel @Inject constructor(
     // region ==================== 登录 — setDriveType（UC/普通模式切换） ====================
 
     fun setDriveType(type: String) {
+        val isSwitching = _uiState.value.driveType != type
+        Log.d(TAG, "setDriveType: type=$type, isSwitching=$isSwitching")
         apiClient.setDriveType(type)
         val prefName = if (type == "uc") UC_PREF_NAME else PREF_NAME
         val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
         val cookie = prefs.getString("cookie", "") ?: ""
+        // 切换 driveType 时重置状态，防止夸克/UC 之间数据泄漏
+        if (isSwitching) {
+            directoryCache.clear()
+            _navigationStack.value = listOf(DirectoryStackEntry(fileId = "0", label = "根目录"))
+        }
         if (cookie.isNotBlank()) {
             apiClient.setCookie(cookie)
-            updateUiState { it.copy(isLoggedIn = true, driveType = type) }
+            updateUiState { it.copy(isLoggedIn = true, driveType = type, items = if (isSwitching) emptyList() else it.items, error = null, isLoading = false) }
             loadDirectory("0")
         } else {
-            updateUiState { it.copy(driveType = type) }
+            if (isSwitching) QuarkAuthProvider.clear()
+            updateUiState { it.copy(isLoggedIn = false, driveType = type, items = if (isSwitching) emptyList() else it.items, error = null, isLoading = false) }
         }
     }
 
@@ -110,6 +120,13 @@ class QuarkBrowserViewModel @Inject constructor(
         val ucPrefs = getApplication<Application>().getSharedPreferences(UC_PREF_NAME, Context.MODE_PRIVATE)
         ucPrefs.edit().clear().apply()
         directoryCache.clear()
+        // 清除 WebView 痕迹
+        try {
+            val cookieManager = android.webkit.CookieManager.getInstance()
+            cookieManager.removeAllCookies(null)
+            cookieManager.flush()
+            android.webkit.WebStorage.getInstance().deleteAllData()
+        } catch (_: Exception) {}
         _uiState.value = QuarkBrowserUiState()
         _navigationStack.value = listOf(DirectoryStackEntry(fileId = "0", label = "根目录"))
     }
@@ -441,12 +458,9 @@ class QuarkBrowserViewModel @Inject constructor(
 
         Log.d(TAG, "resolveVideoUri: path=${item.path}, name=${item.name}, driveLabel=$driveLabel")
 
-        // 注册夸克播放头，播放器会自动注入
-        val headers = QuarkAuthProvider.getPlayHeaders()
-        if (headers.isNotEmpty()) {
-            CloudPlayHeaders.register("vod.quark.cn", headers)
-            CloudPlayHeaders.register("drive.quark.cn", headers)
-        }
+        // 注册夸克播放头（lambda 实时读取，避免 stale cookie）
+        CloudPlayHeaders.register("vod.quark.cn") { QuarkAuthProvider.getPlayHeaders() }
+        CloudPlayHeaders.register("drive.quark.cn") { QuarkAuthProvider.getPlayHeaders() }
 
         // 先检查缓存
         val cached = CloudPlaylistCache.getResolvedUrl(driveLabel, item.path)
@@ -461,6 +475,20 @@ class QuarkBrowserViewModel @Inject constructor(
             val url = result.urls.first() + "#$fragment#"
             Log.d(TAG, "resolveVideoUri: getVideoPlayInfo成功 -> ${url.take(100)}")
             CloudPlaylistCache.putResolvedUrl(driveLabel, item.path, url)
+
+            // 缓存清晰度选项，加速后续切换
+            if (result.urls.size > 1) {
+                val qualityOptions = result.urls.zip(result.names).map { (u, n) ->
+                    VideoQualityCache.QualityOption(label = n, url = u)
+                }
+                videoQualityCache.cacheQualityOptions(
+                    provider = driveLabel,
+                    fileId = item.path,
+                    videoName = item.name,
+                    options = qualityOptions
+                )
+            }
+
             return android.net.Uri.parse(url)
         }
 

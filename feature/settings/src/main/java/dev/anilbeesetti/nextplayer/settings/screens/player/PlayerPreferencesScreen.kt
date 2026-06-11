@@ -3,6 +3,7 @@ package dev.anilbeesetti.nextplayer.settings.screens.player
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -15,6 +16,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -24,13 +27,16 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.anilbeesetti.nextplayer.core.common.extensions.isPipFeatureSupported
+import dev.anilbeesetti.nextplayer.core.model.CacheMaxSize
 import dev.anilbeesetti.nextplayer.core.model.ControlButtonsPosition
 import dev.anilbeesetti.nextplayer.core.model.PlayerPreferences
 import dev.anilbeesetti.nextplayer.core.model.Resume
 import dev.anilbeesetti.nextplayer.core.model.ScreenOrientation
 import dev.anilbeesetti.nextplayer.core.ui.R
+import dev.anilbeesetti.nextplayer.core.ui.components.CancelButton
 import dev.anilbeesetti.nextplayer.core.ui.components.ClickablePreferenceItem
 import dev.anilbeesetti.nextplayer.core.ui.components.ListSectionTitle
+import dev.anilbeesetti.nextplayer.core.ui.components.NextDialog
 import dev.anilbeesetti.nextplayer.core.ui.components.NextTopAppBar
 import dev.anilbeesetti.nextplayer.core.model.DanmakuSource
 import dev.anilbeesetti.nextplayer.settings.screens.player.DanmakuSourceManagerDialog
@@ -216,6 +222,39 @@ private fun PlayerPreferencesContent(
                     isLastItem = true
                 )
             }
+
+            ListSectionTitle(text = stringResource(id = R.string.playback_cache))
+            Column(
+                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
+            ) {
+                PreferenceSwitch(
+                    title = stringResource(id = R.string.playback_cache),
+                    description = stringResource(id = R.string.playback_cache_description),
+                    icon = NextIcons.Storage,
+                    isChecked = uiState.preferences.playbackCacheEnabled,
+                    onClick = { onEvent(PlayerPreferencesUiEvent.TogglePlaybackCacheEnabled) },
+                    isFirstItem = true,
+                )
+                if (uiState.preferences.playbackCacheEnabled) {
+                    ClickablePreferenceItem(
+                        title = stringResource(id = R.string.cache_size),
+                        description = uiState.preferences.playbackCacheMaxSize.name(),
+                        icon = NextIcons.Settings,
+                        onClick = {
+                            onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.CacheMaxSizeDialog))
+                        },
+                    )
+                    ClickablePreferenceItem(
+                        title = stringResource(id = R.string.clear_cache),
+                        description = stringResource(id = R.string.clear_cache_description, formatBytes(uiState.cacheSizeBytes)),
+                        icon = NextIcons.DeleteSweep,
+                        onClick = {
+                            onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.ClearCacheConfirmDialog))
+                        },
+                        isLastItem = true,
+                    )
+                }
+            }
         }
 
         uiState.showDialog?.let { showDialog ->
@@ -298,6 +337,53 @@ private fun PlayerPreferencesContent(
                         },
                     )
                 }
+
+                PlayerPreferenceDialog.CacheMaxSizeDialog -> {
+                    OptionsDialog(
+                        text = stringResource(id = R.string.cache_size),
+                        onDismissClick = { onEvent(PlayerPreferencesUiEvent.ShowDialog(null)) },
+                    ) {
+                        items(CacheMaxSize.entries.toTypedArray()) {
+                            RadioTextButton(
+                                text = it.name(),
+                                selected = it == uiState.preferences.playbackCacheMaxSize,
+                                onClick = {
+                                    onEvent(PlayerPreferencesUiEvent.UpdatePlaybackCacheMaxSize(it))
+                                    onEvent(PlayerPreferencesUiEvent.ShowDialog(null))
+                                },
+                            )
+                        }
+                    }
+                }
+
+                PlayerPreferenceDialog.ClearCacheConfirmDialog -> {
+                    NextDialog(
+                        onDismissRequest = { onEvent(PlayerPreferencesUiEvent.ShowDialog(null)) },
+                        title = {
+                            Text(
+                                text = stringResource(id = R.string.clear_cache),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    onEvent(PlayerPreferencesUiEvent.ClearPlaybackCache)
+                                    onEvent(PlayerPreferencesUiEvent.ShowDialog(null))
+                                },
+                            ) {
+                                Text(text = stringResource(id = R.string.confirm))
+                            }
+                        },
+                        dismissButton = { CancelButton(onClick = { onEvent(PlayerPreferencesUiEvent.ShowDialog(null)) }) },
+                        content = {
+                            Text(
+                                text = stringResource(id = R.string.clear_cache_confirmation),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                        },
+                    )
+                }
             }
         }
     }
@@ -312,4 +398,16 @@ private fun PlayerPreferencesScreenPreview() {
             onEvent = {},
         )
     }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val units = arrayOf("B", "KB", "MB", "GB", "TB")
+    val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt()
+        .coerceIn(0, units.size - 1)
+    return String.format(
+        "%.1f %s",
+        bytes / Math.pow(1024.0, digitGroups.toDouble()),
+        units[digitGroups],
+    )
 }

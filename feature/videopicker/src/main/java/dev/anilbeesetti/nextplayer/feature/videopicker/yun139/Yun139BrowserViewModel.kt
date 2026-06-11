@@ -163,6 +163,13 @@ class Yun139BrowserViewModel @Inject constructor(
         directoryCache.clear()
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
+        // 清除 WebView 痕迹
+        try {
+            val cookieManager = android.webkit.CookieManager.getInstance()
+            cookieManager.removeAllCookies(null)
+            cookieManager.flush()
+            android.webkit.WebStorage.getInstance().deleteAllData()
+        } catch (_: Exception) {}
         _uiState.value = Yun139BrowserUiState()
         _navigationStack.value = listOf(DirectoryStackEntry(fileId = "/", label = "根目录"))
     }
