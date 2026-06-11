@@ -152,10 +152,11 @@ class WebDavBrowserViewModel @Inject constructor(
                     val filtered = resources.filter { res ->
                         !res.name.startsWith(".") && res.name.isNotBlank()
                     }
-                    directoryCache[loadingPath] = filtered
+                    val sorted = sortItems(filtered, _stateFlow.value.orderBy, _stateFlow.value.orderDirection)
+                    directoryCache[loadingPath] = sorted
                     Log.d(TAG, "loadDirectory: cached path=$loadingPath, items=${filtered.size}")
                     updateStackTop(loadingPath) {
-                        it.copy(items = filtered, isLoading = false, error = null)
+                        it.copy(items = sorted, isLoading = false, error = null)
                     }
                 },
                 onFailure = { error ->
@@ -253,6 +254,31 @@ class WebDavBrowserViewModel @Inject constructor(
             WebDavBreadcrumb(it.label, it.path)
         }
         _stateFlow.update { it.copy(breadcrumbs = crumbs) }
+    }
+
+    // endregion
+
+    // region ==================== 排序 ====================
+
+    fun setSort(orderBy: String, orderDirection: String = "ASC") {
+        _stateFlow.update { it.copy(orderBy = orderBy, orderDirection = orderDirection) }
+        // 对当前栈顶数据重新排序
+        val current = _navigationStack.value.lastOrNull() ?: return
+        if (current.items.isNotEmpty()) {
+            val sorted = sortItems(current.items, orderBy, orderDirection)
+            updateStackTop(current.path) { it.copy(items = sorted) }
+        }
+    }
+
+    private fun sortItems(items: List<WebDavResource>, orderBy: String, orderDirection: String): List<WebDavResource> {
+        val comparator: Comparator<WebDavResource> = when (orderBy) {
+            "name" -> compareBy { it.name.lowercase() }
+            "size" -> compareBy { it.size }
+            "modified" -> compareBy { it.lastModified }
+            else -> compareBy { it.name.lowercase() }
+        }
+        return if (orderDirection.equals("DESC", ignoreCase = true)) items.sortedWith(comparator.reversed())
+        else items.sortedWith(comparator)
     }
 
     // endregion

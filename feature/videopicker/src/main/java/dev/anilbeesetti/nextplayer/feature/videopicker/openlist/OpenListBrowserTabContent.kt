@@ -12,10 +12,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.anilbeesetti.nextplayer.core.common.onCloudVideoClick
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import dev.anilbeesetti.nextplayer.core.ui.designsystem.NextIcons
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
 
 /**
  * OpenList 浏览标签页内容。
@@ -31,6 +34,7 @@ fun OpenListBrowserTabContent(
 ) {
     val state by viewModel.stateFlow.collectAsStateWithLifecycle()
     val navigationStack by viewModel.navigationStack.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
 
     BackHandler(enabled = state.isLoggedIn && state.breadcrumbs.size > 1) {
         viewModel.navigateUp()
@@ -38,6 +42,17 @@ fun OpenListBrowserTabContent(
 
     val context = LocalContext.current
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
+    var showSortSheet by remember { mutableStateOf(false) }
+
+    val currentSortKey = remember(state.orderBy, state.orderDirection) {
+        val dir = state.orderDirection.uppercase()
+        when (state.orderBy) {
+            "name" -> if (dir == "DESC") "name:desc" else "name:asc"
+            "modified" -> if (dir == "ASC") "time:asc" else "time:desc"
+            "size" -> if (dir == "ASC") "size:asc" else "size:desc"
+            else -> "name:asc"
+        }
+    }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -52,11 +67,14 @@ fun OpenListBrowserTabContent(
             if (item.isDirectory) {
                 viewModel.navigateToDir(state.items.indexOf(item))
             } else if (item.isVideo) {
-                val allVideos = state.items.filter { it.isVideo }
-                val videoUris = allVideos.map { viewModel.getPlayUri(it) }
-                if (videoUris.isNotEmpty()) {
-                    onPlayVideos(videoUris, viewModel.getPlayUri(item))
-                }
+                onCloudVideoClick(
+                    item = item,
+                    allItems = state.items,
+                    resolveUrl = { viewModel.getPlayUri(item) },
+                    buildPlaylistUri = { viewModel.getPlayUri(it) },
+                    onPlayVideos = onPlayVideos,
+                    scope = scope,
+                )
             }
         },
         onItemMoreClick = { index -> contextMenuIndex = index },
@@ -79,6 +97,7 @@ fun OpenListBrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = {},
+        onSortClick = { showSortSheet = true },
         breadcrumbLabel = { it.label },
         loginContent = {
             OpenListNoServerPlaceholder(
@@ -87,6 +106,24 @@ fun OpenListBrowserTabContent(
             )
         },
     )
+
+    if (showSortSheet) {
+        SortOptionSheet(
+            currentKey = currentSortKey,
+            onSelect = { option ->
+                showSortSheet = false
+                val field = when (option.key) {
+                    "name:asc", "name:desc" -> "name"
+                    "time:asc", "time:desc" -> "modified"
+                    "size:asc", "size:desc" -> "size"
+                    else -> "name"
+                }
+                val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
+                viewModel.setSort(field, dir)
+            },
+            onDismiss = { showSortSheet = false },
+        )
+    }
 }
 
 @Composable

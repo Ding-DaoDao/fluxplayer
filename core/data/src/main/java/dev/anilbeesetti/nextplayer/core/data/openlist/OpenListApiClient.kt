@@ -106,19 +106,19 @@ class OpenListApiClient(
      * @param path 路径
      * @param adminPassword 管理员密码（用于 public API 没有 Bearer token 时的密码参数）
      */
-    suspend fun listFiles(path: String = "/", adminPassword: String? = null): Result<List<OpenListFileItem>> {
+    suspend fun listFiles(path: String = "/", adminPassword: String? = null, orderBy: String = "name", orderDirection: String = "ASC"): Result<List<OpenListFileItem>> {
         try {
-            return listFilesImpl(path, adminPassword)
+            return listFilesImpl(path, adminPassword, orderBy, orderDirection)
         } catch (e: Exception) {
             Log.e(TAG, "listFiles crashed: ${e.javaClass.simpleName}: ${e.message}", e)
             return Result.failure(e)
         }
     }
 
-    private suspend fun listFilesImpl(path: String, adminPassword: String?): Result<List<OpenListFileItem>> = runCatching {
+    private suspend fun listFilesImpl(path: String, adminPassword: String?, orderBy: String, orderDirection: String): Result<List<OpenListFileItem>> = runCatching {
         val pwdParam = adminPassword ?: ""
         val encodedPath = URLEncoder.encode(path, "UTF-8").replace("%2F", "/")
-        val fullUrl = "$baseUrl/api/fs/list?path=$encodedPath&password=$pwdParam&page=1&per_page=0&refresh=false"
+        val fullUrl = "$baseUrl/api/fs/list?path=$encodedPath&password=$pwdParam&page=1&per_page=0&refresh=false&order_by=$orderBy&order_direction=$orderDirection"
         Log.d(TAG, "listFiles URL: $fullUrl")
         val requestBuilder = Request.Builder()
             .url(fullUrl)

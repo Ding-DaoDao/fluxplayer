@@ -21,6 +21,7 @@ class QuarkApiClient(
 
     private val cookieManager = QuarkCookieManager()
     private var driveType: String = "quark"
+    var onCookieUpdated: ((String) -> Unit)? = null
 
     private val baseUrl: String get() = if (driveType == "uc") "https://pc-api.uc.cn" else "https://drive.quark.cn"
     private val homeUrl: String get() = if (driveType == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
@@ -62,7 +63,9 @@ class QuarkApiClient(
         val setCookie = resp.header("set-cookie") ?: return
         Log.d(TAG, "updateCookieFromResponse: set-cookie=${setCookie.take(100)}")
         cookieManager.add(setCookie)
-        QuarkAuthProvider.cookie = cookieManager.get()
+        val merged = cookieManager.get()
+        QuarkAuthProvider.cookie = merged
+        onCookieUpdated?.invoke(merged)
     }
 
     private suspend fun apiGet(url: String): JSONObject {
@@ -107,7 +110,6 @@ class QuarkApiClient(
         page: Int = 1,
         orderBy: String = "file_name:asc"
     ): Result<List<QuarkFileItem>> = runCatching {
-        val sortField = orderBy.substringBefore(":")
         val url = buildString {
             append(baseUrl)
             append("/1/clouddrive/file/sort?pr=$pr&fr=pc")
@@ -118,7 +120,7 @@ class QuarkApiClient(
             append("&uc_param_str=")
             append("&_fetch_total=1")
             append("&_fetch_sub_dirs=0")
-            append("&_sort=$sortField")
+            append("&_sort=file_type:asc,$orderBy")
         }
         Log.d(TAG, "listFiles: pdirFid=$pdirFid, page=$page, driveType=$driveType, url=$url")
         val json = apiGet(url)

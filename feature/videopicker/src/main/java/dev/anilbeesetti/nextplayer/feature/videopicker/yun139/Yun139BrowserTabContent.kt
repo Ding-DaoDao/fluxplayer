@@ -20,11 +20,14 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
+import dev.anilbeesetti.nextplayer.core.common.onCloudVideoClick
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -55,6 +58,17 @@ fun Yun139BrowserTabContent(
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var showSortSheet by remember { mutableStateOf(false) }
+
+    val currentSortKey = remember(state.orderBy, state.orderDirection) {
+        val dir = state.orderDirection.uppercase()
+        when (state.orderBy) {
+            "name" -> if (dir == "DESC") "name:desc" else "name:asc"
+            "updated_at" -> if (dir == "ASC") "time:asc" else "time:desc"
+            "size" -> if (dir == "ASC") "size:asc" else "size:desc"
+            else -> "name:asc"
+        }
+    }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -64,16 +78,14 @@ fun Yun139BrowserTabContent(
         navigationStack = navigationStack,
         onItemClick = { item ->
             if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
-            else {
-                scope.launch {
-                    val clickedUri = viewModel.resolveVideoUri(item)
-                    if (clickedUri != null) {
-                        val videoItems = state.items.filter { !it.isDirectory }
-                        val allUris = videoItems.map { CloudUriScheme.buildCloudUri("yun139", it.path) }
-                        onPlayVideos(allUris, CloudUriScheme.buildCloudUri("yun139", item.path))
-                    }
-                }
-            }
+            else onCloudVideoClick(
+                item = item,
+                allItems = state.items,
+                resolveUrl = { viewModel.resolveVideoUri(item) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("yun139", it.path) },
+                onPlayVideos = onPlayVideos,
+                scope = scope,
+            )
         },
         onItemMoreClick = { index -> contextMenuIndex = index },
         expandedMenuIndex = contextMenuIndex,
@@ -95,6 +107,7 @@ fun Yun139BrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = { viewModel.loadMore() },
+        onSortClick = { showSortSheet = true },
         breadcrumbLabel = { it.label },
         loginContent = {
             Yun139LoginScreen(
@@ -117,6 +130,24 @@ fun Yun139BrowserTabContent(
         CreateFolderDialog(
             onDismiss = { showCreateFolderDialog = false },
             onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
+        )
+    }
+
+    if (showSortSheet) {
+        SortOptionSheet(
+            currentKey = currentSortKey,
+            onSelect = { option ->
+                showSortSheet = false
+                val field = when (option.key) {
+                    "name:asc", "name:desc" -> "name"
+                    "time:asc", "time:desc" -> "updated_at"
+                    "size:asc", "size:desc" -> "size"
+                    else -> "name"
+                }
+                val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
+                viewModel.setSort(field, dir)
+            },
+            onDismiss = { showSortSheet = false },
         )
     }
 }

@@ -91,9 +91,30 @@ class OpenListBrowserViewModel @Inject constructor(
     ): Result<List<WebDavResource>> {
         val client = apiClient
             ?: return Result.failure(IllegalStateException("API Client 未初始化"))
-        return client.listFiles(parentFileId, currentAdminPassword).map { items ->
-            items.map { it.toWebDavResource() }
+        return client.listFiles(parentFileId, currentAdminPassword, orderBy, orderDirection).map { items ->
+            val resources = items.map { it.toWebDavResource() }
+            // AList API 不支持排序参数，客户端排序
+            val comparator: Comparator<WebDavResource> = when (orderBy) {
+                "name" -> compareBy { it.name.lowercase() }
+                "size" -> compareBy { it.size }
+                "modified" -> compareBy { it.lastModified }
+                else -> compareBy { it.name.lowercase() }
+            }
+            if (orderDirection.equals("DESC", ignoreCase = true)) resources.sortedWith(comparator.reversed())
+            else resources.sortedWith(comparator)
         }
+    }
+
+    override fun sortItems(items: List<WebDavResource>): List<WebDavResource> {
+        val state = readState()
+        val comparator: Comparator<WebDavResource> = when (state.orderBy) {
+            "name" -> compareBy { it.name.lowercase() }
+            "size" -> compareBy { it.size }
+            "modified" -> compareBy { it.lastModified }
+            else -> compareBy { it.name.lowercase() }
+        }
+        return if (state.orderDirection.equals("DESC", ignoreCase = true)) items.sortedWith(comparator.reversed())
+        else items.sortedWith(comparator)
     }
 
     override suspend fun doCreateFolder(name: String, parentFileId: String): Result<Unit> {
@@ -205,6 +226,14 @@ class OpenListBrowserViewModel @Inject constructor(
                 }
             )
         }
+    }
+
+    // endregion
+
+    // region ==================== 排序 ====================
+
+    fun setSort(orderBy: String, orderDirection: String = "ASC") {
+        setSortCommon(orderBy, orderDirection)
     }
 
     // endregion

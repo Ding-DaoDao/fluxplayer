@@ -127,6 +127,10 @@ class CloudUriResolver @Inject constructor(
         QuarkAuthProvider.cookie = cookie
         QuarkAuthProvider.isActive = true
 
+        // 注册夸克播放头，播放器数据源自动注入
+        CloudPlayHeaders.register("vod.quark.cn") { QuarkAuthProvider.getPlayHeaders() }
+        CloudPlayHeaders.register("drive.quark.cn") { QuarkAuthProvider.getPlayHeaders() }
+
         val playResult = client.getVideoPlayInfo(fileId).getOrNull()
         if (playResult != null && playResult.urls.isNotEmpty()) {
             Log.d(TAG, "resolveQuark: playUrl=${playResult.urls.first()}, qualities=${playResult.urls.size}")
@@ -156,6 +160,10 @@ class CloudUriResolver @Inject constructor(
         client.setCookie(cookie)
         QuarkAuthProvider.cookie = cookie
         QuarkAuthProvider.isActive = true
+
+        // 注册 UC 播放头，播放器数据源自动注入
+        CloudPlayHeaders.register("vod.quark.cn") { QuarkAuthProvider.getPlayHeaders() }
+        CloudPlayHeaders.register("drive.quark.cn") { QuarkAuthProvider.getPlayHeaders() }
 
         val playResult = client.getVideoPlayInfo(fileId).getOrNull()
         if (playResult != null && playResult.urls.isNotEmpty()) {
@@ -226,6 +234,9 @@ class CloudUriResolver @Inject constructor(
 
         val signature = prefs.getString("signature", "")
         if (!signature.isNullOrBlank()) client.setSignature(signature)
+
+        // 注册阿里云播放头，播放器数据源自动注入
+        CloudPlayHeaders.register("vod.alipan.com") { AliyunAuthProvider.getPlayHeaders() }
 
         val playResult = client.getVideoPreviewPlayInfo(fileId).getOrNull()
         if (playResult != null && playResult.urls.isNotEmpty()) {

@@ -6,9 +6,9 @@ import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dev.anilbeesetti.nextplayer.core.common.CloudPlayHeaders
 import dev.anilbeesetti.nextplayer.core.common.CloudPlaylistCache
-import dev.anilbeesetti.nextplayer.core.common.VideoQualityCache
+import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
+import dev.anilbeesetti.nextplayer.core.data.cloud.CloudUriResolver
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkApiClient
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkAuthProvider
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkFileItem
@@ -29,7 +29,7 @@ data class QuarkBreadcrumb(val label: String, val fileId: String)
 class QuarkBrowserViewModel @Inject constructor(
     application: Application,
     private val preferencesRepository: PreferencesRepository,
-    private val videoQualityCache: VideoQualityCache
+    private val cloudUriResolver: CloudUriResolver
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
@@ -78,6 +78,7 @@ class QuarkBrowserViewModel @Inject constructor(
         prefs.edit().putString("cookie", cookie).apply()
 
         apiClient.setCookie(cookie)
+        setupCookiePersistence(prefName)
 
         updateUiState { it.copy(isLoggedIn = true, driveType = driveType) }
         Log.d(TAG, "loginWithCookie: 开始加载根目录")
@@ -89,6 +90,8 @@ class QuarkBrowserViewModel @Inject constructor(
     // region ==================== 登录 — setDriveType（UC/普通模式切换） ====================
 
     fun setDriveType(type: String) {
+        // driveType 未变且已登录，跳过（避免 tab 切换时重载根目录覆盖导航栈）
+        if (_uiState.value.driveType == type && _uiState.value.isLoggedIn) return
         val isSwitching = _uiState.value.driveType != type
         Log.d(TAG, "setDriveType: type=$type, isSwitching=$isSwitching")
         apiClient.setDriveType(type)
@@ -102,6 +105,7 @@ class QuarkBrowserViewModel @Inject constructor(
         }
         if (cookie.isNotBlank()) {
             apiClient.setCookie(cookie)
+            setupCookiePersistence(prefName)
             updateUiState { it.copy(isLoggedIn = true, driveType = type, items = if (isSwitching) emptyList() else it.items, error = null, isLoading = true) }
             syncStackTop { it.copy(isLoading = true, error = null) }
             // 从磁盘缓存预填根目录，加速子目录导航
@@ -150,7 +154,7 @@ class QuarkBrowserViewModel @Inject constructor(
         syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
-            val result = apiClient.listFiles(parentFileId)
+            val result = apiClient.listFiles(parentFileId, orderBy = _uiState.value.orderBy)
             if (seq != loadSequence) return@launch
 
             result.fold(
@@ -462,56 +466,7 @@ class QuarkBrowserViewModel @Inject constructor(
 
     suspend fun resolveVideoUri(item: WebDavResource): android.net.Uri? {
         val driveLabel = if (uiState.value.driveType == "uc") "uc" else "quark"
-        val fragment = if (uiState.value.driveType == "uc") "ucPlay=true" else "quarkPlay=true"
-
-        Log.d(TAG, "resolveVideoUri: path=${item.path}, name=${item.name}, driveLabel=$driveLabel")
-
-        // 注册夸克播放头（lambda 实时读取，避免 stale cookie）
-        CloudPlayHeaders.register("vod.quark.cn") { QuarkAuthProvider.getPlayHeaders() }
-        CloudPlayHeaders.register("drive.quark.cn") { QuarkAuthProvider.getPlayHeaders() }
-
-        // 先检查缓存
-        val cached = CloudPlaylistCache.getResolvedUrl(driveLabel, item.path)
-        if (cached != null) {
-            Log.d(TAG, "resolveVideoUri: 命中缓存 -> $cached")
-            return android.net.Uri.parse(cached)
-        }
-
-        // 优先尝试 getVideoPlayInfo
-        val result = apiClient.getVideoPlayInfo(item.path).getOrNull()
-        if (result != null && result.urls.isNotEmpty()) {
-            val url = result.urls.first() + "#$fragment#"
-            Log.d(TAG, "resolveVideoUri: getVideoPlayInfo成功 -> ${url.take(100)}")
-            CloudPlaylistCache.putResolvedUrl(driveLabel, item.path, url)
-
-            // 缓存清晰度选项，加速后续切换
-            if (result.urls.size > 1) {
-                val qualityOptions = result.urls.zip(result.names).map { (u, n) ->
-                    VideoQualityCache.QualityOption(label = n, url = u)
-                }
-                videoQualityCache.cacheQualityOptions(
-                    provider = driveLabel,
-                    fileId = item.path,
-                    videoName = item.name,
-                    options = qualityOptions
-                )
-            }
-
-            return android.net.Uri.parse(url)
-        }
-
-        // 回退：尝试 getDownloadUrl
-        Log.d(TAG, "resolveVideoUri: getVideoPlayInfo失败或无源，尝试getDownloadUrl")
-        val dlUrl = apiClient.getDownloadUrl(item.path).getOrNull()
-        if (dlUrl != null) {
-            val url = dlUrl + "#$fragment#"
-            Log.d(TAG, "resolveVideoUri: getDownloadUrl成功 -> ${url.take(100)}")
-            CloudPlaylistCache.putResolvedUrl(driveLabel, item.path, url)
-            return android.net.Uri.parse(url)
-        }
-
-        Log.e(TAG, "resolveVideoUri: 所有方式都失败了")
-        return null
+        return cloudUriResolver.resolve(CloudUriScheme.buildCloudUri(driveLabel, item.path))
     }
 
     // endregion
@@ -573,6 +528,18 @@ class QuarkBrowserViewModel @Inject constructor(
             crumbs.add(QuarkBreadcrumb(label, fileId))
         }
         return crumbs
+    }
+
+    /**
+     * 每次 API 响应可能携带 Set-Cookie 更新合并后的 cookie，
+     * 通过此回调实时写回 SharedPreferences，确保 CloudUriResolver 后续能读到最新 cookie。
+     */
+    private fun setupCookiePersistence(prefName: String) {
+        apiClient.onCookieUpdated = { mergedCookie ->
+            val prefs = getApplication<Application>()
+                .getSharedPreferences(prefName, Context.MODE_PRIVATE)
+            prefs.edit().putString("cookie", mergedCookie).apply()
+        }
     }
 
     // endregion

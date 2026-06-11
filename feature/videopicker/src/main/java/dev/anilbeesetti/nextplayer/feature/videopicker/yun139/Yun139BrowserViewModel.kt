@@ -8,6 +8,8 @@ import android.widget.Toast
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.anilbeesetti.nextplayer.core.common.CloudPlaylistCache
+import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
+import dev.anilbeesetti.nextplayer.core.data.cloud.CloudUriResolver
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
 import dev.anilbeesetti.nextplayer.core.data.yun139.Yun139ApiClient
 import dev.anilbeesetti.nextplayer.core.data.yun139.Yun139AuthProvider
@@ -27,7 +29,8 @@ data class Yun139Breadcrumb(val label: String, val fileId: String)
 @HiltViewModel
 class Yun139BrowserViewModel @Inject constructor(
     application: Application,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    private val cloudUriResolver: CloudUriResolver
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
@@ -177,7 +180,11 @@ class Yun139BrowserViewModel @Inject constructor(
         syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
-            val result = apiClient.listFiles(parentFileId)
+            val result = apiClient.listFiles(
+                parentFileId,
+                orderBy = _uiState.value.orderBy,
+                orderDirection = _uiState.value.orderDirection
+            )
             if (seq != loadSequence) return@launch
 
             result.fold(
@@ -488,13 +495,7 @@ class Yun139BrowserViewModel @Inject constructor(
     // region ==================== 视频播放 ====================
 
     suspend fun resolveVideoUri(item: WebDavResource): android.net.Uri? {
-        val result = apiClient.getVideoPreviewUrl(item.path).getOrNull()
-        if (!result.isNullOrBlank()) {
-            val url = result + "#yun139Play=true#"
-            CloudPlaylistCache.putResolvedUrl("yun139", item.path, url)
-            return android.net.Uri.parse(url)
-        }
-        return null
+        return cloudUriResolver.resolve(CloudUriScheme.buildCloudUri("yun139", item.path))
     }
 
     // endregion

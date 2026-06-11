@@ -267,21 +267,28 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
     // region ==================== 导航 ====================
 
     /**
+     * 子类可重写：对缓存数据按当前排序设置重新排序。
+     * 默认不排序（API 已排序的情况）。
+     */
+    protected open fun sortItems(items: List<WebDavResource>): List<WebDavResource> = items
+
+    /**
      * 加载目录（优先从内存缓存恢复）
      */
     protected fun loadDirectoryCached(fileId: String) {
         val cached = directoryCache[fileId]
         Log.d("BaseCloudVM", "loadDirectoryCached: fileId=$fileId, cacheHit=${cached != null}, cacheSize=${directoryCache.size}")
         if (cached != null) {
+            val sorted = sortItems(cached)
             updateState(
                 CommonStateUpdate(
-                    items = cached,
+                    items = sorted,
                     currentFileId = fileId,
                     isLoading = false,
                     error = null
                 )
             )
-            syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
+            syncStackTop { it.copy(items = sorted, isLoading = false, error = null) }
         } else {
             updateState(CommonStateUpdate(items = emptyList(), currentFileId = fileId))
             syncStackTop { it.copy(items = emptyList(), isLoading = true, error = null) }
@@ -494,10 +501,11 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                 onSuccess = { newItems ->
                     val existingPaths = getItems().map { it.path }.toSet()
                     val filtered = onFilesLoaded(newItems).filter { it.path !in existingPaths }
+                    val combined = sortItems(getItems() + filtered)
 
                     updateState(
                         CommonStateUpdate(
-                            items = getItems() + filtered,
+                            items = combined,
                             isLoadingMore = false,
                             hasMore = newItems.size >= pageSize,
                             currentPage = nextPage

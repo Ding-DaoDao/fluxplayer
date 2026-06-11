@@ -139,13 +139,15 @@ class Yun139ApiClient(
     suspend fun listFiles(
         folderId: String = "/",
         pageNum: Int = 1,
-        pageSize: Int = 100
+        pageSize: Int = 100,
+        orderBy: String = "updated_at",
+        orderDirection: String = "DESC"
     ): Result<Yun139ListResult> = runCatching {
         val body = JSONObject().apply {
             put("fields", "thumbnailUrls,addressDetail,mediaMetaInfo,metadataAuditInfo,userTags,contentAuditInfo,starredAt,starred,localCreatedAt,localUpdatedAt")
             put("imageThumbnailStyleList", JSONArray(listOf("Small", "Big")))
-            put("orderBy", "updated_at")
-            put("orderDirection", "DESC")
+            put("orderBy", orderBy)
+            put("orderDirection", orderDirection)
             put("ownerId", JSONObject.NULL)
             put("pageInfo", JSONObject().apply {
                 put("needTotalCount", 0)

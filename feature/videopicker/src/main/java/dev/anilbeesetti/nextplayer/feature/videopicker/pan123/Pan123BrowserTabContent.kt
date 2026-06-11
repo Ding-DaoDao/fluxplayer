@@ -15,11 +15,13 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
+import dev.anilbeesetti.nextplayer.core.common.onCloudVideoClick
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
-import kotlinx.coroutines.launch
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
 
 /**
  * 123云盘浏览器 Tab 内容
@@ -45,6 +47,17 @@ fun Pan123BrowserTabContent(
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var showSortSheet by remember { mutableStateOf(false) }
+
+    val currentSortKey = remember(state.orderBy, state.orderDirection) {
+        val dir = state.orderDirection.lowercase()
+        when (state.orderBy) {
+            "file_name" -> if (dir == "desc") "name:desc" else "name:asc"
+            "update_time" -> if (dir == "asc") "time:asc" else "time:desc"
+            "size" -> if (dir == "asc") "size:asc" else "size:desc"
+            else -> "name:asc"
+        }
+    }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -54,17 +67,14 @@ fun Pan123BrowserTabContent(
         navigationStack = navigationStack,
         onItemClick = { item ->
             if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
-            else {
-                scope.launch {
-                    // 只解析点击的视频，其余视频用 cloud:// URI 按需加载
-                    val clickedUri = viewModel.resolveVideoUri(item)
-                    if (clickedUri != null) {
-                        val videoItems = state.items.filter { !it.isDirectory }
-                        val allUris = videoItems.map { CloudUriScheme.buildCloudUri("pan123", it.path) }
-                        onPlayVideos(allUris, CloudUriScheme.buildCloudUri("pan123", item.path))
-                    }
-                }
-            }
+            else onCloudVideoClick(
+                item = item,
+                allItems = state.items,
+                resolveUrl = { viewModel.resolveVideoUri(item) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("pan123", it.path) },
+                onPlayVideos = onPlayVideos,
+                scope = scope,
+            )
         },
         onItemMoreClick = { index -> contextMenuIndex = index },
         expandedMenuIndex = contextMenuIndex,
@@ -86,6 +96,7 @@ fun Pan123BrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = { viewModel.loadMore() },
+        onSortClick = { showSortSheet = true },
         breadcrumbLabel = { it.label },
         loginContent = {
             LoginScreen(
@@ -111,6 +122,24 @@ fun Pan123BrowserTabContent(
         CreateFolderDialog(
             onDismiss = { showCreateFolderDialog = false },
             onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
+        )
+    }
+
+    if (showSortSheet) {
+        SortOptionSheet(
+            currentKey = currentSortKey,
+            onSelect = { option ->
+                showSortSheet = false
+                val field = when (option.key) {
+                    "name:asc", "name:desc" -> "file_name"
+                    "time:asc", "time:desc" -> "update_time"
+                    "size:asc", "size:desc" -> "size"
+                    else -> "file_name"
+                }
+                val dir = if (option.key.endsWith(":desc")) "desc" else "asc"
+                viewModel.setSort(field, dir)
+            },
+            onDismiss = { showSortSheet = false },
         )
     }
 }

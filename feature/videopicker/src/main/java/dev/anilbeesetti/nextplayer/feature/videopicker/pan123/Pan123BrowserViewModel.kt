@@ -6,11 +6,10 @@ import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dev.anilbeesetti.nextplayer.core.common.CloudPlayHeaders
 import dev.anilbeesetti.nextplayer.core.common.CloudPlaylistCache
-import dev.anilbeesetti.nextplayer.core.common.VideoQualityCache
+import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
+import dev.anilbeesetti.nextplayer.core.data.cloud.CloudUriResolver
 import dev.anilbeesetti.nextplayer.core.data.pan123.Pan123ApiClient
-import dev.anilbeesetti.nextplayer.core.data.pan123.Pan123AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.pan123.Pan123FileItem
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
@@ -29,7 +28,7 @@ data class Pan123Breadcrumb(val label: String, val fileId: String)
 class Pan123BrowserViewModel @Inject constructor(
     application: Application,
     private val preferencesRepository: PreferencesRepository,
-    private val videoQualityCache: VideoQualityCache
+    private val cloudUriResolver: CloudUriResolver
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
@@ -177,18 +176,28 @@ class Pan123BrowserViewModel @Inject constructor(
         syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
-            val result = apiClient.listFiles(parentFileId)
+            val result = apiClient.listFiles(
+                parentFileId,
+                orderBy = _uiState.value.orderBy,
+                orderDirection = _uiState.value.orderDirection
+            )
             if (seq != loadSequence) return@launch
 
             result.fold(
                 onSuccess = { items ->
                     cachedFileItems = items
-                    // 缓存文件元数据到 CloudPlaylistCache，供播放器显示标题
+                    // 缓存文件元数据到 CloudPlaylistCache，供播放器显示标题和 CloudUriResolver 解析
                     items.forEach { file ->
                         if (file.isVideo) {
                             CloudPlaylistCache.putFileMetadata(
                                 "pan123", file.fileId,
-                                CloudPlaylistCache.FileMetadata(fileName = file.fileName)
+                                CloudPlaylistCache.FileMetadata(
+                                    fileName = file.fileName,
+                                    etag = file.etag,
+                                    size = file.size,
+                                    s3keyFlag = file.s3keyFlag,
+                                    downloadUrl = file.downloadUrl,
+                                )
                             )
                         }
                     }
@@ -251,11 +260,28 @@ class Pan123BrowserViewModel @Inject constructor(
         viewModelScope.launch {
             val result = apiClient.listFiles(
                 parentFileId = state.currentFileId,
-                page = nextPage
+                page = nextPage,
+                orderBy = state.orderBy,
+                orderDirection = state.orderDirection
             )
             result.fold(
                 onSuccess = { items ->
                     cachedFileItems = cachedFileItems + items
+                    // 缓存文件元数据到 CloudPlaylistCache（loadMore 也需要）
+                    items.forEach { file ->
+                        if (file.isVideo) {
+                            CloudPlaylistCache.putFileMetadata(
+                                "pan123", file.fileId,
+                                CloudPlaylistCache.FileMetadata(
+                                    fileName = file.fileName,
+                                    etag = file.etag,
+                                    size = file.size,
+                                    s3keyFlag = file.s3keyFlag,
+                                    downloadUrl = file.downloadUrl,
+                                )
+                            )
+                        }
+                    }
                     val newItems = items.map { fileToResource(it) }
                     val existingPaths = state.items.map { it.path }.toSet()
                     val filtered = newItems.filter { it.path !in existingPaths }
@@ -471,45 +497,7 @@ class Pan123BrowserViewModel @Inject constructor(
     // region ==================== 视频播放 ====================
 
     suspend fun resolveVideoUri(item: WebDavResource): android.net.Uri? {
-        val fileItem = cachedFileItems.find { it.fileId == item.path } ?: return null
-        val result = apiClient.getVideoPlayInfo(fileItem).getOrNull()
-        if (result != null && result.urls.isNotEmpty()) {
-            val url = result.urls.first() + "#pan123Play=true#"
-            CloudPlaylistCache.putResolvedUrl("pan123", item.path, url)
-
-            // 注册 pan123 播放认证，播放器数据源自动注入
-            val token = apiClient.getToken() ?: ""
-            Pan123AuthProvider.isActive = true  // 总是激活，Referer+UA 是必须的
-            if (token.isNotBlank()) {
-                Pan123AuthProvider.authorization = token
-            }
-            Log.d("FluxQuality", "Pan123AuthProvider: isActive=true, token=${if (token.isNotBlank()) token.take(20) + "..." else "无"}")
-            // pan123 CDN 认证已由 AuthAwareDataSource 通过 URI fragment 注入
-            // 不再通过 CloudPlayHeaders，避免 Authorization 头干扰 CDN 自带签名
-            val playHeaders = mapOf(
-                "Referer" to Pan123AuthProvider.referer,
-                "User-Agent" to Pan123AuthProvider.userAgent,
-                "X-MF-PAN-RANGE" to "1"
-            )
-            CloudPlayHeaders.register("vip-download-cdn.123295.com", playHeaders)
-            CloudPlayHeaders.register("vip-client-video-download-cdn.123295.com", playHeaders)
-
-            // 缓存清晰度选项，加速后续切换
-            if (result.urls.size > 1) {
-                val qualityOptions = result.urls.zip(result.names).map { (u, n) ->
-                    VideoQualityCache.QualityOption(label = n, url = u)
-                }
-                videoQualityCache.cacheQualityOptions(
-                    provider = "pan123",
-                    fileId = item.path,
-                    videoName = item.name,
-                    options = qualityOptions
-                )
-            }
-
-            return android.net.Uri.parse(url)
-        }
-        return null
+        return cloudUriResolver.resolve(CloudUriScheme.buildCloudUri("pan123", item.path))
     }
 
     // endregion

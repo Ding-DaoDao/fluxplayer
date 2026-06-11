@@ -6,6 +6,8 @@ import android.widget.Toast
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.anilbeesetti.nextplayer.core.common.CloudPlaylistCache
+import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
+import dev.anilbeesetti.nextplayer.core.data.cloud.CloudUriResolver
 import dev.anilbeesetti.nextplayer.core.data.cloud189.C189ApiClient
 import dev.anilbeesetti.nextplayer.core.data.cloud189.C189AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.cloud189.C189FileItem
@@ -25,7 +27,8 @@ data class C189Breadcrumb(val label: String, val fileId: String)
 @HiltViewModel
 class C189BrowserViewModel @Inject constructor(
     application: Application,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    private val cloudUriResolver: CloudUriResolver
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
@@ -207,8 +210,10 @@ class C189BrowserViewModel @Inject constructor(
 
         loadDirectoryJob = viewModelScope.launch {
             val state = _uiState.value
+            // API 不支持 filesize 排序，用 lastOpTime 获取后客户端排序
+            val apiOrderBy = if (state.orderBy == "filesize") "lastOpTime" else state.orderBy
             val result = apiClient.listFiles(
-                parentFileId, state.currentPage, 100, state.orderBy, state.descending
+                parentFileId, state.currentPage, 100, apiOrderBy, state.descending
             )
             if (seq != loadSequence) return@launch
 
@@ -223,7 +228,7 @@ class C189BrowserViewModel @Inject constructor(
                             )
                         }
                     }
-                    val resources = listResult.items.map { fileToResource(it) }
+                    val resources = sortResources(listResult.items.map { fileToResource(it) })
                     directoryCache[parentFileId] = resources
                     CloudDirectoryCache.put(getApplication(), "cloud189", parentFileId, resources)
                     updateUiState {
@@ -252,15 +257,16 @@ class C189BrowserViewModel @Inject constructor(
     private fun loadDirectoryCached(fileId: String) {
         val cached = directoryCache[fileId]
         if (cached != null) {
+            val sorted = sortResources(cached)
             updateUiState {
                 it.copy(
-                    items = cached,
+                    items = sorted,
                     currentFolderId = fileId,
                     isLoading = false,
                     error = null
                 )
             }
-            syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
+            syncStackTop { it.copy(items = sorted, isLoading = false, error = null) }
         } else {
             updateUiState { it.copy(items = emptyList(), currentFolderId = fileId) }
             syncStackTop { it.copy(items = emptyList(), isLoading = true, error = null) }
@@ -280,17 +286,19 @@ class C189BrowserViewModel @Inject constructor(
         updateUiState { it.copy(isLoadingMore = true) }
 
         viewModelScope.launch {
+            val apiOrderBy = if (state.orderBy == "filesize") "lastOpTime" else state.orderBy
             val result = apiClient.listFiles(
-                state.currentFolderId, nextPage, 100, state.orderBy, state.descending
+                state.currentFolderId, nextPage, 100, apiOrderBy, state.descending
             )
             result.fold(
                 onSuccess = { listResult ->
-                    val newItems = listResult.items.map { fileToResource(it) }
+                    val newItems = sortResources(listResult.items.map { fileToResource(it) })
                     val existingPaths = state.items.map { it.path }.toSet()
                     val filtered = newItems.filter { it.path !in existingPaths }
+                    val combined = sortResources(state.items + filtered)
                     updateUiState {
                         it.copy(
-                            items = state.items + filtered, isLoadingMore = false,
+                            items = combined, isLoadingMore = false,
                             hasMore = listResult.items.size >= 100, currentPage = nextPage
                         )
                     }
@@ -509,13 +517,7 @@ class C189BrowserViewModel @Inject constructor(
     // region ==================== 视频播放 ====================
 
     suspend fun resolveVideoUri(item: WebDavResource): android.net.Uri? {
-        val result = apiClient.getVideoPlayUrl(item.path).getOrNull()
-        if (!result.isNullOrBlank()) {
-            val url = result + "#c189Play=true#"
-            CloudPlaylistCache.putResolvedUrl("cloud189", item.path, url)
-            return android.net.Uri.parse(url)
-        }
-        return null
+        return cloudUriResolver.resolve(CloudUriScheme.buildCloudUri("cloud189", item.path))
     }
 
     // endregion
@@ -559,6 +561,13 @@ class C189BrowserViewModel @Inject constructor(
             val next = transform(current)
             if (_uiState.compareAndSet(current, next)) break
         }
+    }
+
+    private fun sortResources(items: List<WebDavResource>): List<WebDavResource> {
+        val state = _uiState.value
+        if (state.orderBy != "filesize") return items
+        val comparator = compareBy<WebDavResource> { it.size }
+        return if (state.descending) items.sortedWith(comparator.reversed()) else items.sortedWith(comparator)
     }
 
     private fun fileToResource(file: C189FileItem): WebDavResource {

@@ -14,12 +14,14 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
+import dev.anilbeesetti.nextplayer.core.common.onCloudVideoClick
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
-import kotlinx.coroutines.launch
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
 
 /**
  * 天翼云盘浏览器 Tab 内容
@@ -45,6 +47,19 @@ fun C189BrowserTabContent(
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var showSortSheet by remember { mutableStateOf(false) }
+
+    val currentSortKey = remember(state.orderBy, state.descending) {
+        when {
+            state.orderBy == "filename" && !state.descending -> "name:asc"
+            state.orderBy == "filename" && state.descending -> "name:desc"
+            state.orderBy == "lastOpTime" && state.descending -> "time:desc"
+            state.orderBy == "lastOpTime" && !state.descending -> "time:asc"
+            state.orderBy == "filesize" && state.descending -> "size:desc"
+            state.orderBy == "filesize" && !state.descending -> "size:asc"
+            else -> "name:asc"
+        }
+    }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -54,17 +69,14 @@ fun C189BrowserTabContent(
         navigationStack = navigationStack,
         onItemClick = { item ->
             if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
-            else {
-                scope.launch {
-                    // 只解析点击的视频，其余视频用 cloud:// URI 按需加载
-                    val clickedUri = viewModel.resolveVideoUri(item)
-                    if (clickedUri != null) {
-                        val videoItems = state.items.filter { !it.isDirectory }
-                        val allUris = videoItems.map { CloudUriScheme.buildCloudUri("cloud189", it.path) }
-                        onPlayVideos(allUris, CloudUriScheme.buildCloudUri("cloud189", item.path))
-                    }
-                }
-            }
+            else onCloudVideoClick(
+                item = item,
+                allItems = state.items,
+                resolveUrl = { viewModel.resolveVideoUri(item) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("cloud189", it.path) },
+                onPlayVideos = onPlayVideos,
+                scope = scope,
+            )
         },
         onItemMoreClick = { index -> contextMenuIndex = index },
         expandedMenuIndex = contextMenuIndex,
@@ -86,6 +98,7 @@ fun C189BrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = { viewModel.loadMore() },
+        onSortClick = { showSortSheet = true },
         breadcrumbLabel = { it.label },
         loginContent = {
             C189LoginScreen(
@@ -109,6 +122,24 @@ fun C189BrowserTabContent(
         CreateFolderDialog(
             onDismiss = { showCreateFolderDialog = false },
             onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
+        )
+    }
+
+    if (showSortSheet) {
+        SortOptionSheet(
+            currentKey = currentSortKey,
+            onSelect = { option ->
+                showSortSheet = false
+                val field = when (option.key) {
+                    "name:asc", "name:desc" -> "filename"
+                    "time:asc", "time:desc" -> "lastOpTime"
+                    "size:asc", "size:desc" -> "filesize"
+                    else -> "filename"
+                }
+                val desc = option.key.endsWith(":desc")
+                viewModel.setSort(field, desc)
+            },
+            onDismiss = { showSortSheet = false },
         )
     }
 }

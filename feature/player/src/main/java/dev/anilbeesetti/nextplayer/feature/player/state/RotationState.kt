@@ -73,8 +73,15 @@ class RotationState(
     suspend fun observe() {
         setOrientation()
         player.listen { events ->
-            if (events.contains(Player.EVENT_VIDEO_SIZE_CHANGED)) {
-                if (screenOrientation == ScreenOrientation.VIDEO_ORIENTATION) {
+            // Delay rotation until player is ready (buffering complete),
+            // avoiding jarring orientation changes during the loading spinner.
+            if (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED)
+                && player.playbackState == Player.STATE_READY
+            ) {
+                if (screenOrientation == ScreenOrientation.VIDEO_ORIENTATION
+                    && player.videoSize.width > 0
+                    && player.videoSize.height > 0
+                ) {
                     activity.requestedOrientation = getVideoBasedOrientation()
                 }
             }

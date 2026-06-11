@@ -5,10 +5,10 @@ import android.content.Context
 import android.widget.Toast
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dev.anilbeesetti.nextplayer.core.common.CloudPlayHeaders
 import dev.anilbeesetti.nextplayer.core.common.CloudPlaylistCache
-import dev.anilbeesetti.nextplayer.core.common.VideoQualityCache
+import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
 import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunApiClient
+import dev.anilbeesetti.nextplayer.core.data.cloud.CloudUriResolver
 import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunAuthProvider
 import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunTokenExpiredException
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
@@ -30,7 +30,7 @@ data class AliyunBreadcrumb(val label: String, val fileId: String)
 class AliyunBrowserViewModel @Inject constructor(
     application: Application,
     private val preferencesRepository: PreferencesRepository,
-    private val videoQualityCache: VideoQualityCache
+    private val cloudUriResolver: CloudUriResolver
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
@@ -661,30 +661,7 @@ class AliyunBrowserViewModel @Inject constructor(
     // region ==================== 视频播放 ====================
 
     suspend fun resolveVideoUri(item: WebDavResource): android.net.Uri? {
-        // 注册阿里云播放头（lambda 实时读取，避免 stale token）
-        CloudPlayHeaders.register("vod.alipan.com") { AliyunAuthProvider.getPlayHeaders() }
-
-        val result = apiClient.getVideoPreviewPlayInfo(item.path).getOrNull()
-        if (result != null && result.urls.isNotEmpty()) {
-            val url = result.urls.first() + "#alipanPlay=true#"
-            CloudPlaylistCache.putResolvedUrl("alipan", item.path, url)
-
-            // 缓存清晰度选项，加速后续切换
-            if (result.urls.size > 1) {
-                val qualityOptions = result.urls.zip(result.names).map { (u, n) ->
-                    VideoQualityCache.QualityOption(label = n, url = u)
-                }
-                videoQualityCache.cacheQualityOptions(
-                    provider = "alipan",
-                    fileId = item.path,
-                    videoName = item.name,
-                    options = qualityOptions
-                )
-            }
-
-            return android.net.Uri.parse(url)
-        }
-        return null
+        return cloudUriResolver.resolve(CloudUriScheme.buildCloudUri("alipan", item.path))
     }
 
     // endregion

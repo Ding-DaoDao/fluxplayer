@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.anilbeesetti.nextplayer.core.common.onCloudVideoClick
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import dev.anilbeesetti.nextplayer.core.model.WebDavServer
 import dev.anilbeesetti.nextplayer.core.ui.designsystem.NextIcons
@@ -17,6 +18,8 @@ import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserP
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
 
 /**
  * WebDAV 浏览标签页内容。
@@ -42,9 +45,21 @@ fun WebDavBrowserTabContent(
     }
 
     val server = extraState.selectedServer
+    val scope = rememberCoroutineScope()
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var showSortSheet by remember { mutableStateOf(false) }
+
+    val currentSortKey = remember(state.orderBy, state.orderDirection) {
+        val dir = state.orderDirection.uppercase()
+        when (state.orderBy) {
+            "name" -> if (dir == "DESC") "name:desc" else "name:asc"
+            "modified" -> if (dir == "ASC") "time:asc" else "time:desc"
+            "size" -> if (dir == "ASC") "size:asc" else "size:desc"
+            else -> "name:asc"
+        }
+    }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -60,12 +75,14 @@ fun WebDavBrowserTabContent(
                 val idx = currentDir?.items?.indexOf(item)
                 if (idx != null) viewModel.navigateToDir(idx)
             } else if (item.isVideo && server != null) {
-                val clickedUri = buildSingleWebDavAuthUri(item, server)
-                val allVideos = (currentDir?.items ?: emptyList()).filter { it.isVideo }
-                val videoUris = buildWebDavPlaylist(allVideos, server)
-                if (videoUris.isNotEmpty()) {
-                    onPlayVideos(videoUris, Uri.parse(clickedUri))
-                }
+                onCloudVideoClick(
+                    item = item,
+                    allItems = currentDir?.items ?: emptyList(),
+                    resolveUrl = { Uri.parse(buildSingleWebDavAuthUri(item, server)) },
+                    buildPlaylistUri = { Uri.parse(buildSingleWebDavAuthUri(it, server)) },
+                    onPlayVideos = onPlayVideos,
+                    scope = scope,
+                )
             }
         },
         onItemMoreClick = { index -> contextMenuIndex = index },
@@ -88,6 +105,7 @@ fun WebDavBrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = {},
+        onSortClick = { showSortSheet = true },
         breadcrumbLabel = { it.label },
         loginContent = {
             WebDavNoServerPlaceholder(onSettingsClick = onSettingsClick)
@@ -108,6 +126,24 @@ fun WebDavBrowserTabContent(
         CreateFolderDialog(
             onDismiss = { showCreateFolderDialog = false },
             onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
+        )
+    }
+
+    if (showSortSheet) {
+        SortOptionSheet(
+            currentKey = currentSortKey,
+            onSelect = { option ->
+                showSortSheet = false
+                val field = when (option.key) {
+                    "name:asc", "name:desc" -> "name"
+                    "time:asc", "time:desc" -> "modified"
+                    "size:asc", "size:desc" -> "size"
+                    else -> "name"
+                }
+                val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
+                viewModel.setSort(field, dir)
+            },
+            onDismiss = { showSortSheet = false },
         )
     }
 }

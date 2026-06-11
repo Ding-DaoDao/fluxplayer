@@ -16,13 +16,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
+import dev.anilbeesetti.nextplayer.core.common.onCloudVideoClick
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import android.widget.Toast
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
-import kotlinx.coroutines.launch
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
 
 /**
  * 夸克网盘浏览器 Tab 内容
@@ -50,6 +52,19 @@ fun QuarkBrowserTabContent(
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var showSortSheet by remember { mutableStateOf(false) }
+
+    val currentSortKey = remember(state.orderBy) {
+        when (state.orderBy) {
+            "file_name:asc" -> "name:asc"
+            "file_name:desc" -> "name:desc"
+            "updated_at:asc" -> "time:asc"
+            "updated_at:desc" -> "time:desc"
+            "size:asc" -> "size:asc"
+            "size:desc" -> "size:desc"
+            else -> "name:asc"
+        }
+    }
 
     SharedCloudBrowserPanel(
         modifier = modifier,
@@ -63,18 +78,14 @@ fun QuarkBrowserTabContent(
         navigationStack = navigationStack,
         onItemClick = { item ->
             if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
-            else {
-                scope.launch {
-                    // 只解析点击的视频，其余视频用 cloud:// URI 按需加载
-                    val clickedUri = viewModel.resolveVideoUri(item)
-                    if (clickedUri != null) {
-                        val provider = if (state.driveType == "uc") "uc" else "quark"
-                        val videoItems = state.items.filter { !it.isDirectory }
-                        val allUris = videoItems.map { CloudUriScheme.buildCloudUri(provider, it.path) }
-                        onPlayVideos(allUris, CloudUriScheme.buildCloudUri(provider, item.path))
-                    }
-                }
-            }
+            else onCloudVideoClick(
+                item = item,
+                allItems = state.items,
+                resolveUrl = { viewModel.resolveVideoUri(item) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri(if (state.driveType == "uc") "uc" else "quark", it.path) },
+                onPlayVideos = onPlayVideos,
+                scope = scope,
+            )
         },
         onItemMoreClick = { index -> contextMenuIndex = index },
         expandedMenuIndex = contextMenuIndex,
@@ -96,6 +107,7 @@ fun QuarkBrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = { viewModel.loadMore() },
+        onSortClick = { showSortSheet = true },
         breadcrumbLabel = { it.label },
         loginContent = {
             QuarkLoginScreen(
@@ -121,6 +133,26 @@ fun QuarkBrowserTabContent(
         CreateFolderDialog(
             onDismiss = { showCreateFolderDialog = false },
             onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
+        )
+    }
+
+    if (showSortSheet) {
+        SortOptionSheet(
+            currentKey = currentSortKey,
+            onSelect = { option ->
+                showSortSheet = false
+                val providerOrderBy = when (option.key) {
+                    "name:asc" -> "file_name:asc"
+                    "name:desc" -> "file_name:desc"
+                    "time:asc" -> "updated_at:asc"
+                    "time:desc" -> "updated_at:desc"
+                    "size:asc" -> "size:asc"
+                    "size:desc" -> "size:desc"
+                    else -> "file_name:asc"
+                }
+                viewModel.setSort(providerOrderBy)
+            },
+            onDismiss = { showSortSheet = false },
         )
     }
 }

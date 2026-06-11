@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -45,6 +46,7 @@ fun <T> CloudBrowserPanel(
     reLoginRequired: Boolean = false,
     navigationStack: List<DirectoryState> = emptyList(),
     breadcrumbActions: @Composable (RowScope.() -> Unit)? = null,
+    onSortClick: (() -> Unit)? = null,
     onCreateFolder: (() -> Unit)? = null,
 ) {
     // 从 navigationStack 或扁平参数获取当前目录状态
@@ -63,6 +65,7 @@ fun <T> CloudBrowserPanel(
                 breadcrumbs = breadcrumbs,
                 breadcrumbLabel = breadcrumbLabel,
                 onNavigateToBreadcrumb = onBreadcrumbClick,
+                onSortClick = onSortClick,
                 actions = breadcrumbActions,
             )
 
@@ -231,6 +234,7 @@ private fun <T> BreadcrumbBar(
     breadcrumbs: List<T>,
     breadcrumbLabel: (T) -> String,
     onNavigateToBreadcrumb: (Int) -> Unit,
+    onSortClick: (() -> Unit)? = null,
     actions: @Composable (RowScope.() -> Unit)? = null,
 ) {
     Row(
@@ -268,6 +272,16 @@ private fun <T> BreadcrumbBar(
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
+            }
+        }
+        if (onSortClick != null) {
+            IconButton(onClick = onSortClick, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = Icons.Default.SwapVert,
+                    contentDescription = "排序",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
         if (actions != null) {

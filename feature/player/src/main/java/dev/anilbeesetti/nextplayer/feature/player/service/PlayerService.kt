@@ -5,6 +5,7 @@ import android.content.ContentResolver
 import android.content.Intent
 import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
+import android.util.Log
 import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
@@ -127,6 +128,10 @@ class PlayerService : MediaSessionService() {
     private var isMediaItemReady = false
 
     private var loudnessEnhancer: LoudnessEnhancer? = null
+
+    companion object {
+        private const val TAG = "PlayerService"
+    }
     private var currentVolumeGain: Int = 0
 
     private val playbackStateListener = object : Player.Listener {
@@ -699,9 +704,28 @@ class PlayerService : MediaSessionService() {
     ): List<MediaItem> = supervisorScope {
         mediaItems.map { mediaItem ->
             async {
-                val uri = mediaItem.mediaId.toUri()
-                val video = mediaRepository.getVideoByUri(uri = mediaItem.mediaId)
-                val videoState = mediaRepository.getVideoState(uri = mediaItem.mediaId)
+                val mediaId = mediaItem.mediaId
+                val uri = mediaId.toUri()
+
+                // Pre-resolve cloud URIs on background thread to avoid blocking ExoPlayer start
+                val resolvedUri = if (CloudUriScheme.isCloudUri(uri)) {
+                    try {
+                        val resolved = cloudUriResolver.resolve(uri)
+                        if (resolved != null) {
+                            cacheKeyRegistry?.register(resolved.toString(), uri.toString())
+                            Log.d(TAG, "Pre-resolved cloud URI: $uri -> $resolved")
+                        }
+                        resolved
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to pre-resolve cloud URI: $uri", e)
+                        null
+                    }
+                } else {
+                    null
+                }
+
+                val video = mediaRepository.getVideoByUri(uri = mediaId)
+                val videoState = mediaRepository.getVideoState(uri = mediaId)
 
                 val externalSubs = videoState?.externalSubs ?: emptyList()
                 val localSubs = (videoState?.path ?: getPath(uri))?.let {
@@ -734,6 +758,11 @@ class PlayerService : MediaSessionService() {
                 val subtitleSpeed = mediaItem.mediaMetadata.subtitleSpeed ?: videoState?.subtitleSpeed
 
                 mediaItem.buildUpon().apply {
+                    // Use pre-resolved HTTP URL so ExoPlayer starts buffering immediately
+                    if (resolvedUri != null) {
+                        setUri(resolvedUri)
+                        setMediaId(mediaId)
+                    }
                     setSubtitleConfigurations(existingSubConfigurations + subConfigurations)
                     setMediaMetadata(
                         MediaMetadata.Builder().apply {
