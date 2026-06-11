@@ -14,6 +14,7 @@ import dev.anilbeesetti.nextplayer.core.data.quark.QuarkAuthProvider
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkFileItem
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
+import dev.anilbeesetti.nextplayer.feature.videopicker.CloudDirectoryCache
 import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -101,7 +102,10 @@ class QuarkBrowserViewModel @Inject constructor(
         }
         if (cookie.isNotBlank()) {
             apiClient.setCookie(cookie)
-            updateUiState { it.copy(isLoggedIn = true, driveType = type, items = if (isSwitching) emptyList() else it.items, error = null, isLoading = false) }
+            updateUiState { it.copy(isLoggedIn = true, driveType = type, items = if (isSwitching) emptyList() else it.items, error = null, isLoading = true) }
+            syncStackTop { it.copy(isLoading = true, error = null) }
+            // 从磁盘缓存预填根目录，加速子目录导航
+            CloudDirectoryCache.get(getApplication(), type, "0")?.let { directoryCache["0"] = it }
             loadDirectory("0")
         } else {
             if (isSwitching) QuarkAuthProvider.clear()
@@ -120,6 +124,8 @@ class QuarkBrowserViewModel @Inject constructor(
         val ucPrefs = getApplication<Application>().getSharedPreferences(UC_PREF_NAME, Context.MODE_PRIVATE)
         ucPrefs.edit().clear().apply()
         directoryCache.clear()
+        CloudDirectoryCache.clear(getApplication(), "quark")
+        CloudDirectoryCache.clear(getApplication(), "uc")
         // 清除 WebView 痕迹
         try {
             val cookieManager = android.webkit.CookieManager.getInstance()
@@ -141,6 +147,7 @@ class QuarkBrowserViewModel @Inject constructor(
         loadSequence++
         val seq = loadSequence
         updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
+        syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
             val result = apiClient.listFiles(parentFileId)
@@ -162,6 +169,7 @@ class QuarkBrowserViewModel @Inject constructor(
                     }
                     val resources = items.map { fileToResource(it) }
                     directoryCache[parentFileId] = resources
+                    CloudDirectoryCache.put(getApplication(), provider, parentFileId, resources)
                     updateUiState {
                         it.copy(
                             items = resources,

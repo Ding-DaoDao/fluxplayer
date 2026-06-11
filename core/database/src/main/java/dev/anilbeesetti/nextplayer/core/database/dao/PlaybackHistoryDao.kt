@@ -31,6 +31,9 @@ interface PlaybackHistoryDao {
     @Query("UPDATE playback_history SET thumbnail_path = :path WHERE uri = :uriString")
     suspend fun updateThumbnailPath(uriString: String, path: String?)
 
+    @Query("SELECT * FROM playback_history WHERE uri = :uriString LIMIT 1")
+    suspend fun getByUri(uriString: String): PlaybackHistoryEntity?
+
     @Query("SELECT COUNT(*) FROM playback_history WHERE uri = :uriString")
     suspend fun countByUri(uriString: String): Int
 

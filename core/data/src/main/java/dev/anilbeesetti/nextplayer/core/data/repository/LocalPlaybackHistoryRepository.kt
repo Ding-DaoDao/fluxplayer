@@ -85,6 +85,10 @@ class LocalPlaybackHistoryRepository @Inject constructor(
         originalUriString: String?,
         thumbnailPath: String?,
     ) {
+        // 新的缩略图优先使用；如果本次未截取，保留数据库中已有的缩略图
+        val finalThumbnailPath = thumbnailPath
+            ?: playbackHistoryDao.getByUri(uriString)?.thumbnailPath
+
         playbackHistoryDao.upsert(
             PlaybackHistoryEntity(
                 uriString = uriString,
@@ -94,11 +98,11 @@ class LocalPlaybackHistoryRepository @Inject constructor(
                 playbackPosition = position,
                 duration = duration,
                 originalUriString = originalUriString,
-                thumbnailPath = thumbnailPath,
+                thumbnailPath = finalThumbnailPath,
             ),
         )
-        // 如果没有预截取的缩略图，异步提取
-        if (thumbnailPath == null) {
+        // 只有完全没有缩略图时才异步提取
+        if (finalThumbnailPath == null) {
             thumbnailScope.launch {
                 val path = thumbnailExtractor.extract(
                     uriString = uriString,

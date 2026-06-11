@@ -13,7 +13,7 @@ import dev.anilbeesetti.nextplayer.core.data.yun139.Yun139ApiClient
 import dev.anilbeesetti.nextplayer.core.data.yun139.Yun139AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.yun139.Yun139FileItem
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
-import kotlinx.coroutines.delay
+import dev.anilbeesetti.nextplayer.feature.videopicker.CloudDirectoryCache
 import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -84,38 +84,28 @@ class Yun139BrowserViewModel @Inject constructor(
 
         if (authorization.isBlank()) return
 
-        viewModelScope.launch {
-            var valid = false
-            for (attempt in 1..4) {
+        // 直接设置 token 并加载目录，跳过前置验证（loadDirectory 内已处理认证失败）
+        apiClient.setToken(authorization, phoneNumber, userDomainId)
+        updateUiState { it.copy(isLoggedIn = true, isLoading = true) }
+        syncStackTop { it.copy(isLoading = true, error = null) }
+        // 从磁盘缓存预填根目录，加速子目录导航
+        CloudDirectoryCache.get(getApplication(), "yun139", "/")?.let { directoryCache["/"] = it }
+        loadDirectory("/")
+
+        // 超过7天自动刷新token
+        val sevenDays = 7L * 24 * 60 * 60 * 1000
+        if (System.currentTimeMillis() - lastRefresh >= sevenDays) {
+            viewModelScope.launch {
                 try {
-                    apiClient.setToken(authorization, phoneNumber, userDomainId)
-                    val result = apiClient.listFiles("/", 1, 10)
-                    if (result.isSuccess) { valid = true; break }
+                    val refreshResult = apiClient.refreshToken()
+                    if (refreshResult.isSuccess) {
+                        prefs.edit()
+                            .putString("authorization", Yun139AuthProvider.authorization)
+                            .putLong("lastRefresh", System.currentTimeMillis())
+                            .apply()
+                        Log.d(TAG, "token auto-refreshed")
+                    }
                 } catch (_: Exception) {}
-                if (attempt < 4) delay(1500)
-            }
-
-            if (valid) {
-                updateUiState { it.copy(isLoggedIn = true) }
-                loadDirectory("/")
-
-                // 超过7天自动刷新token
-                val sevenDays = 7L * 24 * 60 * 60 * 1000
-                if (System.currentTimeMillis() - lastRefresh >= sevenDays) {
-                    try {
-                        val refreshResult = apiClient.refreshToken()
-                        if (refreshResult.isSuccess) {
-                            prefs.edit()
-                                .putString("authorization", Yun139AuthProvider.authorization)
-                                .putLong("lastRefresh", System.currentTimeMillis())
-                                .apply()
-                            Log.d(TAG, "token auto-refreshed")
-                        }
-                    } catch (_: Exception) {}
-                }
-            } else {
-                Log.w(TAG, "autoLogin token verification failed, keeping credentials")
-                updateUiState { it.copy(error = "登录已过期，请重新登录") }
             }
         }
     }
@@ -161,6 +151,7 @@ class Yun139BrowserViewModel @Inject constructor(
     fun logout() {
         apiClient.logout()
         directoryCache.clear()
+        CloudDirectoryCache.clear(getApplication(), "yun139")
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         // 清除 WebView 痕迹
@@ -183,6 +174,7 @@ class Yun139BrowserViewModel @Inject constructor(
         loadSequence++
         val seq = loadSequence
         updateUiState { it.copy(isLoading = true, error = null, currentFolderId = parentFileId) }
+        syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
             val result = apiClient.listFiles(parentFileId)
@@ -201,6 +193,7 @@ class Yun139BrowserViewModel @Inject constructor(
                     }
                     val resources = listResult.items.map { fileToResource(it) }
                     directoryCache[parentFileId] = resources
+                    CloudDirectoryCache.put(getApplication(), "yun139", parentFileId, resources)
                     updateUiState {
                         it.copy(
                             items = resources,

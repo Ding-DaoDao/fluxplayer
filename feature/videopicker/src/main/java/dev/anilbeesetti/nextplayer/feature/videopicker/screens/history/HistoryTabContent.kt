@@ -273,7 +273,13 @@ private fun sourceIcon(source: VideoSource) = when (source) {
     VideoSource.LOCAL -> NextIcons.Movie
     VideoSource.WEBDAV -> NextIcons.Folder
     VideoSource.OPENLIST -> NextIcons.Link
-    else -> NextIcons.Play
+    VideoSource.ALIYUN,
+    VideoSource.PAN123,
+    VideoSource.QUARK,
+    VideoSource.UC,
+    VideoSource.CLOUD189,
+    VideoSource.YUN139 -> NextIcons.Storage
+    VideoSource.OTHER -> NextIcons.Play
 }
 
 @Composable
@@ -281,14 +287,26 @@ private fun sourceColor(source: VideoSource) = when (source) {
     VideoSource.LOCAL -> MaterialTheme.colorScheme.primary
     VideoSource.WEBDAV -> MaterialTheme.colorScheme.tertiary
     VideoSource.OPENLIST -> MaterialTheme.colorScheme.secondary
-    else -> MaterialTheme.colorScheme.onSurfaceVariant
+    VideoSource.ALIYUN,
+    VideoSource.PAN123,
+    VideoSource.QUARK,
+    VideoSource.UC,
+    VideoSource.CLOUD189,
+    VideoSource.YUN139 -> MaterialTheme.colorScheme.primaryContainer
+    VideoSource.OTHER -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 private fun sourceLabel(source: VideoSource) = when (source) {
     VideoSource.LOCAL -> "本地"
     VideoSource.WEBDAV -> "WebDAV"
     VideoSource.OPENLIST -> "OpenList"
-    else -> "其他"
+    VideoSource.ALIYUN -> "阿里云盘"
+    VideoSource.PAN123 -> "123云盘"
+    VideoSource.QUARK -> "夸克"
+    VideoSource.UC -> "UC"
+    VideoSource.CLOUD189 -> "天翼云盘"
+    VideoSource.YUN139 -> "移动云盘"
+    VideoSource.OTHER -> "其他"
 }
 
 private fun formatRelativeTime(timestamp: Long): String {

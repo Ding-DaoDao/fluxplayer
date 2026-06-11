@@ -14,6 +14,7 @@ import dev.anilbeesetti.nextplayer.core.data.pan123.Pan123AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.pan123.Pan123FileItem
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
+import dev.anilbeesetti.nextplayer.feature.videopicker.CloudDirectoryCache
 import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -85,7 +86,10 @@ class Pan123BrowserViewModel @Inject constructor(
         // 优先使用 token 恢复
         if (token.isNotBlank()) {
             apiClient.setToken("Bearer $token")
-            updateUiState { it.copy(isLoggedIn = true) }
+            updateUiState { it.copy(isLoggedIn = true, isLoading = true) }
+            syncStackTop { it.copy(isLoading = true, error = null) }
+            // 从磁盘缓存预填根目录，加速子目录导航
+            CloudDirectoryCache.get(getApplication(), "pan123", "0")?.let { directoryCache["0"] = it }
             viewModelScope.launch {
                 try { loadDirectory("0") } catch (_: Exception) {}
             }
@@ -156,6 +160,7 @@ class Pan123BrowserViewModel @Inject constructor(
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         directoryCache.clear()
+        CloudDirectoryCache.clear(getApplication(), "pan123")
         _uiState.value = Pan123BrowserUiState()
         _navigationStack.value = listOf(DirectoryStackEntry(fileId = "0", label = "根目录"))
     }
@@ -169,6 +174,7 @@ class Pan123BrowserViewModel @Inject constructor(
         loadSequence++
         val seq = loadSequence
         updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
+        syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
             val result = apiClient.listFiles(parentFileId)
@@ -188,6 +194,7 @@ class Pan123BrowserViewModel @Inject constructor(
                     }
                     val resources = items.map { fileToResource(it) }
                     directoryCache[parentFileId] = resources
+                    CloudDirectoryCache.put(getApplication(), "pan123", parentFileId, resources)
                     updateUiState {
                         it.copy(
                             items = resources,

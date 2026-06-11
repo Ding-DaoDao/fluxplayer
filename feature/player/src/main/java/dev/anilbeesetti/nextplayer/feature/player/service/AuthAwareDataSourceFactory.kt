@@ -35,7 +35,7 @@ class AuthAwareDataSourceFactory(
     private val httpFactory = DefaultHttpDataSource.Factory()
         .setUserAgent(userAgent)
         .setConnectTimeoutMs(15_000)
-        .setReadTimeoutMs(10_000)
+        .setReadTimeoutMs(20_000)
         .setAllowCrossProtocolRedirects(true)
 
     override fun createDataSource(): DataSource {

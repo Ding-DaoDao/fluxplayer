@@ -6,10 +6,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Base64
 import dagger.hilt.android.qualifiers.ApplicationContext
-import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunAuthProvider
-import dev.anilbeesetti.nextplayer.core.data.cloud189.C189AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.openlist.OpenListTokenProvider
-import dev.anilbeesetti.nextplayer.core.data.quark.QuarkAuthProvider
 import dev.anilbeesetti.nextplayer.core.model.VideoSource
 import java.io.File
 import java.io.FileOutputStream
@@ -74,31 +71,12 @@ class ThumbnailExtractor @Inject constructor(
                     if (token == null) return@withContext null
                     retriever.setDataSource(uriString, mapOf("Authorization" to "Bearer $token"))
                 }
-                VideoSource.PAN123 -> {
-                    val cleanUrl = uriString.replace(Regex("#.*$"), "")
-                    retriever.setDataSource(cleanUrl, emptyMap())
-                }
-                VideoSource.QUARK, VideoSource.UC -> {
-                    val cleanUrl = uriString.replace(Regex("#.*$"), "")
-                    val headers = QuarkAuthProvider.getPlayHeaders()
-                    if (headers.isEmpty()) return@withContext null
-                    retriever.setDataSource(cleanUrl, headers)
-                }
-                VideoSource.ALIYUN -> {
-                    val cleanUrl = uriString.replace(Regex("#.*$"), "")
-                    val headers = AliyunAuthProvider.getPlayHeaders()
-                    if (headers.isEmpty()) return@withContext null
-                    retriever.setDataSource(cleanUrl, headers)
-                }
-                VideoSource.CLOUD189 -> {
-                    val cleanUrl = uriString.replace(Regex("#.*$"), "")
-                    val headers = mutableMapOf(
-                        "User-Agent" to C189AuthProvider.userAgent,
-                        "Referer" to "https://cloud.189.cn/web/main/"
-                    )
-                    retriever.setDataSource(cleanUrl, headers)
-                }
-                VideoSource.YUN139 -> return@withContext null
+                VideoSource.PAN123,
+                VideoSource.QUARK,
+                VideoSource.UC,
+                VideoSource.ALIYUN,
+                VideoSource.CLOUD189,
+                VideoSource.YUN139,
                 VideoSource.OTHER -> return@withContext null
             }
 

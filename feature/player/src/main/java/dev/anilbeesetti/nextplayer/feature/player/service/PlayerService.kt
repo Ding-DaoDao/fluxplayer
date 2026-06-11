@@ -173,11 +173,13 @@ class PlayerService : MediaSessionService() {
                             position = updatedPosition,
                         )
                     }
-                    recordPlaybackHistory(
-                        mediaItem = oldMediaItem,
-                        position = updatedPosition.takeIf { it != C.TIME_UNSET }
-                            ?: oldPosition.positionMs,
-                    )
+                    serviceScope.launch {
+                        recordPlaybackHistory(
+                            mediaItem = oldMediaItem,
+                            position = updatedPosition.takeIf { it != C.TIME_UNSET }
+                                ?: oldPosition.positionMs,
+                        )
+                    }
                 }
 
                 DISCONTINUITY_REASON_REMOVE -> {
@@ -189,10 +191,12 @@ class PlayerService : MediaSessionService() {
                             position = if (isAtEnd) C.TIME_UNSET else oldPosition.positionMs,
                         )
                     }
-                    recordPlaybackHistory(
-                        mediaItem = oldMediaItem,
-                        position = oldPosition.positionMs,
-                    )
+                    serviceScope.launch {
+                        recordPlaybackHistory(
+                            mediaItem = oldMediaItem,
+                            position = oldPosition.positionMs,
+                        )
+                    }
                 }
 
                 else -> return
@@ -325,11 +329,16 @@ class PlayerService : MediaSessionService() {
                     )
                 }
             }
-            val currentMediaItem = mediaSession?.player?.currentMediaItem
-            if (currentMediaItem != null) {
+            // 暂停时才记录播放历史（播放时不记录）
+            if (isPlaying) return
+            val player = mediaSession?.player ?: return
+            // 播放器 IDLE 状态时由 STOP_PLAYER_SESSION 统一处理，避免重复覆盖
+            if (player.playbackState == Player.STATE_IDLE) return
+            val currentMediaItem = player.currentMediaItem ?: return
+            serviceScope.launch {
                 recordPlaybackHistory(
                     mediaItem = currentMediaItem,
-                    position = mediaSession?.player?.currentPosition ?: 0L,
+                    position = player.currentPosition,
                 )
             }
         }
@@ -746,25 +755,23 @@ class PlayerService : MediaSessionService() {
         }.awaitAll()
     }
     
-    private fun recordPlaybackHistory(mediaItem: MediaItem, position: Long) {
-        serviceScope.launch {
-            val uri = mediaItem.mediaId
-            val title = mediaItem.mediaMetadata.title?.toString()
-                ?: getFilenameFromUri(uri.toUri())
-            val duration = mediaItem.mediaMetadata.durationMs ?: 0L
-            val source = VideoSource.fromUri(uri)
-            // 从 PlayerFrameCapture 取出退出时截取的缩略图路径
-            val preCapturedPath = PlayerFrameCapture.take(uri)
-            playbackHistoryRepository.recordPlayback(
-                uriString = uri,
-                title = title,
-                source = source,
-                position = position,
-                duration = duration,
-                originalUriString = if (source == VideoSource.WEBDAV) uri else null,
-                thumbnailPath = preCapturedPath,
-            )
-        }
+    private suspend fun recordPlaybackHistory(mediaItem: MediaItem, position: Long) {
+        val uri = mediaItem.mediaId
+        val title = mediaItem.mediaMetadata.title?.toString()
+            ?: getFilenameFromUri(uri.toUri())
+        val duration = mediaItem.mediaMetadata.durationMs ?: 0L
+        val source = VideoSource.fromUri(uri)
+        // 从 PlayerFrameCapture 取出退出时截取的缩略图路径
+        val preCapturedPath = PlayerFrameCapture.take(uri)
+        playbackHistoryRepository.recordPlayback(
+            uriString = uri,
+            title = title,
+            source = source,
+            position = position,
+            duration = duration,
+            originalUriString = if (source == VideoSource.WEBDAV) uri else null,
+            thumbnailPath = preCapturedPath,
+        )
     }
 
     private fun getDefaultArtworkUri(): Uri = Uri.Builder().apply {

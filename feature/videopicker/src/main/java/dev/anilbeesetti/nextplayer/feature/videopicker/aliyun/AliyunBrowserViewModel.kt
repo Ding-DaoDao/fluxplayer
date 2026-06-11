@@ -13,9 +13,9 @@ import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunAuthProvider
 import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunTokenExpiredException
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import dev.anilbeesetti.nextplayer.feature.videopicker.CloudDirectoryCache
 import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -158,7 +158,7 @@ class AliyunBrowserViewModel @Inject constructor(
 
     // endregion
 
-    // region ==================== 登录 — tryRestoreSession（含token验证重试） ====================
+    // region ==================== 登录 — tryRestoreSession ====================
 
     fun tryRestoreSession() {
         if (_uiState.value.isLoggedIn) return
@@ -184,29 +184,15 @@ class AliyunBrowserViewModel @Inject constructor(
             apiClient.setSignature(savedSignature)
         }
 
-        viewModelScope.launch {
-            var valid = false
-            for (i in 0 until 3) {
-                try {
-                    val result = apiClient.getUserDriveInfo()
-                    if (result.isSuccess) {
-                        valid = true
-                        break
-                    }
-                } catch (_: Exception) {}
-                if (i < 2) delay(1500)
-            }
-
-            if (valid) {
-                AliyunAuthProvider.authorization = auth
-                AliyunAuthProvider.isActive = true
-                updateUiState { it.copy(isLoggedIn = true) }
-                refreshDriveInfo()
-                loadDirectory("root")
-            } else {
-                triggerReLogin()
-            }
-        }
+        // 跳过 token 验证，直接加载目录（loadDirectory 内已处理 token 失效 → triggerReLogin）
+        AliyunAuthProvider.authorization = auth
+        AliyunAuthProvider.isActive = true
+        updateUiState { it.copy(isLoggedIn = true, isLoading = true) }
+        syncStackTop { it.copy(isLoading = true, error = null) }
+        // 从磁盘缓存预填根目录，加速子目录导航
+        CloudDirectoryCache.get(getApplication(), "alipan", "root")?.let { directoryCache["root"] = it }
+        viewModelScope.launch { refreshDriveInfo() }
+        loadDirectory("root")
     }
 
     // endregion
@@ -218,6 +204,7 @@ class AliyunBrowserViewModel @Inject constructor(
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         directoryCache.clear()
+        CloudDirectoryCache.clear(getApplication(), "alipan")
         // 清除 WebView 痕迹（cookie、localStorage、缓存等）
         try {
             val cookieManager = android.webkit.CookieManager.getInstance()
@@ -314,6 +301,7 @@ class AliyunBrowserViewModel @Inject constructor(
         loadSequence++
         val seq = loadSequence
         updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
+        syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
             val result = apiClient.listFiles(
@@ -336,6 +324,7 @@ class AliyunBrowserViewModel @Inject constructor(
                     }
                     val resources = listResult.items.map { fileToResource(it) }
                     directoryCache[parentFileId] = resources
+                    CloudDirectoryCache.put(getApplication(), "alipan", parentFileId, resources)
                     updateUiState {
                         it.copy(
                             items = resources,

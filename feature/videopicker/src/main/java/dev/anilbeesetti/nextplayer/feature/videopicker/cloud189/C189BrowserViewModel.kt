@@ -11,6 +11,7 @@ import dev.anilbeesetti.nextplayer.core.data.cloud189.C189AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.cloud189.C189FileItem
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
+import dev.anilbeesetti.nextplayer.feature.videopicker.CloudDirectoryCache
 import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -89,7 +90,10 @@ class C189BrowserViewModel @Inject constructor(
             val cookies = prefs.getString("cookies", "") ?: ""
             apiClient.restoreCookies(cookies)
 
-            updateUiState { it.copy(isLoggedIn = true) }
+            updateUiState { it.copy(isLoggedIn = true, isLoading = true) }
+            syncStackTop { it.copy(isLoading = true, error = null) }
+            // 从磁盘缓存预填根目录，加速子目录导航
+            CloudDirectoryCache.get(getApplication(), "cloud189", "-11")?.let { directoryCache["-11"] = it }
             viewModelScope.launch {
                 try {
                     loadDirectory("-11")
@@ -185,6 +189,7 @@ class C189BrowserViewModel @Inject constructor(
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         directoryCache.clear()
+        CloudDirectoryCache.clear(getApplication(), "cloud189")
         _uiState.value = C189BrowserUiState()
         _navigationStack.value = listOf(DirectoryStackEntry(fileId = "-11", label = "根目录"))
     }
@@ -198,6 +203,7 @@ class C189BrowserViewModel @Inject constructor(
         loadSequence++
         val seq = loadSequence
         updateUiState { it.copy(isLoading = true, error = null, currentFolderId = parentFileId) }
+        syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
             val state = _uiState.value
@@ -219,6 +225,7 @@ class C189BrowserViewModel @Inject constructor(
                     }
                     val resources = listResult.items.map { fileToResource(it) }
                     directoryCache[parentFileId] = resources
+                    CloudDirectoryCache.put(getApplication(), "cloud189", parentFileId, resources)
                     updateUiState {
                         it.copy(
                             items = resources,
