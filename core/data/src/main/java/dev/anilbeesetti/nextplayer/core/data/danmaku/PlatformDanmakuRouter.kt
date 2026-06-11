@@ -37,7 +37,6 @@ class PlatformDanmakuRouter(
             MgtvDanmakuFetcher(),
             YoukuDanmakuFetcher(),
             QiyiDanmakuFetcher(),
-            RrspDanmakuFetcher(),
         )
     }
 }

@@ -68,7 +68,6 @@ data class PlayerPreferences(
         DanmakuSource.MGTV,
         DanmakuSource.YOUKU,
         DanmakuSource.QIYI,
-        DanmakuSource.RRSP,
     ),
     /** 已缓存的弹幕映射 episodeId -> 本地文件路径 */
     val danmakuCacheMap: Map<String, String> = emptyMap(),

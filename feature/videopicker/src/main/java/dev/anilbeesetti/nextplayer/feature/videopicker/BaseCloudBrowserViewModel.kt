@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -149,6 +150,25 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
     protected val pageSize: Int = 100
 
+    /** 内存目录缓存 —— 已访问目录的列表，返回上级时直接恢复，不走网络 */
+    private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
+
+    /** 导航栈 —— 每层目录的独立状态，用于栈式叠加导航 */
+    private val _navigationStack = MutableStateFlow(
+        listOf(DirectoryStackEntry(fileId = rootFileId, label = rootLabel))
+    )
+    val navigationStack: StateFlow<List<DirectoryStackEntry>> = _navigationStack.asStateFlow()
+
+    /** 同步栈顶与扁平状态 */
+    private fun syncStackTop(transform: (DirectoryStackEntry) -> DirectoryStackEntry) {
+        _navigationStack.update { stack ->
+            if (stack.isEmpty()) return@update stack
+            stack.toMutableList().apply {
+                set(lastIndex, transform(get(lastIndex)))
+            }
+        }
+    }
+
     private val _downloadProgress = MutableStateFlow<DownloadProgressData?>(null)
     val downloadProgress: StateFlow<DownloadProgressData?> = _downloadProgress.asStateFlow()
 
@@ -180,7 +200,6 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
     private var loadDirectoryFn: ((String) -> Unit)? = null
     private var resetStateFn: (() -> Unit)? = null
     private var getPrefsRepoFn: (() -> PreferencesRepository)? = null
-    private var recordFootprintFn: ((String) -> Unit)? = null
 
     // endregion
 
@@ -195,14 +214,12 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
         loadDirectory: (String) -> Unit,
         resetState: (() -> Unit)? = null,
         prefsRepo: () -> PreferencesRepository,
-        recordFootprint: (String) -> Unit = {}
     ) {
         this.readStateFn = readState
         this.updateStateFn = updateState
         this.loadDirectoryFn = loadDirectory
         this.resetStateFn = resetState
         this.getPrefsRepoFn = prefsRepo
-        this.recordFootprintFn = recordFootprint
     }
 
     // endregion
@@ -233,8 +250,8 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                 error = update.error ?: current.error,
                 orderBy = update.orderBy ?: current.orderBy,
                 orderDirection = update.orderDirection ?: current.orderDirection,
-                currentFootprint = update.currentFootprint ?: current.currentFootprint,
                 scrollTargetIndex = update.scrollTargetIndex ?: current.scrollTargetIndex,
+                scrollTargetOffset = update.scrollTargetOffset ?: current.scrollTargetOffset,
                 scrollTargetParentKey = update.scrollTargetParentKey ?: current.scrollTargetParentKey,
                 pendingAction = update.pendingAction ?: current.pendingAction,
                 moveFileId = update.moveFileId ?: current.moveFileId,
@@ -249,6 +266,29 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
     // region ==================== 导航 ====================
 
+    /**
+     * 加载目录（优先从内存缓存恢复）
+     */
+    protected fun loadDirectoryCached(fileId: String) {
+        val cached = directoryCache[fileId]
+        Log.d("BaseCloudVM", "loadDirectoryCached: fileId=$fileId, cacheHit=${cached != null}, cacheSize=${directoryCache.size}")
+        if (cached != null) {
+            updateState(
+                CommonStateUpdate(
+                    items = cached,
+                    currentFileId = fileId,
+                    isLoading = false,
+                    error = null
+                )
+            )
+            syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
+        } else {
+            updateState(CommonStateUpdate(items = emptyList(), currentFileId = fileId))
+            syncStackTop { it.copy(items = emptyList(), isLoading = true, error = null) }
+            loadDirectoryFn?.invoke(fileId)
+        }
+    }
+
     /** 进入指定索引的目录 */
     open fun navigateToDir(index: Int) {
         val state = readState()
@@ -256,17 +296,14 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
         if (!item.isDirectory) return
 
         val fileId = item.path
-        val parentKey = state.breadcrumbs.joinToString("/") { breadcrumbLabel(it) }
 
         updateState(
             CommonStateUpdate(
-                items = emptyList(),
-                breadcrumbs = state.breadcrumbs + makeBreadcrumb(item.name, fileId),
-                scrollTargetIndex = index,
-                scrollTargetParentKey = parentKey
+                breadcrumbs = state.breadcrumbs + makeBreadcrumb(item.name, fileId)
             )
         )
-        loadDirectoryFn?.invoke(fileId)
+        _navigationStack.update { it + DirectoryStackEntry(fileId = fileId, label = item.name) }
+        loadDirectoryCached(fileId)
     }
 
     fun clearScrollTarget() {
@@ -275,16 +312,22 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
     /** 返回上级目录 */
     open fun navigateUp() {
-        val breadcrumbs = readState().breadcrumbs
+        val state = readState()
+        val breadcrumbs = state.breadcrumbs
         if (breadcrumbs.size <= 1) return
 
         val target = breadcrumbs[breadcrumbs.size - 2]
+        val parentFileId = breadcrumbFileId(target)
+
         updateState(
             CommonStateUpdate(
-                breadcrumbs = breadcrumbs.dropLast(1)
+                breadcrumbs = breadcrumbs.dropLast(1),
+                scrollTargetIndex = -1,
+                scrollTargetParentKey = null
             )
         )
-        loadDirectoryFn?.invoke(breadcrumbFileId(target))
+        _navigationStack.update { if (it.size > 1) it.dropLast(1) else it }
+        loadDirectoryCached(parentFileId)
     }
 
     /** 跳转到指定面包屑位置 */
@@ -293,14 +336,18 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
         if (index >= breadcrumbs.size) return
 
         val target = breadcrumbs[index]
-        if (breadcrumbFileId(target).isEmpty()) return
+        val targetFileId = breadcrumbFileId(target)
+        if (targetFileId.isEmpty()) return
 
         updateState(
             CommonStateUpdate(
-                breadcrumbs = breadcrumbs.subList(0, index + 1)
+                breadcrumbs = breadcrumbs.subList(0, index + 1),
+                scrollTargetIndex = -1,
+                scrollTargetParentKey = null
             )
         )
-        loadDirectoryFn?.invoke(breadcrumbFileId(target))
+        _navigationStack.update { it.take(index + 1) }
+        loadDirectoryCached(targetFileId)
     }
 
     /**
@@ -342,7 +389,6 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                 orderDirection = dir
             )
         )
-        // CloudDirectoryCache 是 @Singleton 注入类，子类可按需调用
         loadDirectoryFn?.invoke(readState().currentFileId)
     }
 
@@ -357,65 +403,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
     // endregion
 
-    // region ==================== 足迹 ====================
-
-    protected fun recordFootprintCommon(path: String) {
-        val dir = readState().currentFileId
-        recordFootprintFn?.invoke(path)
-
-        viewModelScope.launch {
-            try {
-                val prefs = getPrefsRepoFn?.invoke() ?: return@launch
-                val appPrefs = prefs.applicationPreferences.value
-                val footprintMap = appPrefs.latestFootprintPerDir.toMutableMap()
-                footprintMap["$providerLabel:$dir"] = path
-                prefs.updateApplicationPreferences { it.copy(latestFootprintPerDir = footprintMap) }
-            } catch (_: Exception) {
-                // 足迹记录失败不影响主流程
-            }
-        }
-    }
-
-    // endregion
-
-    // region ==================== 缓存 ====================
-
-    protected fun cacheKey(fileId: String? = null): String {
-        return "$providerLabel:${fileId ?: readState().currentFileId}"
-    }
-
-    protected fun tryLoadFromCache(parentFileId: String): Boolean {
-        val key = cacheKey(parentFileId)
-        // CloudDirectoryCache 是 @Singleton 注入类，需要通过 Hilt 获取
-        // 这里直接跳过缓存（子类可按需重写）
-        return false
-        /*
-        val cached = CloudDirectoryCache.getCachedDirectory(providerLabel, parentFileId)
-        if (cached == null) return false
-
-        updateState(
-            CommonStateUpdate(
-                items = cached.items,
-                currentFileId = parentFileId,
-                isLoading = false,
-                isLoadingMore = false,
-                hasMore = true,
-                currentPage = 1
-            )
-        )
-
-        // 异步加载足迹
-        viewModelScope.launch {
-            try {
-                val prefs = getPrefsRepoFn?.invoke() ?: return@launch
-                val fp = prefs.applicationPreferences.value.latestFootprintPerDir[key]
-                updateState(CommonStateUpdate(currentFootprint = fp))
-            } catch (_: Exception) { }
-        }
-
-        return true
-        */
-    }
+    // region ==================== 足迹（已移除） ====================
 
     // endregion
 
@@ -426,33 +414,18 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
         resources: List<WebDavResource>,
         hasMore: Boolean
     ) {
-        // CloudDirectoryCache 是 @Singleton 注入类，子类可按需调用
-        // CloudDirectoryCache.cacheDirectory(...)
+        directoryCache[parentFileId] = resources
+        Log.d("BaseCloudVM", "onDirectoryLoaded: cached parentFileId=$parentFileId, items=${resources.size}, cacheSize=${directoryCache.size}")
 
-        viewModelScope.launch {
-            try {
-                val prefs = getPrefsRepoFn?.invoke()
-                val fp = prefs?.applicationPreferences?.value?.latestFootprintPerDir?.get(cacheKey(parentFileId))
-                updateState(
-                    CommonStateUpdate(
-                        items = resources,
-                        isLoading = false,
-                        hasMore = hasMore,
-                        currentPage = 1,
-                        currentFootprint = fp
-                    )
-                )
-            } catch (_: Exception) {
-                updateState(
-                    CommonStateUpdate(
-                        items = resources,
-                        isLoading = false,
-                        hasMore = hasMore,
-                        currentPage = 1
-                    )
-                )
-            }
-        }
+        updateState(
+            CommonStateUpdate(
+                items = resources,
+                isLoading = false,
+                hasMore = hasMore,
+                currentPage = 1
+            )
+        )
+        syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
     }
 
     /**
@@ -487,9 +460,11 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
         }
 
         updateState(CommonStateUpdate(error = friendly))
+        syncStackTop { it.copy(error = friendly) }
 
         if (!friendly.contains("登录已过期")) {
             updateState(CommonStateUpdate(isLoading = false))
+            syncStackTop { it.copy(isLoading = false) }
         }
     }
 
@@ -856,7 +831,8 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
     protected fun logoutCommon() {
         val prefs = getApplication<Application>().getSharedPreferences(prefName, 0)
         prefs.edit().clear().apply()
-        // CloudDirectoryCache 是 @Singleton 注入类，子类可按需调用
+        directoryCache.clear()
+        _navigationStack.value = listOf(DirectoryStackEntry(fileId = rootFileId, label = rootLabel))
         val fn = resetStateFn
         if (fn != null) {
             fn()

@@ -3,7 +3,6 @@ package dev.anilbeesetti.nextplayer.feature.videopicker.screens.webdav
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -33,6 +33,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,11 +47,14 @@ import dev.anilbeesetti.nextplayer.core.model.WebDavServer
 import dev.anilbeesetti.nextplayer.core.ui.designsystem.NextIcons
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CenterCircularProgressBar
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.FileTypeIcon
-import dev.anilbeesetti.nextplayer.feature.videopicker.CommonStateSnapshot
 
 /**
  * WebDAV 浏览内容面板（不带 Scaffold / TopAppBar），供标签页直接内嵌。
+ *
+ * 使用栈式叠加导航：每个目录层级有自己的 composable + rememberLazyListState()，
+ * 通过 key(path) 保持状态。返回上级时父目录的滚动位置自动恢复，无需 scrollToItem。
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun WebDavBrowserTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
@@ -59,47 +63,16 @@ fun WebDavBrowserTabContent(
     modifier: Modifier = Modifier,
     viewModel: WebDavBrowserViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.stateFlow.collectAsStateWithLifecycle()
+    val navigationStack by viewModel.navigationStack.collectAsStateWithLifecycle()
     val extraState by viewModel.extraState.collectAsStateWithLifecycle()
+    val state by viewModel.stateFlow.collectAsStateWithLifecycle()
 
-    BackHandler(enabled = state.breadcrumbs.size > 1) {
+    val currentDir = navigationStack.lastOrNull()
+
+    BackHandler(enabled = navigationStack.size > 1) {
         viewModel.navigateUp()
     }
 
-    WebDavBrowserPanel(
-        state = state,
-        extraState = extraState,
-        onPlayVideo = onPlayVideo,
-        onPlayVideos = onPlayVideos,
-        onRecordFootprint = viewModel::recordFootprint,
-        onDownloadFile = viewModel::downloadFile,
-        onNavigateToDir = viewModel::navigateToDir,
-        onNavigateUpDir = viewModel::navigateUp,
-        onNavigateToBreadcrumb = viewModel::navigateToBreadcrumb,
-        onRefresh = viewModel::refresh,
-        onSettingsClick = onSettingsClick,
-        onSetActive = viewModel::selectServer,
-        modifier = modifier,
-    )
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-internal fun WebDavBrowserPanel(
-    state: CommonStateSnapshot<WebDavBreadcrumb>,
-    extraState: WebDavBrowserViewModel.WebDavExtraState,
-    onPlayVideo: (Uri, String?) -> Unit,
-    onPlayVideos: (List<Uri>, Uri) -> Unit,
-    onRecordFootprint: (String) -> Unit,
-    onDownloadFile: (Int) -> Unit,
-    onNavigateToDir: (Int) -> Unit,
-    onNavigateUpDir: () -> Unit,
-    onNavigateToBreadcrumb: (Int) -> Unit,
-    onRefresh: () -> Unit,
-    onSettingsClick: () -> Unit,
-    onSetActive: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
     Column(modifier = modifier.fillMaxSize()) {
         // 服务器标签栏
         if (extraState.activeServers.size > 1) {
@@ -111,7 +84,7 @@ internal fun WebDavBrowserPanel(
                 extraState.activeServers.forEachIndexed { idx, server ->
                     Tab(
                         selected = idx == selectedIndex,
-                        onClick = { onSetActive(server.id) },
+                        onClick = { viewModel.selectServer(server.id) },
                         text = { Text(server.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     )
                 }
@@ -124,145 +97,153 @@ internal fun WebDavBrowserPanel(
                 modifier = Modifier.weight(1f),
             )
         } else {
+            // 面包屑
             BreadcrumbBar(
                 breadcrumbs = state.breadcrumbs,
-                onNavigateToBreadcrumb = onNavigateToBreadcrumb,
-                onNavigateUpDir = onNavigateUpDir,
+                onNavigateToBreadcrumb = { viewModel.navigateToBreadcrumb(it) },
+                onNavigateUpDir = { viewModel.navigateUp() },
             )
 
-            if (state.isLoading && state.items.isEmpty()) {
+            // 栈式目录内容
+            if (currentDir == null) {
                 CenterCircularProgressBar(modifier = Modifier.weight(1f))
-            } else if (state.items.isEmpty()) {
-                EmptyFolder(modifier = Modifier.weight(1f))
             } else {
-                PullToRefreshBox(
-                    isRefreshing = state.isLoading && state.items.isNotEmpty(),
-                    onRefresh = onRefresh,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    ) {
-                        itemsIndexed(state.items) { index, resource ->
-                            val currentItemUri = if (resource.isVideo)
-                                buildSingleWebDavAuthUri(resource, extraState.selectedServer)
-                            else null
-                            val hasPlayFootprint = currentItemUri != null &&
-                                state.currentFootprint == currentItemUri
-                            val isDirFootprint = resource.isDirectory &&
-                                state.currentFootprint == resource.path
-                            val hasFootprint = hasPlayFootprint || isDirFootprint
+                Box(modifier = Modifier.weight(1f)) {
+                    navigationStack.forEachIndexed { index, dirState ->
+                        val isTop = index == navigationStack.lastIndex
+                        key(dirState.path) {
+                            // 每个目录层级都有自己的 LazyListState，由 key(path) 保持
+                            val listState = rememberLazyListState()
+                            if (isTop) {
+                                DirectoryContent(
+                                    dirState = dirState,
+                                    listState = listState,
+                                    server = extraState.selectedServer,
+                                    onPlayVideo = onPlayVideo,
+                                    onPlayVideos = onPlayVideos,
+                                    onDownloadFile = { viewModel.downloadFile(it) },
+                                    onNavigateToDir = { viewModel.navigateToDir(it) },
+                                    onRefresh = { viewModel.refresh() },
+                                )
+                            }
+                            // 非顶层：不渲染内容，但 key(path) 保持 LazyListState 存活
+                        }
+                    }
+                }
 
-                            Card(
-                                onClick = {
-                                    if (resource.isDirectory) {
-                                        onNavigateToDir(index)
-                                    } else if (resource.isVideo) {
-                                        val clickedVideoUri = buildSingleWebDavAuthUri(resource, extraState.selectedServer)
-                                        val allVideos = state.items.filter { it.isVideo }
-                                        val videoUris = buildWebDavPlaylist(
-                                            items = allVideos,
-                                            server = extraState.selectedServer,
-                                        )
-                                        if (videoUris.isNotEmpty()) {
-                                            onRecordFootprint(clickedVideoUri)
-                                            onPlayVideos(videoUris, Uri.parse(clickedVideoUri))
-                                        }
-                                    } else {
-                                        onDownloadFile(index)
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Box {
-                                        FileTypeIcon(
-                                            item = resource,
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(RoundedCornerShape(8.dp)),
-                                        )
-                                        if (hasFootprint) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .size(16.dp)
-                                                    .background(
-                                                        color = MaterialTheme.colorScheme.primary,
-                                                        shape = CircleShape,
-                                                    ),
-                                                contentAlignment = Alignment.Center,
-                                            ) {
-                                                Icon(
-                                                    imageVector = NextIcons.Check,
-                                                    contentDescription = "足迹",
-                                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                                    modifier = Modifier.size(10.dp),
-                                                )
-                                            }
-                                        }
-                                    }
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            text = resource.name,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            color = if (hasPlayFootprint) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurface
-                                            },
-                                        )
-                                        if (!resource.isDirectory && resource.size > 0) {
-                                            Text(
-                                                text = formatFileSize(resource.size),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    }
-                                    if (resource.isDirectory) {
-                                        Text(
-                                            text = "›",
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            style = MaterialTheme.typography.titleLarge,
-                                        )
-                                    }
-                                }
+                // 错误提示
+                currentDir.error?.let { error ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = error,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            TextButton(onClick = { viewModel.refresh() }) {
+                                Text("重试", color = MaterialTheme.colorScheme.onErrorContainer)
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
 
-            state.error?.let { error ->
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = error,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        TextButton(onClick = onRefresh) {
-                            Text("重试", color = MaterialTheme.colorScheme.onErrorContainer)
+/**
+ * 单个目录层级的内容（LazyColumn + 下拉刷新）
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun DirectoryContent(
+    dirState: WebDavDirectoryState,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    server: WebDavServer?,
+    onPlayVideo: (Uri, String?) -> Unit,
+    onPlayVideos: (List<Uri>, Uri) -> Unit,
+    onDownloadFile: (Int) -> Unit,
+    onNavigateToDir: (Int) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    if (dirState.isLoading && dirState.items.isEmpty()) {
+        CenterCircularProgressBar(modifier = Modifier.fillMaxSize())
+    } else if (dirState.items.isEmpty()) {
+        EmptyFolder(modifier = Modifier.fillMaxSize())
+    } else {
+        PullToRefreshBox(
+            isRefreshing = dirState.isLoading && dirState.items.isNotEmpty(),
+            onRefresh = onRefresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                itemsIndexed(dirState.items) { index, resource ->
+                    Card(
+                        onClick = {
+                            if (resource.isDirectory) {
+                                onNavigateToDir(index)
+                            } else if (resource.isVideo) {
+                                val clickedVideoUri = buildSingleWebDavAuthUri(resource, server)
+                                val allVideos = dirState.items.filter { it.isVideo }
+                                val videoUris = buildWebDavPlaylist(allVideos, server)
+                                if (videoUris.isNotEmpty()) {
+                                    onPlayVideos(videoUris, Uri.parse(clickedVideoUri))
+                                }
+                            } else {
+                                onDownloadFile(index)
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            FileTypeIcon(
+                                item = resource,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = resource.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (!resource.isDirectory && resource.size > 0) {
+                                    Text(
+                                        text = formatFileSize(resource.size),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            if (resource.isDirectory) {
+                                Text(
+                                    text = "›",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.titleLarge,
+                                )
+                            }
                         }
                     }
                 }

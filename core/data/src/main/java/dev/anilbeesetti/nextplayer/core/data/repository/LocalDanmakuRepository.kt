@@ -31,27 +31,70 @@ class LocalDanmakuRepository @Inject constructor(
     private val platformRouter = PlatformDanmakuRouter()
 
     override suspend fun searchAnime(source: DanmakuSource, keyword: String): List<AnimeMatch> {
+        // PLATFORM 源走独立 fetcher（B站、腾讯、芒果等），通用 API 源走 DanmakuApiClient
+        if (DanmakuSource.isPlatformSource(source)) {
+            return searchPlatformAnime(keyword, source)
+        }
         return apiClient.searchAnime(source, keyword)
     }
 
-    override suspend fun getEpisodes(source: DanmakuSource, animeId: Int): List<EpisodeInfo> {
-        return apiClient.getEpisodes(source, animeId)
+    override suspend fun getEpisodes(source: DanmakuSource, anime: AnimeMatch): List<EpisodeInfo> {
+        if (DanmakuSource.isPlatformSource(source)) {
+            val fetcher = getPlatformFetcherBySource(source) ?: return emptyList()
+            Log.d(TAG, "getEpisodes: routing to ${fetcher.name} animeId=${anime.animeId} url=${anime.url} title=${anime.title}")
+            val result = fetcher.getEpisodes(anime)
+            Log.d(TAG, "getEpisodes: ${fetcher.name} returned ${result.size} episodes")
+            return result
+        }
+        return apiClient.getEpisodes(source, anime.animeId)
     }
 
-    override suspend fun downloadAndCache(source: DanmakuSource, episodeId: Int): Uri? {
+    override suspend fun downloadAndCache(source: DanmakuSource, episode: EpisodeInfo): Uri? {
+        val episodeId = episode.episodeId
+
         // 检查缓存
         if (downloadManager.isCached(episodeId)) {
             return downloadManager.getCacheUri(episodeId)
         }
 
-        // 下载
-        val inputStream = apiClient.downloadDanmaku(source, episodeId) ?: return null
+        // PLATFORM 源走独立 fetcher：需要用视频页面 URL 下载，而非 API episodeId
+        val inputStream = if (DanmakuSource.isPlatformSource(source)) {
+            val fetcher = getPlatformFetcherBySource(source) ?: return null
+            val videoUrl = buildPlatformEpisodeUrl(source, episode)
+            Log.d(TAG, "downloadAndCache: platform source -> fetcher=${fetcher.name} url=$videoUrl")
+            fetcher.fetchDanmaku(videoUrl)
+        } else {
+            apiClient.downloadDanmaku(source, episodeId)
+        } ?: return null
 
         // 保存到缓存
         val file = downloadManager.saveFromStream(episodeId, inputStream)
         inputStream.close()
 
         return Uri.fromFile(file)
+    }
+
+    /**
+     * 为平台源构造视频页面 URL，供 fetcher.fetchDanmaku 使用。
+     * 优先使用 EpisodeInfo.url（API 返回的链接），否则根据 sourceId 推断。
+     */
+    private fun buildPlatformEpisodeUrl(source: DanmakuSource, episode: EpisodeInfo): String {
+        // 优先用 API 返回的完整 URL
+        val apiUrl = episode.url
+        if (!apiUrl.isNullOrBlank() && (apiUrl.startsWith("http://") || apiUrl.startsWith("https://"))) {
+            return apiUrl
+        }
+
+        // 根据平台类型构造 URL
+        val sourceId = source.id.removePrefix("platform:")
+        return when (sourceId) {
+            "bilibili" -> "https://www.bilibili.com/bangumi/play/ep${episode.episodeId}"
+            "tencent" -> "https://v.qq.com/x/cover/mzc00200.html"
+            else -> {
+                Log.w(TAG, "Cannot build URL for platform=$sourceId, url=${episode.url}")
+                if (!apiUrl.isNullOrBlank()) "https://$apiUrl" else ""
+            }
+        }
     }
 
     override suspend fun fetchDanmakuByUrl(videoUrl: String): Uri? {

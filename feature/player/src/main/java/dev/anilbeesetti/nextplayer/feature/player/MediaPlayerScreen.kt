@@ -63,9 +63,7 @@ import dev.anilbeesetti.nextplayer.core.ui.extensions.copy
 import dev.anilbeesetti.nextplayer.feature.player.danmaku.Danmaku
 import dev.anilbeesetti.nextplayer.feature.player.danmaku.DanmakuController
 import dev.anilbeesetti.nextplayer.feature.player.danmaku.DanmakuOverlay
-import dev.anilbeesetti.nextplayer.feature.player.danmaku.DanmakuSourceSearchSheet
-import dev.anilbeesetti.nextplayer.feature.player.danmaku.DanmakuSourceSelectorSheet
-import dev.anilbeesetti.nextplayer.feature.player.danmaku.LocalDanmakuFileBrowser
+import dev.anilbeesetti.nextplayer.feature.player.danmaku.DanmakuSearchSheet
 import dev.anilbeesetti.nextplayer.feature.player.buttons.NextButton
 import dev.anilbeesetti.nextplayer.feature.player.buttons.PlayPauseButton
 import dev.anilbeesetti.nextplayer.feature.player.buttons.PlayerButton
@@ -239,12 +237,12 @@ fun MediaPlayerScreen(
     }
 
     var overlayView by remember { mutableStateOf<OverlayView?>(null) }
-    var showDanmakuSourceSelector by remember { mutableStateOf(false) }
-    var showLocalDanmakuBrowser by remember { mutableStateOf(false) }
-    var localBrowserDir by remember { mutableStateOf(File(playerPreferences.localDanmakuPath)) }
 
     val danmakuSources by viewModel.danmakuSources.collectAsStateWithLifecycle(emptyList())
     val danmakuDownloadState by viewModel.danmakuDownloadState.collectAsStateWithLifecycle(DanmakuDownloadState.Idle)
+    val danmakuSearchViewMode by viewModel.danmakuSearchViewMode.collectAsStateWithLifecycle()
+    val danmakuSearchKeyword by viewModel.danmakuSearchKeyword.collectAsStateWithLifecycle()
+    val danmakuLocalBrowserDir by viewModel.danmakuLocalBrowserDir.collectAsStateWithLifecycle()
 
     // 下载成功后自动关闭搜索 Sheet
     LaunchedEffect(danmakuDownloadState) {
@@ -381,15 +379,11 @@ fun MediaPlayerScreen(
                                     },
                                     onDanmakuSearchClick = {
                                         controlsVisibilityState.hideControls()
-                                        if (danmakuList.isNullOrEmpty()) {
-                                            showDanmakuSourceSelector = true
-                                        } else {
-                                            // 已下载过弹幕，打开搜索时回到剧集列表
-                                            if (danmakuDownloadState is DanmakuDownloadState.Ready) {
-                                                viewModel.restoreLastSearchState()
-                                            }
-                                            overlayView = OverlayView.DANMAKU_SEARCH
+                                        // 已下载过弹幕，打开搜索时回到剧集列表
+                                        if (danmakuDownloadState is DanmakuDownloadState.Ready) {
+                                            viewModel.restoreLastSearchState()
                                         }
+                                        overlayView = OverlayView.DANMAKU_SEARCH
                                     },
                                     onDanmakuSettingsClick = {
                                         controlsVisibilityState.hideControls()
@@ -515,64 +509,30 @@ fun MediaPlayerScreen(
                 onVideoContentScaleChanged = { videoZoomAndContentScaleState.onVideoContentScaleChanged(it) },
             )
 
-            // ── 弹幕来源选择 Sheet（无弹幕时弹出）──
-            DanmakuSourceSelectorSheet(
-                show = showDanmakuSourceSelector,
-                onPickLocalFile = {
-                    showDanmakuSourceSelector = false
-                    showLocalDanmakuBrowser = true
-                },
-                onSearchOnline = {
-                    showDanmakuSourceSelector = false
-                    overlayView = OverlayView.DANMAKU_SEARCH
-                },
-                onDismiss = {
-                    showDanmakuSourceSelector = false
-                },
-            )
-
-            // ── 弹幕在线搜索 Sheet ──
-            DanmakuSourceSearchSheet(
+            // ── 弹幕搜索弹窗（整合搜索 + 本地文件） ──
+            DanmakuSearchSheet(
                 show = overlayView == OverlayView.DANMAKU_SEARCH,
                 sources = danmakuSources,
                 downloadState = danmakuDownloadState,
+                currentViewMode = danmakuSearchViewMode,
+                onViewModeChange = { viewModel.setDanmakuSearchViewMode(it) },
+                currentKeyword = danmakuSearchKeyword,
+                onKeywordChange = { viewModel.setDanmakuSearchKeyword(it) },
+                currentLocalDir = File(danmakuLocalBrowserDir ?: playerPreferences.localDanmakuPath),
+                onLocalDirChange = { viewModel.setDanmakuLocalBrowserDir(it.absolutePath) },
                 onSearch = { source, keyword ->
                     if (keyword.isNotBlank()) {
                         viewModel.searchDanmaku(source, keyword)
-                    } else {
-                        // Show search UI for keyword input
                     }
                 },
-                onSelectAnime = { anime ->
-                    viewModel.selectAnime(anime)
-                },
-                onSelectEpisode = { episode ->
-                    viewModel.selectEpisode(context, episode)
-                },
-                onResetSearch = {
-                    viewModel.resetDanmakuSearch()
-                },
-                onDismiss = {
-                    overlayView = null
-                    // 不重置搜索状态，保留搜索结果以便切集后复用
-                },
-            )
-
-            // ── 本地弹幕文件浏览器 ──
-            LocalDanmakuFileBrowser(
-                show = showLocalDanmakuBrowser,
-                currentDir = localBrowserDir,
-                startDir = File(playerPreferences.localDanmakuPath),
-                onDirChange = { localBrowserDir = it },
+                onSelectAnime = { viewModel.selectAnime(it) },
+                onSelectEpisode = { viewModel.selectEpisode(context, it) },
+                onResetSearch = { viewModel.resetDanmakuSearch() },
+                onNavigateBack = { viewModel.navigateDanmakuBack() },
                 onFileSelected = { file ->
-                    showLocalDanmakuBrowser = false
-                    localBrowserDir = File(playerPreferences.localDanmakuPath)
                     onDanmakuLocalFileSelected?.invoke(Uri.fromFile(file))
                 },
-                onDismiss = {
-                    showLocalDanmakuBrowser = false
-                    localBrowserDir = File(playerPreferences.localDanmakuPath)
-                },
+                onDismiss = { overlayView = null },
             )
         }
     }

@@ -18,7 +18,6 @@ data class Pan123BrowserUiState(
     val isLoggedIn: Boolean = false,
     val error: String? = null,
     val playedUriStrings: Set<String> = emptySet(),
-    val currentFootprint: String? = null,
     val scrollTargetIndex: Int = -1,
     val scrollTargetParentKey: String? = null,
     val userInfo: Pan123UserInfo? = null,

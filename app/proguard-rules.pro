@@ -19,3 +19,9 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# ===== 保留所有日志输出（覆盖 proguard-android-optimize.txt 的默认行为）=====
+# Android 默认优化规则会自动删除 Log.d/Log.v，这里反转该行为
+-assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
+}

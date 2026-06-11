@@ -1,0 +1,68 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic:
+          - link:
+            - /url: javascript:;
+        - generic [ref=e9]:
+          - link:
+            - /url: javascript:;
+        - generic:
+          - link:
+            - /url: javascript:;
+        - generic:
+          - link:
+            - /url: javascript:;
+        - generic:
+          - link:
+            - /url: javascript:;
+      - generic [ref=e10]:
+        - button "Go to slide 1" [ref=e11] [cursor=pointer]
+        - button "Go to slide 2" [ref=e12] [cursor=pointer]
+        - button "Go to slide 3" [ref=e13] [cursor=pointer]
+    - generic [ref=e14]:
+      - generic [ref=e17]:
+        - paragraph [ref=e18]: 上传下载不限速
+        - paragraph [ref=e19]: 中国移动云盘为所有用户提供无差别的上传下载速率服务，用户可以享有优质的传输体验。
+        - paragraph [ref=e20]: "*实际速度主要受网络、宽带和终端等因素影响"
+      - generic [ref=e24]:
+        - paragraph [ref=e25]: 文件备份更便捷
+        - paragraph [ref=e26]: 相册、通讯录、微信文件备份功能及同步盘功能助力资产快速上传云端，重要资料不丢失。
+        - paragraph [ref=e27]: "*仅APP端、Windows端"
+      - generic [ref=e31]:
+        - paragraph [ref=e32]: 在线办公更高效
+        - paragraph [ref=e33]: 共享群、在线编辑功能帮助你快速进行办公协作；云笔记功能解决会议记录难题，在线办公更高效。
+        - paragraph [ref=e34]: "*云笔记仅APP端、Windows端、Mac端"
+      - generic [ref=e38]:
+        - paragraph [ref=e39]: 多端资产实时同步
+        - paragraph [ref=e40]: 中国移动云盘覆盖多端，支持随时随地查看云端内容。
+        - paragraph
+        - generic [ref=e41]:
+          - generic [ref=e42] [cursor=pointer]: 下载Windows客户端
+          - generic [ref=e43] [cursor=pointer]: 下载APP端
+    - generic [ref=e45]:
+      - generic [ref=e46]:
+        - text: 关于移动|联系我们|公告|用户协议|法律声明|
+        - generic [ref=e47]: 扫黄打黑
+      - generic [ref=e49]: 中国移动通信版权所有·粤公网安备44010602013480号·粤ICP备16124124号·IPv6
+  - generic [ref=e52]:
+    - link "客户端下载" [ref=e53] [cursor=pointer]:
+      - /url: "#/client"
+    - link "帮助中心" [ref=e54] [cursor=pointer]:
+      - /url: "#/help"
+    - link "开放平台" [ref=e55] [cursor=pointer]:
+      - /url: http://open.yun.139.com/open/index.html
+    - generic [ref=e56]: 会员中心
+  - generic [ref=e59]:
+    - generic [ref=e63]:
+      - generic [ref=e64] [cursor=pointer]: 短信登录
+      - generic [ref=e65] [cursor=pointer]: 手机登录
+      - generic [ref=e66] [cursor=pointer]: 账号登录
+    - generic [ref=e68] [cursor=pointer]:
+      - textbox "请输入手机号" [ref=e69]
+      - generic [ref=e70]: 获取验证码
+    - textbox "请输入验证码" [ref=e72]
+    - paragraph [ref=e73]: 新用户使用短信登录自动注册中国移动云盘账号
+    - generic [ref=e74]: 登录/注册
+    - paragraph [ref=e78]: 我已阅读并同意 中国移动云盘用户协议、隐私政策、手机登录服务协议

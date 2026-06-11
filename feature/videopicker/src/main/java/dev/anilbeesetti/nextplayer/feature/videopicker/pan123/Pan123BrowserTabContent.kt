@@ -33,6 +33,7 @@ fun Pan123BrowserTabContent(
     LaunchedEffect(Unit) { onLogoutReady { viewModel.logout() } }
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val navigationStack by viewModel.navigationStack.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     BackHandler(enabled = state.breadcrumbs.size > 1 && state.isLoggedIn) {
@@ -46,6 +47,7 @@ fun Pan123BrowserTabContent(
         items = state.items, breadcrumbs = state.breadcrumbs,
         isLoading = state.isLoading, isConfigured = state.isLoggedIn,
         error = state.error, isLoadingMore = state.isLoadingMore, reLoginRequired = false,
+        navigationStack = navigationStack,
         onItemClick = { item ->
             if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
             else {

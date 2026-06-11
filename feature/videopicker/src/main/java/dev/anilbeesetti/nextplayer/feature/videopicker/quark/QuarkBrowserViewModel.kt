@@ -13,9 +13,11 @@ import dev.anilbeesetti.nextplayer.core.data.quark.QuarkAuthProvider
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkFileItem
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
+import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -45,9 +47,22 @@ class QuarkBrowserViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(QuarkBrowserUiState())
     val uiState: StateFlow<QuarkBrowserUiState> = _uiState.asStateFlow()
 
+    private val _navigationStack = MutableStateFlow(
+        listOf(DirectoryStackEntry(fileId = "0", label = "根目录"))
+    )
+    val navigationStack: StateFlow<List<DirectoryStackEntry>> = _navigationStack.asStateFlow()
+
+    private fun syncStackTop(transform: (DirectoryStackEntry) -> DirectoryStackEntry) {
+        _navigationStack.update { stack ->
+            if (stack.isEmpty()) return@update stack
+            stack.toMutableList().apply { set(lastIndex, transform(get(lastIndex))) }
+        }
+    }
+
     private var loadSequence: Int = 0
     private var loadDirectoryJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
+    private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
 
     // endregion
 
@@ -94,7 +109,9 @@ class QuarkBrowserViewModel @Inject constructor(
         prefs.edit().clear().apply()
         val ucPrefs = getApplication<Application>().getSharedPreferences(UC_PREF_NAME, Context.MODE_PRIVATE)
         ucPrefs.edit().clear().apply()
+        directoryCache.clear()
         _uiState.value = QuarkBrowserUiState()
+        _navigationStack.value = listOf(DirectoryStackEntry(fileId = "0", label = "根目录"))
     }
 
     // endregion
@@ -127,12 +144,14 @@ class QuarkBrowserViewModel @Inject constructor(
                         }
                     }
                     val resources = items.map { fileToResource(it) }
+                    directoryCache[parentFileId] = resources
                     updateUiState {
                         it.copy(
                             items = resources,
                             isLoading = false, hasMore = items.size >= 100, currentPage = 1
                         )
                     }
+                    syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
                 },
                 onFailure = { e ->
                     Log.e(TAG, "loadDirectory FAILED: ${e.message}", e)
@@ -145,8 +164,30 @@ class QuarkBrowserViewModel @Inject constructor(
                         else -> "加载失败: $msg"
                     }
                     updateUiState { it.copy(error = friendly, isLoading = false) }
+                    syncStackTop { it.copy(error = friendly, isLoading = false) }
                 }
             )
+        }
+    }
+
+    private fun loadDirectoryCached(fileId: String) {
+        val cached = directoryCache[fileId]
+        if (cached != null) {
+            loadDirectoryJob?.cancel()
+            loadSequence++
+            updateUiState {
+                it.copy(
+                    items = cached,
+                    currentFileId = fileId,
+                    isLoading = false,
+                    error = null
+                )
+            }
+            syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
+        } else {
+            updateUiState { it.copy(items = emptyList(), currentFileId = fileId) }
+            syncStackTop { it.copy(items = emptyList(), isLoading = true, error = null) }
+            loadDirectory(fileId)
         }
     }
 
@@ -202,13 +243,13 @@ class QuarkBrowserViewModel @Inject constructor(
         val parentKey = state.breadcrumbs.joinToString("/") { it.label }
         updateUiState {
             it.copy(
-                items = emptyList(),
                 breadcrumbs = state.breadcrumbs + QuarkBreadcrumb(item.name, item.path),
                 scrollTargetIndex = index,
                 scrollTargetParentKey = parentKey
             )
         }
-        loadDirectory(item.path)
+        _navigationStack.update { it + DirectoryStackEntry(fileId = item.path, label = item.name) }
+        loadDirectoryCached(item.path)
     }
 
     fun clearScrollTarget() { updateUiState { it.copy(scrollTargetIndex = -1) } }
@@ -218,7 +259,8 @@ class QuarkBrowserViewModel @Inject constructor(
         if (breadcrumbs.size <= 1) return
         val target = breadcrumbs[breadcrumbs.size - 2]
         updateUiState { it.copy(breadcrumbs = breadcrumbs.dropLast(1)) }
-        loadDirectory(target.fileId)
+        _navigationStack.update { if (it.size > 1) it.dropLast(1) else it }
+        loadDirectoryCached(target.fileId)
     }
 
     fun navigateToBreadcrumb(index: Int) {
@@ -227,7 +269,8 @@ class QuarkBrowserViewModel @Inject constructor(
         val target = breadcrumbs[index]
         if (target.fileId.isEmpty()) return
         updateUiState { it.copy(breadcrumbs = breadcrumbs.subList(0, index + 1)) }
-        loadDirectory(target.fileId)
+        _navigationStack.update { it.take(index + 1) }
+        loadDirectoryCached(target.fileId)
     }
 
     fun jumpToFolder(fileId: String, label: String) {
@@ -238,8 +281,8 @@ class QuarkBrowserViewModel @Inject constructor(
             val parts = seg.split("|", limit = 2)
             QuarkBreadcrumb(parts[0], if (parts.size > 1) parts[1] else "")
         }
-        updateUiState { it.copy(items = emptyList(), breadcrumbs = listOf(root) + pathCrumbs) }
-        loadDirectory(fileId)
+        updateUiState { it.copy(breadcrumbs = listOf(root) + pathCrumbs) }
+        loadDirectoryCached(fileId)
     }
 
     // endregion
@@ -256,26 +299,6 @@ class QuarkBrowserViewModel @Inject constructor(
     // region ==================== 刷新 ====================
 
     fun refresh() { loadDirectory(_uiState.value.currentFileId) }
-
-    // endregion
-
-    // region ==================== 足迹 ====================
-
-    fun recordFootprint(path: String) {
-        val dir = _uiState.value.currentFileId
-        val dt = _uiState.value.driveType
-        updateUiState { it.copy(currentFootprint = path) }
-        viewModelScope.launch {
-            try {
-                val appPrefs = preferencesRepository.applicationPreferences.value
-                val footprintMap = appPrefs.latestFootprintPerDir.toMutableMap()
-                footprintMap["$dt:$dir"] = path
-                preferencesRepository.updateApplicationPreferences {
-                    it.copy(latestFootprintPerDir = footprintMap)
-                }
-            } catch (_: Exception) {}
-        }
-    }
 
     // endregion
 

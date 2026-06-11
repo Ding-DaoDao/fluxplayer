@@ -1,7 +1,6 @@
 package dev.anilbeesetti.nextplayer.feature.videopicker.openlist
 
 import android.app.Application
-import android.content.Context
 import android.util.Log
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -161,6 +160,7 @@ class OpenListBrowserViewModel @Inject constructor(
             Log.w(TAG, "adminLogin failed: ${loginResult.exceptionOrNull()?.message}")
         }
         currentAdminPassword = pwd
+
         Log.d(TAG, "calling loadDirectory(/), currentAdminPassword=$currentAdminPassword")
         loadDirectoryInternal(rootFileId)
     }
@@ -171,6 +171,7 @@ class OpenListBrowserViewModel @Inject constructor(
             return
         }
         Log.d(TAG, "loadDirectory: path=$path, hasPassword=${currentAdminPassword != null}")
+
         updateState(CommonStateUpdate(isLoading = true, error = null))
 
         viewModelScope.launch {
@@ -179,15 +180,8 @@ class OpenListBrowserViewModel @Inject constructor(
                 onSuccess = { items ->
                     Log.d(TAG, "loadDirectory success: ${items.size} items for path=$path")
                     val resources = items.map { it.toWebDavResource() }
-                    val freshPrefs = preferencesRepository.applicationPreferences.value
-                    updateState(
-                        CommonStateUpdate(
-                            items = resources,
-                            currentFileId = path,
-                            isLoading = false,
-                            currentFootprint = freshPrefs.latestFootprintPerDir[path]
-                        )
-                    )
+                    updateState(CommonStateUpdate(currentFileId = path))
+                    onDirectoryLoaded(path, resources, hasMore = false)
                 },
                 onFailure = { e ->
                     Log.e(TAG, "loadDirectory failed for path=$path: ${e.message}")
@@ -230,11 +224,7 @@ class OpenListBrowserViewModel @Inject constructor(
 
     // endregion
 
-    // region ==================== 足迹 ====================
-
-    fun recordFootprint(path: String) {
-        recordFootprintCommon(path)
-    }
+    // region ==================== 足迹（已移除） ====================
 
     // endregion
 

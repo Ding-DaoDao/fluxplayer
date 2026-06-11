@@ -2,6 +2,7 @@ package dev.anilbeesetti.nextplayer.feature.videopicker.yun139
 
 import android.app.Application
 import android.content.Context
+import android.util.Base64
 import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.viewModelScope
@@ -13,9 +14,11 @@ import dev.anilbeesetti.nextplayer.core.data.yun139.Yun139AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.yun139.Yun139FileItem
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import kotlinx.coroutines.delay
+import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -43,83 +46,111 @@ class Yun139BrowserViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(Yun139BrowserUiState())
     val uiState: StateFlow<Yun139BrowserUiState> = _uiState.asStateFlow()
 
+    private val _navigationStack = MutableStateFlow(
+        listOf(DirectoryStackEntry(fileId = "/", label = "根目录"))
+    )
+    val navigationStack: StateFlow<List<DirectoryStackEntry>> = _navigationStack.asStateFlow()
+
+    private fun syncStackTop(transform: (DirectoryStackEntry) -> DirectoryStackEntry) {
+        _navigationStack.update { stack ->
+            if (stack.isEmpty()) return@update stack
+            stack.toMutableList().apply { set(lastIndex, transform(get(lastIndex))) }
+        }
+    }
+
     private var loadSequence: Int = 0
     private var loadDirectoryJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
-    private var smsJob: kotlinx.coroutines.Job? = null  // 预留，SMS登录UI保留但API暂未实现
+    private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
 
     // endregion
 
-    // region ==================== 登录 — tryRestoreSession（含token验证重试） ====================
+    // region ==================== 登录 — autoLogin ====================
 
     init {
-        viewModelScope.launch { tryRestoreSession() }
+        try {
+            autoLogin()
+        } catch (e: Exception) {
+            Log.e(TAG, "autoLogin failed in init", e)
+        }
     }
 
-    fun tryRestoreSession() {
+    private fun autoLogin() {
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val token = prefs.getString("token", "") ?: ""
-        val sessionId = prefs.getString("sessionId", "") ?: ""
+        val authorization = prefs.getString("authorization", "") ?: ""
+        val phoneNumber = prefs.getString("phoneNumber", "") ?: ""
+        val userDomainId = prefs.getString("userDomainId", "") ?: ""
+        val lastRefresh = prefs.getLong("lastRefresh", 0L)
 
-        if (token.isBlank()) return
+        if (authorization.isBlank()) return
 
-        Yun139AuthProvider.token = token
-        Yun139AuthProvider.sessionId = sessionId
-        Yun139AuthProvider.isActive = true
-
-        // Token 验证（最多3次重试，间隔1.5秒）
         viewModelScope.launch {
             var valid = false
-            for (i in 0 until 3) {
+            for (attempt in 1..4) {
                 try {
+                    apiClient.setToken(authorization, phoneNumber, userDomainId)
                     val result = apiClient.listFiles("/", 1, 10)
                     if (result.isSuccess) { valid = true; break }
                 } catch (_: Exception) {}
-                if (i < 2) delay(1500)
+                if (attempt < 4) delay(1500)
             }
 
             if (valid) {
                 updateUiState { it.copy(isLoggedIn = true) }
                 loadDirectory("/")
+
+                // 超过7天自动刷新token
+                val sevenDays = 7L * 24 * 60 * 60 * 1000
+                if (System.currentTimeMillis() - lastRefresh >= sevenDays) {
+                    try {
+                        val refreshResult = apiClient.refreshToken()
+                        if (refreshResult.isSuccess) {
+                            prefs.edit()
+                                .putString("authorization", Yun139AuthProvider.authorization)
+                                .putLong("lastRefresh", System.currentTimeMillis())
+                                .apply()
+                            Log.d(TAG, "token auto-refreshed")
+                        }
+                    } catch (_: Exception) {}
+                }
             } else {
-                Yun139AuthProvider.clear()
-                updateUiState { it.copy(isLoggedIn = false, error = "Token验证失败，请重新登录") }
+                Log.w(TAG, "autoLogin token verification failed, keeping credentials")
+                updateUiState { it.copy(error = "登录已过期，请重新登录") }
             }
         }
     }
 
     // endregion
 
-    // region ==================== 登录 — loginWithToken ====================
+    // region ==================== 登录 — loginWithWeb ====================
 
-    fun loginWithToken(token: String) {
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString("token", token).apply()
+    fun loginWithWeb(authorization: String, userDomainId: String) {
+        try {
+            // 解码 cookie 中的 authorization 并重新编码为 mobile:phone:authToken 格式
+            val base64Part = authorization.removePrefix("Basic ").trim()
+            val decoded = String(Base64.decode(base64Part, Base64.DEFAULT), Charsets.UTF_8)
+            val phoneNumber = Regex("\\d{11}").find(decoded)?.value ?: ""
+            val authToken = decoded.split(":").getOrNull(2) ?: decoded.split(":").last()
+            val tokenValue = "Basic " + Base64.encodeToString(
+                "mobile:$phoneNumber:$authToken".toByteArray(Charsets.UTF_8),
+                Base64.NO_WRAP
+            )
 
-        // 判断是 Bearer token 还是 cookie 字符串
-        if (token.startsWith("Bearer ") || token.length in 30..200) {
-            // 看起来像 token
-            Yun139AuthProvider.token = token
-        } else {
-            // 可能是 cookie 字符串，存到 sessionId
-            Yun139AuthProvider.sessionId = token
-            // 从 cookie 中尝试提取 Authorization 相关字段
-            val authFromCookie = token.split(";")
-                .map { it.trim() }
-                .firstOrNull { it.startsWith("Authorization=") || it.startsWith("token=") }
-                ?.substringAfter("=")
-            if (!authFromCookie.isNullOrBlank()) {
-                Yun139AuthProvider.token = authFromCookie
-            }
-        }
-        Yun139AuthProvider.isActive = true
-        updateUiState { it.copy(isLoggedIn = true) }
-        viewModelScope.launch {
-            try {
-                loadDirectory("/")
-            } catch (e: Exception) {
-                updateUiState { it.copy(error = "加载失败: ${e.message}", isLoggedIn = false) }
-            }
+            apiClient.setToken(tokenValue, phoneNumber, userDomainId)
+
+            val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("authorization", tokenValue)
+                .putString("phoneNumber", phoneNumber)
+                .putString("userDomainId", userDomainId)
+                .putLong("lastRefresh", System.currentTimeMillis())
+                .apply()
+
+            updateUiState { it.copy(isLoggedIn = true) }
+            loadDirectory("/")
+        } catch (e: Exception) {
+            Log.e(TAG, "loginWithWeb failed", e)
+            updateUiState { it.copy(error = "登录信息解析失败: ${e.message}") }
         }
     }
 
@@ -128,11 +159,12 @@ class Yun139BrowserViewModel @Inject constructor(
     // region ==================== 登出 ====================
 
     fun logout() {
-        Yun139AuthProvider.clear()
-        smsJob?.cancel()
+        apiClient.logout()
+        directoryCache.clear()
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         _uiState.value = Yun139BrowserUiState()
+        _navigationStack.value = listOf(DirectoryStackEntry(fileId = "/", label = "根目录"))
     }
 
     // endregion
@@ -161,6 +193,7 @@ class Yun139BrowserViewModel @Inject constructor(
                         }
                     }
                     val resources = listResult.items.map { fileToResource(it) }
+                    directoryCache[parentFileId] = resources
                     updateUiState {
                         it.copy(
                             items = resources,
@@ -168,8 +201,10 @@ class Yun139BrowserViewModel @Inject constructor(
                             nextPageCursor = listResult.nextMarker.ifEmpty { null }
                         )
                     }
+                    syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
                 },
                 onFailure = { e ->
+                    Log.e(TAG, "loadDirectory failed for $parentFileId", e)
                     val msg = e.message ?: "未知错误"
                     val friendly = when {
                         msg.contains("<!DOCTYPE", ignoreCase = true) ||
@@ -178,11 +213,39 @@ class Yun139BrowserViewModel @Inject constructor(
                         msg.contains("require login", ignoreCase = true) ||
                         msg.contains("token", ignoreCase = true) ||
                         msg.contains("401") -> "登录已过期，请重新登录"
+                        msg.contains("timeout", ignoreCase = true) ||
+                        msg.contains("Timeout", ignoreCase = true) ||
+                        msg.contains("timed out", ignoreCase = true) ->
+                            "请求超时，请重试"
                         else -> "加载失败: ${msg.take(100)}"
                     }
                     updateUiState { it.copy(error = friendly, isLoading = false) }
+                    syncStackTop { it.copy(error = friendly, isLoading = false) }
                 }
             )
+        }
+    }
+
+    // endregion
+
+    // region ==================== 缓存加载 ====================
+
+    private fun loadDirectoryCached(fileId: String) {
+        val cached = directoryCache[fileId]
+        if (cached != null) {
+            updateUiState {
+                it.copy(
+                    items = cached,
+                    currentFolderId = fileId,
+                    isLoading = false,
+                    error = null
+                )
+            }
+            syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
+        } else {
+            updateUiState { it.copy(items = emptyList(), currentFolderId = fileId) }
+            syncStackTop { it.copy(items = emptyList(), isLoading = true, error = null) }
+            loadDirectory(fileId)
         }
     }
 
@@ -232,12 +295,12 @@ class Yun139BrowserViewModel @Inject constructor(
         val parentKey = state.breadcrumbs.joinToString("/") { it.label }
         updateUiState {
             it.copy(
-                items = emptyList(),
                 breadcrumbs = state.breadcrumbs + Yun139Breadcrumb(item.name, item.path),
                 scrollTargetIndex = index, scrollTargetParentKey = parentKey
             )
         }
-        loadDirectory(item.path)
+        _navigationStack.update { it + DirectoryStackEntry(fileId = item.path, label = item.name) }
+        loadDirectoryCached(item.path)
     }
 
     fun clearScrollTarget() { updateUiState { it.copy(scrollTargetIndex = -1) } }
@@ -247,7 +310,8 @@ class Yun139BrowserViewModel @Inject constructor(
         if (breadcrumbs.size <= 1) return
         val target = breadcrumbs[breadcrumbs.size - 2]
         updateUiState { it.copy(breadcrumbs = breadcrumbs.dropLast(1)) }
-        loadDirectory(target.fileId)
+        _navigationStack.update { if (it.size > 1) it.dropLast(1) else it }
+        loadDirectoryCached(target.fileId)
     }
 
     fun navigateToBreadcrumb(index: Int) {
@@ -256,7 +320,8 @@ class Yun139BrowserViewModel @Inject constructor(
         val target = breadcrumbs[index]
         if (target.fileId.isEmpty()) return
         updateUiState { it.copy(breadcrumbs = breadcrumbs.subList(0, index + 1)) }
-        loadDirectory(target.fileId)
+        _navigationStack.update { it.take(index + 1) }
+        loadDirectoryCached(target.fileId)
     }
 
     // endregion
@@ -273,23 +338,6 @@ class Yun139BrowserViewModel @Inject constructor(
     // region ==================== 刷新 ====================
 
     fun refresh() { loadDirectory(_uiState.value.currentFolderId) }
-
-    // endregion
-
-    // region ==================== 足迹 ====================
-
-    fun recordFootprint(path: String) {
-        val dir = _uiState.value.currentFolderId
-        updateUiState { it.copy(currentFootprint = path) }
-        viewModelScope.launch {
-            try {
-                val appPrefs = preferencesRepository.applicationPreferences.value
-                val footprintMap = appPrefs.latestFootprintPerDir.toMutableMap()
-                footprintMap["yun139:$dir"] = path
-                preferencesRepository.updateApplicationPreferences { it.copy(latestFootprintPerDir = footprintMap) }
-            } catch (_: Exception) {}
-        }
-    }
 
     // endregion
 
@@ -498,12 +546,6 @@ class Yun139BrowserViewModel @Inject constructor(
             isDirectory = file.isDir, size = file.fileSize,
             lastModified = file.lastOpTime.ifEmpty { file.createDate }
         )
-    }
-
-    private fun buildBreadcrumbs(fileId: String, label: String?): List<Yun139Breadcrumb> {
-        val crumbs = mutableListOf(Yun139Breadcrumb("根目录", "/"))
-        if (fileId != "/" && label != null) crumbs.add(Yun139Breadcrumb(label, fileId))
-        return crumbs
     }
 
     // endregion

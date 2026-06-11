@@ -37,6 +37,7 @@ fun AliyunBrowserTabContent(
     LaunchedEffect(Unit) { onLogoutReady { viewModel.logout() } }
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val navigationStack by viewModel.navigationStack.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     // 返回键：在子目录时返回上级；在根目录或未登录时不拦截（让系统处理）
@@ -55,6 +56,7 @@ fun AliyunBrowserTabContent(
         error = state.error,
         isLoadingMore = state.isLoadingMore,
         reLoginRequired = state.reLoginRequired,
+        navigationStack = navigationStack,
         onItemClick = { item ->
             if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
             else {

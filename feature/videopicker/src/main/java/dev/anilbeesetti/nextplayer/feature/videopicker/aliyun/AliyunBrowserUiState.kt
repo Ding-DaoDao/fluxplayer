@@ -15,7 +15,6 @@ data class AliyunBrowserUiState(
     val isLoggedIn: Boolean = false,
     val reLoginRequired: Boolean = false,
     val error: String? = null,
-    val currentFootprint: String? = null,
     val scrollTargetIndex: Int = -1,
     val scrollTargetParentKey: String? = null,
     val orderBy: String = "name:ASC",

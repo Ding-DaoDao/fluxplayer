@@ -397,7 +397,7 @@ class BilibiliDanmakuFetcher(
             if (response.isSuccessful) {
                 val body = response.body?.string() ?: return null
                 val json = JSONObject(body)
-                val cid = json.optJSONObject("data")?.optString("content_id", "")
+                val cid = json.optJSONObject("data")?.optString("cid", "")
                 if (cid.isNullOrBlank()) null else cid
             } else null
         } catch (e: Exception) {
@@ -429,12 +429,12 @@ class BilibiliDanmakuFetcher(
                 val link = ep.optString("link", "")
                 val epIdStr = ep.optString("ep_id", "")
                 if (link.contains(epid) || epIdStr.contains(epid)) {
-                    val cid = ep.optString("content_id", "")
+                    val cid = ep.optString("cid", "")
                     return if (cid.isBlank()) null else cid
                 }
             }
 
-            val firstCid = episodes.optJSONObject(0)?.optString("content_id", "")
+            val firstCid = episodes.optJSONObject(0)?.optString("cid", "")
             if (firstCid.isNullOrBlank()) null else firstCid
         } catch (e: Exception) {
             Log.e(TAG, "resolveCidByEpId failed", e)
@@ -460,7 +460,7 @@ class BilibiliDanmakuFetcher(
                     ?.optJSONObject("main_section")
                     ?.optJSONArray("episodes")
                     ?.optJSONObject(0)
-                    ?.optString("content_id", "")
+                    ?.optString("cid", "")
                 if (cid.isNullOrBlank()) null else cid
             } else null
         } catch (e: Exception) {
@@ -495,22 +495,28 @@ class BilibiliDanmakuFetcher(
     }
 
     override suspend fun search(keyword: String): List<AnimeMatch> {
+        Log.d(TAG, "========== search START: keyword=$keyword ==========")
         return try {
             val encodedKeyword = URLEncoder.encode(keyword, "UTF-8")
             val results = mutableListOf<AnimeMatch>()
 
             for (searchType in listOf("media_bangumi", "media_ft")) {
                 try {
+                    Log.d(TAG, "search: trying type=$searchType")
                     val items = searchBiliSearchType(keyword, encodedKeyword, searchType)
+                    Log.d(TAG, "search: type=$searchType returned ${items.size} items")
                     results.addAll(items)
                 } catch (e: Exception) {
-                    Log.w(TAG, "search type $searchType failed", e)
+                    Log.w(TAG, "search: type $searchType EXCEPTION ${e.javaClass.simpleName}: ${e.message}", e)
                 }
             }
+            Log.d(TAG, "search: combined ${results.size} results")
             results
         } catch (e: Exception) {
-            Log.e(TAG, "search failed", e)
+            Log.e(TAG, "search: EXCEPTION ${e.javaClass.simpleName}: ${e.message}", e)
             emptyList()
+        }.also {
+            Log.d(TAG, "========== search END: ${it.size} results ==========")
         }
     }
 
@@ -539,8 +545,10 @@ class BilibiliDanmakuFetcher(
                 "com2co" to "true"
             )
 
+            Log.d(TAG, "searchBiliSearchType: type=$searchType signing WBI...")
             val signedQuery = signWbi(params)
             val apiUrl = "https://api.bilibili.com/x/web-interface/wbi/search/type?$signedQuery"
+            Log.d(TAG, "searchBiliSearchType: GET $apiUrl")
 
             val request = Request.Builder()
                 .url(apiUrl)
@@ -550,15 +558,30 @@ class BilibiliDanmakuFetcher(
                 .build()
 
             val response = client.newCall(request).execute()
+            Log.d(TAG, "searchBiliSearchType: HTTP ${response.code}")
             if (!response.isSuccessful) {
-                Log.w(TAG, "search $searchType HTTP ${response.code}")
+                Log.w(TAG, "searchBiliSearchType: HTTP ${response.code} FAILED")
                 return emptyList()
             }
 
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: ""
+            if (body.isBlank()) {
+                Log.w(TAG, "searchBiliSearchType: empty body")
+                return emptyList()
+            }
+            Log.d(TAG, "searchBiliSearchType: body len=${body.length}, sample=${body.take(200)}")
+
             val json = JSONObject(body)
+            val code = json.optInt("code", -1)
+            val message = json.optString("message", "")
+            Log.d(TAG, "searchBiliSearchType: code=$code message=$message")
+
             val resultArray = json.optJSONObject("data")?.optJSONArray("result")
-                ?: return emptyList()
+            if (resultArray == null) {
+                Log.w(TAG, "searchBiliSearchType: no data.result, body keys=${json.keys().asSequence().toList()}")
+                return emptyList()
+            }
+            Log.d(TAG, "searchBiliSearchType: result array length=${resultArray.length()}")
 
             val list = mutableListOf<AnimeMatch>()
             for (i in 0 until resultArray.length()) {
@@ -658,10 +681,15 @@ class BilibiliDanmakuFetcher(
 
     override suspend fun getEpisodes(anime: AnimeMatch): List<EpisodeInfo> {
         val seasonId = anime.animeId
-        if (seasonId <= 0) return emptyList()
+        Log.d(TAG, "========== getEpisodes START: seasonId=$seasonId animeTitle=${anime.title} ==========")
+        if (seasonId <= 0) {
+            Log.w(TAG, "getEpisodes: seasonId <= 0")
+            return emptyList()
+        }
 
         return try {
             val url = "https://api.bilibili.com/pgc/view/web/season?season_id=$seasonId"
+            Log.d(TAG, "getEpisodes: GET $url")
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", PC_UA)
@@ -670,12 +698,30 @@ class BilibiliDanmakuFetcher(
                 .build()
 
             val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return emptyList()
+            Log.d(TAG, "getEpisodes: HTTP ${response.code}")
+            if (!response.isSuccessful) {
+                Log.w(TAG, "getEpisodes: HTTP ${response.code} FAILED")
+                return emptyList()
+            }
 
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: ""
+            if (body.isBlank()) {
+                Log.w(TAG, "getEpisodes: empty body")
+                return emptyList()
+            }
+            Log.d(TAG, "getEpisodes: body len=${body.length}, sample=${body.take(200)}")
+
             val json = JSONObject(body)
+            val code = json.optInt("code", -1)
+            val message = json.optString("message", "")
+            Log.d(TAG, "getEpisodes: code=$code message=$message")
+
             val episodes = json.optJSONObject("result")?.optJSONArray("episodes")
-                ?: return emptyList()
+            if (episodes == null) {
+                Log.w(TAG, "getEpisodes: no result.episodes, body keys=${json.keys().asSequence().toList()}")
+                return emptyList()
+            }
+            Log.d(TAG, "getEpisodes: episodes array length=${episodes.length()}")
 
             val list = mutableListOf<EpisodeInfo>()
             for (i in 0 until episodes.length()) {
@@ -704,10 +750,13 @@ class BilibiliDanmakuFetcher(
                     )
                 )
             }
+            Log.d(TAG, "getEpisodes: parsed ${list.size} episodes")
             list
         } catch (e: Exception) {
-            Log.e(TAG, "getEpisodes failed for season $seasonId", e)
+            Log.e(TAG, "getEpisodes: EXCEPTION ${e.javaClass.simpleName}: ${e.message}", e)
             emptyList()
+        }.also {
+            Log.d(TAG, "========== getEpisodes END: ${it.size} episodes ==========")
         }
     }
 

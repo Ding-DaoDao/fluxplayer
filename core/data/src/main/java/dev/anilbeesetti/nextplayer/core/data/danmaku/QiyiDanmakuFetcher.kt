@@ -3,6 +3,10 @@ package dev.anilbeesetti.nextplayer.core.data.danmaku
 import android.util.Log
 import dev.anilbeesetti.nextplayer.core.model.AnimeMatch
 import dev.anilbeesetti.nextplayer.core.model.EpisodeInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -30,9 +34,11 @@ class QiyiDanmakuFetcher(
     }
 
     override suspend fun search(keyword: String): List<AnimeMatch> {
+        Log.d(TAG, "========== search START: keyword=$keyword ==========")
         return try {
             val encoded = URLEncoder.encode(keyword, "UTF-8")
             val url = "https://pcw-api.iqiyi.com/strategy/pcw/data/soBaseCardLeftSide?pageNum=1&key=$encoded"
+            Log.d(TAG, "search: GET $url")
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", PC_UA)
@@ -40,39 +46,52 @@ class QiyiDanmakuFetcher(
                 .get()
                 .build()
             val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return emptyList()
+            Log.d(TAG, "search: HTTP ${response.code}")
+            if (!response.isSuccessful) {
+                Log.w(TAG, "search: HTTP ${response.code} FAILED")
+                return emptyList()
+            }
 
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: ""
+            if (body.isBlank()) { Log.w(TAG, "search: empty body"); return emptyList() }
+            Log.d(TAG, "search: body len=${body.length}")
             val json = JSONObject(body)
             val formatData = json.optJSONObject("data")
-                ?.optJSONObject("formatData") ?: return emptyList()
+                ?.optJSONObject("formatData")
+            if (formatData == null) {
+                Log.w(TAG, "search: no data.formatData, keys=${json.keys().asSequence().toList()}")
+                return emptyList()
+            }
 
             val results = mutableListOf<AnimeMatch>()
 
             val list = formatData.optJSONArray("list") ?: JSONArray()
+            Log.d(TAG, "search: list length=${list.length()}")
             for (i in 0 until list.length()) {
                 val rs = list.optJSONObject(i) ?: continue
-                if (rs.optInt("videoDocType", 0) != 1) continue
+                val videoDocType = rs.optInt("videoDocType", 0)
                 val siteName = rs.optString("siteName", "")
-                if (!siteName.contains("奇")) continue
+                if (videoDocType != 1) { Log.d(TAG, "search: skip list[$i] videoDocType=$videoDocType"); continue }
+                if (!siteName.contains("奇")) { Log.d(TAG, "search: skip list[$i] siteName=$siteName"); continue }
 
                 val title = rs.optString("g_title", "")
                 val link = rs.optString("g_main_link", "")
                 if (title.isBlank() || link.isBlank()) continue
 
-                val siteNameDisplay = rs.optString("siteName", "")
                 results.add(
                     AnimeMatch(
                         animeId = link.hashCode(),
-                        title = Regex("<[^>]+>").replace(title, "") + "⭐来源：$siteNameDisplay",
+                        title = Regex("<[^>]+>").replace(title, "") + "⭐来源：$siteName",
                         type = "iqiyi",
                         url = link
                     )
                 )
             }
+            Log.d(TAG, "search: from list: ${results.size} results")
 
             val intentList = formatData.optJSONArray("intentList")
             if (intentList != null) {
+                Log.d(TAG, "search: intentList length=${intentList.length()}")
                 for (i in 0 until intentList.length()) {
                     val rs = intentList.optJSONObject(i) ?: continue
                     val title = rs.optString("g_title", "")
@@ -88,26 +107,28 @@ class QiyiDanmakuFetcher(
                         )
                     )
                 }
+                Log.d(TAG, "search: after intentList: ${results.size} results")
             }
 
-            Log.d(TAG, "search parsed ${results.size} results")
             results
         } catch (e: Exception) {
-            Log.e(TAG, "search failed", e)
+            Log.e(TAG, "search: EXCEPTION ${e.javaClass.simpleName}: ${e.message}", e)
             emptyList()
+        }.also {
+            Log.d(TAG, "========== search END: ${it.size} results ==========")
         }
     }
 
     override suspend fun getEpisodes(anime: AnimeMatch): List<EpisodeInfo> {
-        val url = anime.url ?: return emptyList()
+        val url = anime.url ?: run { Log.w(TAG, "getEpisodes: anime.url is null"); return emptyList() }
         val mobileUrl = url.replace("www.", "m.")
-        Log.d(TAG, "getEpisodes: $mobileUrl")
+        Log.d(TAG, "========== getEpisodes START: url=$url mobileUrl=$mobileUrl ==========")
 
         try {
-            // Step 1: Fetch mobile HTML
+            // Step 1: Fetch mobile HTML (MUST use mobile UA to get SSR page with JSON data)
             val htmlReq = Request.Builder()
                 .url(mobileUrl)
-                .header("User-Agent", PC_UA)
+                .header("User-Agent", MOBILE_UA)
                 .header("Referer", "https://www.iqiyi.com/")
                 .get()
                 .build()
@@ -132,8 +153,8 @@ class QiyiDanmakuFetcher(
                 videoName = albumInfoJson.optString("albumName", "")
             }
 
-            val videoInfoRaw = extractJsonField(html, "videoInfo", "videoType")
-            val videoInfoJson = videoInfoRaw as? JSONObject
+            // videoType is now BEFORE videoInfo in iQiyi SSR HTML, so extract videoInfo by brace matching
+            val videoInfoJson = extractBracedJson(html, "videoInfo")
             if (videoInfoJson != null) {
                 Log.d(TAG, "getEpisodes: found videoInfo")
                 if (videoName.isBlank()) {
@@ -253,10 +274,28 @@ class QiyiDanmakuFetcher(
                 }
             }
 
-            // If still blank, return empty
+            // If still blank and this is a single video page (v_xxx.html), try video info API
             if (albumQipuId.isBlank()) {
-                Log.w(TAG, "still cannot find albumQipuId")
-                return emptyList()
+                val isSingleVideo = url.contains("/v_")
+                if (isSingleVideo) {
+                    val tvid = extractTvidFromUrl(url)
+                    if (tvid != null) {
+                        Log.d(TAG, "getEpisodes: v_ URL detected, tvid=$tvid, trying video info API")
+                        albumQipuId = resolveAlbumIdFromTvid(tvid)
+                        if (albumQipuId.isNotBlank()) {
+                            Log.d(TAG, "getEpisodes: resolved albumQipuId=$albumQipuId from tvid=$tvid")
+                        }
+                    }
+                }
+                if (isSingleVideo && albumQipuId.isBlank()) {
+                    Log.d(TAG, "getEpisodes: single video URL (v_), returning 1 episode")
+                    val title = if (videoName.isBlank()) "正片" else videoName
+                    return listOf(EpisodeInfo(url.hashCode(), anime.animeId, title, 1, url))
+                }
+                if (albumQipuId.isBlank()) {
+                    Log.w(TAG, "still cannot find albumQipuId")
+                    return emptyList()
+                }
             }
 
             Log.d(TAG, "getEpisodes: albumQipuId=$albumQipuId channelName=$channelName videoName=$videoName")
@@ -317,13 +356,26 @@ class QiyiDanmakuFetcher(
                 }
             }
 
-            // Step 7: Non-movie or movie with "正片" - return single episode
+            // Step 7: Non-movie content — try to fetch episode list if we have albumQipuId
             val title = if (videoName.isBlank()) "正片" else videoName
+
+            // If we have an albumQipuId, try to fetch the full episode list
+            if (albumQipuId.isNotBlank()) {
+                Log.d(TAG, "getEpisodes: non-movie, fetching paged episodes for albumQipuId=$albumQipuId")
+                val pagedEpisodes = fetchPagedEpisodes(albumQipuId)
+                if (pagedEpisodes.isNotEmpty()) {
+                    Log.d(TAG, "getEpisodes: fetched ${pagedEpisodes.size} episodes from album")
+                    return pagedEpisodes
+                }
+                Log.w(TAG, "getEpisodes: paged episodes empty, falling back to single episode")
+            }
+
             return listOf(EpisodeInfo(url.hashCode(), anime.animeId, title, 1, url))
         } catch (e: Exception) {
-            Log.e(TAG, "getEpisodes failed", e)
+            Log.e(TAG, "getEpisodes: EXCEPTION ${e.javaClass.simpleName}: ${e.message}", e)
             return emptyList()
         }
+        // unreachable — all branches return above
     }
 
     override suspend fun fetchDanmaku(url: String): InputStream? {
@@ -436,7 +488,7 @@ class QiyiDanmakuFetcher(
         }
     }
 
-    private fun fetchDanmakuSegments(
+    private suspend fun fetchDanmakuSegments(
         url: String,
         tvid: String,
         albumId: String,
@@ -453,49 +505,21 @@ class QiyiDanmakuFetcher(
 
         val xmlBuilder = StringBuilder()
         xmlBuilder.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<i>\n")
-        var hasData = false
 
-        for (page in 1..pageCount) {
-            try {
-                val segUrl = "https://cmts.iqiyi.com/bullet/$prefix1/$prefix2/${tvid}_300_$page.z?$params"
-                val segReq = Request.Builder()
-                    .url(segUrl)
-                    .header("User-Agent", PC_UA)
-                    .header("Referer", url)
-                    .get()
-                    .build()
-                val segResp = client.newCall(segReq).execute()
-                if (!segResp.isSuccessful) continue
-                val segBytes = segResp.body?.bytes() ?: continue
-                if (segBytes.isEmpty()) continue
-
-                val decompressed = zlibDecompress(segBytes) ?: continue
-                val contents = extractXmlTags(decompressed, "content")
-                val showTimes = extractXmlTags(decompressed, "showTime")
-                val colors = extractXmlTags(decompressed, "color")
-
-                for (j in contents.indices) {
-                    val dmContent = contents.getOrNull(j) ?: continue
-                    if (dmContent.isBlank()) continue
-                    if (containsInvalidChars(dmContent)) continue
-
-                    val showTime = showTimes.getOrNull(j)
-                    val timepoint = showTime?.toDoubleOrNull() ?: 0.0
-
-                    val hexColor = colors.getOrNull(j) ?: "FFFFFF"
-                    val color = try {
-                        hexColor.toInt(16)
-                    } catch (e: Exception) {
-                        16777215
-                    }
-
-                    xmlBuilder.append("  <d p=\"$timepoint,1,25,$color,0\">")
-                    xmlBuilder.append(escapeXml(dmContent))
-                    xmlBuilder.append("</d>\n")
-                    hasData = true
+        // 并发下载所有分页弹幕（参考海阔视界 batchExecute 多线程模式）
+        val pageResults = coroutineScope {
+            (1..pageCount).map { page ->
+                async(Dispatchers.IO) {
+                    fetchDanmakuPage(url, tvid, prefix1, prefix2, params, page)
                 }
-            } catch (e: Exception) {
-                // continue with next page
+            }.awaitAll()
+        }
+
+        var hasData = false
+        for (pageXml in pageResults) {
+            if (pageXml != null) {
+                xmlBuilder.append(pageXml)
+                hasData = true
             }
         }
 
@@ -506,10 +530,68 @@ class QiyiDanmakuFetcher(
         return ByteArrayInputStream(bytes)
     }
 
+    /**
+     * 下载单个分页的弹幕数据并格式化为 XML 片段。
+     * 每个分页覆盖约 5 分钟时长（300 秒）。
+     */
+    private fun fetchDanmakuPage(
+        referer: String,
+        tvid: String,
+        prefix1: String,
+        prefix2: String,
+        params: String,
+        page: Int
+    ): String? {
+        return try {
+            val segUrl = "https://cmts.iqiyi.com/bullet/$prefix1/$prefix2/${tvid}_300_$page.z?$params"
+            val segReq = Request.Builder()
+                .url(segUrl)
+                .header("User-Agent", PC_UA)
+                .header("Referer", referer)
+                .get()
+                .build()
+            val segResp = client.newCall(segReq).execute()
+            if (!segResp.isSuccessful) return null
+            val segBytes = segResp.body?.bytes() ?: return null
+            if (segBytes.isEmpty()) return null
+
+            val decompressed = zlibDecompress(segBytes) ?: return null
+            val contents = extractXmlTags(decompressed, "content")
+            val showTimes = extractXmlTags(decompressed, "showTime")
+            val colors = extractXmlTags(decompressed, "color")
+
+            val pageBuilder = StringBuilder()
+            for (j in contents.indices) {
+                val dmContent = contents.getOrNull(j) ?: continue
+                if (dmContent.isBlank()) continue
+                if (containsInvalidChars(dmContent)) continue
+
+                val showTime = showTimes.getOrNull(j)
+                val timepoint = showTime?.toDoubleOrNull() ?: 0.0
+
+                val hexColor = colors.getOrNull(j) ?: "FFFFFF"
+                val color = try {
+                    hexColor.toInt(16)
+                } catch (e: Exception) {
+                    16777215
+                }
+
+                pageBuilder.append("  <d p=\"$timepoint,1,25,$color,0\">")
+                pageBuilder.append(escapeXml(dmContent))
+                pageBuilder.append("</d>\n")
+            }
+
+            if (pageBuilder.isEmpty()) null else pageBuilder.toString()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun extractJsonField(html: String, fieldName: String, nextField: String): Any? {
         val pattern = Regex("\"$fieldName\"([\\s\\S]+?)(?=,\"$nextField\")")
         val match = pattern.find(html) ?: return null
-        val jsonStr = match.groupValues[1].trim()
+        // Strip leading ":" from captured group (the pattern captures `:{"..."}`)
+        var jsonStr = match.groupValues[1].trim().removePrefix(":")
         return try {
             when {
                 jsonStr.startsWith("{") -> JSONObject(jsonStr)
@@ -519,6 +601,53 @@ class QiyiDanmakuFetcher(
         } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * Extract a JSON object by finding `"fieldName":{...}` and matching braces.
+     * Used when the next field anchor is unreliable (e.g., videoType before videoInfo).
+     */
+    private fun extractBracedJson(html: String, fieldName: String): JSONObject? {
+        val keyPattern = "\"$fieldName\":"
+        val startIdx = html.indexOf(keyPattern)
+        if (startIdx < 0) return null
+        val braceStart = html.indexOf('{', startIdx + keyPattern.length)
+        if (braceStart < 0) return null
+
+        var depth = 0
+        var inString = false
+        var escape = false
+        for (i in braceStart until html.length) {
+            val c = html[i]
+            if (escape) {
+                escape = false
+                continue
+            }
+            if (c == '\\') {
+                escape = true
+                continue
+            }
+            if (c == '"') {
+                inString = !inString
+                continue
+            }
+            if (!inString) {
+                when (c) {
+                    '{' -> depth++
+                    '}' -> {
+                        depth--
+                        if (depth == 0) {
+                            return try {
+                                JSONObject(html.substring(braceStart, i + 1))
+                            } catch (e: Exception) {
+                                null
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return null
     }
 
     private fun extractJsonFromJsonp(body: String): JSONObject? {
@@ -723,8 +852,66 @@ class QiyiDanmakuFetcher(
         return sb.toString()
     }
 
+    /**
+     * 从 iQiyi v_xxx.html 格式的 URL 中提取 tvid。
+     */
+    private fun extractTvidFromUrl(url: String): String? {
+        val match = Regex("/v_([^.]+)").find(url)
+        return match?.groupValues?.get(1)
+    }
+
+    /**
+     * 通过 iQiyi 视频信息 API 反查专辑 ID。
+     */
+    private suspend fun resolveAlbumIdFromTvid(tvid: String): String {
+        return try {
+            val apiUrl = "https://pcw-api.iqiyi.com/video/video/info/$tvid"
+            Log.d(TAG, "resolveAlbumIdFromTvid: GET $apiUrl")
+            val req = Request.Builder()
+                .url(apiUrl)
+                .header("User-Agent", PC_UA)
+                .header("Referer", "https://www.iqiyi.com/")
+                .get()
+                .build()
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) {
+                Log.w(TAG, "resolveAlbumIdFromTvid: HTTP ${resp.code}")
+                return ""
+            }
+            val body = resp.body?.string() ?: return ""
+            Log.d(TAG, "resolveAlbumIdFromTvid: body len=${body.length}, sample=${body.take(300)}")
+            val json = JSONObject(body)
+            // Try multiple possible paths to find album ID
+            val data = json.optJSONObject("data") ?: return ""
+            var albumId = data.optString("albumId", "").ifBlank {
+                data.optString("album_id", "")
+            }.ifBlank {
+                data.optString("qipuId", "")
+            }.ifBlank {
+                data.optJSONObject("album")?.optString("albumId", "") ?: ""
+            }.ifBlank {
+                data.optString("aid", "")
+            }
+            // Sometimes albumId is in a nested "album" object
+            if (albumId.isBlank()) {
+                val albumObj = data.optJSONObject("album")
+                if (albumObj != null) {
+                    albumId = albumObj.optString("albumId", "").ifBlank {
+                        albumObj.optString("id", "")
+                    }
+                }
+            }
+            Log.d(TAG, "resolveAlbumIdFromTvid: albumId=$albumId")
+            albumId
+        } catch (e: Exception) {
+            Log.w(TAG, "resolveAlbumIdFromTvid failed: ${e.message}")
+            ""
+        }
+    }
+
     companion object {
         private const val PC_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        private const val MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
         private const val TAG = "QiyiDanmakuFetcher"
     }
 }

@@ -22,17 +22,17 @@ interface DanmakuRepository {
     /**
      * 获取剧集列表。
      * @param source 弹幕源
-     * @param animeId 动漫 ID
+     * @param anime 动漫搜索结果（包含 animeId、url 等，平台源需要 url 来构造 API 请求）
      */
-    suspend fun getEpisodes(source: DanmakuSource, animeId: Int): List<EpisodeInfo>
+    suspend fun getEpisodes(source: DanmakuSource, anime: AnimeMatch): List<EpisodeInfo>
 
     /**
      * 下载弹幕到本地缓存。
      * @param source 弹幕源
-     * @param episodeId 剧集 ID
+     * @param episode 剧集信息（包含 episodeId、url 等）
      * @return 本地缓存文件的 Uri，失败返回 null
      */
-    suspend fun downloadAndCache(source: DanmakuSource, episodeId: Int): Uri?
+    suspend fun downloadAndCache(source: DanmakuSource, episode: EpisodeInfo): Uri?
 
     /**
      * 通过视频 URL 抓取弹幕（平台源自动匹配 fetcher）。

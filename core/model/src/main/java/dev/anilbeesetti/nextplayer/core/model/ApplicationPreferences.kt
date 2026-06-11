@@ -27,7 +27,7 @@ data class ApplicationPreferences(
     val thumbnailGenerationStrategy: ThumbnailGenerationStrategy = ThumbnailGenerationStrategy.FRAME_AT_PERCENTAGE,
     val thumbnailFramePosition: Float = DEFAULT_THUMBNAIL_FRAME_POSITION,
 
-    // 足迹 — 每目录最多一个最新足迹 (key=父目录路径, value=最新项目路径/URI)
+    // 每目录最新播放足迹 (key=目录路径, value=最新项目路径/URI)
     val latestFootprintPerDir: Map<String, String> = emptyMap(),
 
     // 启动页与标签页可见性

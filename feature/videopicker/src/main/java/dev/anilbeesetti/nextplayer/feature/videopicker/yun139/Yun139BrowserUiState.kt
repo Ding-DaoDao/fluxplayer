@@ -3,7 +3,7 @@ package dev.anilbeesetti.nextplayer.feature.videopicker.yun139
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 
 /**
- * 移动云盘 UI 状态 —— 对应反编译版 Yun139BrowserUiState
+ * 移动云盘 UI 状态
  */
 data class Yun139BrowserUiState(
     val items: List<WebDavResource> = emptyList(),
@@ -17,11 +17,7 @@ data class Yun139BrowserUiState(
     val error: String? = null,
     val orderBy: String = "name",
     val orderDirection: String = "ASC",
-    val loginLoading: Boolean = false,
-    val smsCountdown: Int = 0,
-    val smsSent: Boolean = false,
     val playedUriStrings: Set<String> = emptySet(),
-    val currentFootprint: String? = null,
     val scrollTargetIndex: Int = -1,
     val scrollTargetParentKey: String? = null,
     val pendingAction: String? = null,

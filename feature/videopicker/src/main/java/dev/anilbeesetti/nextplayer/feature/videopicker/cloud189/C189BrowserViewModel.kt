@@ -11,9 +11,11 @@ import dev.anilbeesetti.nextplayer.core.data.cloud189.C189AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.cloud189.C189FileItem
 import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
+import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -44,6 +46,19 @@ class C189BrowserViewModel @Inject constructor(
     private var loadSequence: Int = 0
     private var loadDirectoryJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
+    private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
+
+    private val _navigationStack = MutableStateFlow(
+        listOf(DirectoryStackEntry(fileId = "-11", label = "根目录"))
+    )
+    val navigationStack: StateFlow<List<DirectoryStackEntry>> = _navigationStack.asStateFlow()
+
+    private fun syncStackTop(transform: (DirectoryStackEntry) -> DirectoryStackEntry) {
+        _navigationStack.update { stack ->
+            if (stack.isEmpty()) return@update stack
+            stack.toMutableList().apply { set(lastIndex, transform(get(lastIndex))) }
+        }
+    }
 
     // endregion
 
@@ -169,7 +184,9 @@ class C189BrowserViewModel @Inject constructor(
         C189AuthProvider.clear()
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
+        directoryCache.clear()
         _uiState.value = C189BrowserUiState()
+        _navigationStack.value = listOf(DirectoryStackEntry(fileId = "-11", label = "根目录"))
     }
 
     // endregion
@@ -201,12 +218,14 @@ class C189BrowserViewModel @Inject constructor(
                         }
                     }
                     val resources = listResult.items.map { fileToResource(it) }
+                    directoryCache[parentFileId] = resources
                     updateUiState {
                         it.copy(
                             items = resources,
                             isLoading = false, hasMore = listResult.items.size >= 100, currentPage = 1
                         )
                     }
+                    syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
                 },
                 onFailure = { e ->
                     val msg = e.message ?: "未知错误"
@@ -217,8 +236,28 @@ class C189BrowserViewModel @Inject constructor(
                         else -> "加载失败: $msg"
                     }
                     updateUiState { it.copy(error = friendly, isLoading = false) }
+                    syncStackTop { it.copy(error = friendly, isLoading = false) }
                 }
             )
+        }
+    }
+
+    private fun loadDirectoryCached(fileId: String) {
+        val cached = directoryCache[fileId]
+        if (cached != null) {
+            updateUiState {
+                it.copy(
+                    items = cached,
+                    currentFolderId = fileId,
+                    isLoading = false,
+                    error = null
+                )
+            }
+            syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
+        } else {
+            updateUiState { it.copy(items = emptyList(), currentFolderId = fileId) }
+            syncStackTop { it.copy(items = emptyList(), isLoading = true, error = null) }
+            loadDirectory(fileId)
         }
     }
 
@@ -269,12 +308,12 @@ class C189BrowserViewModel @Inject constructor(
         val parentKey = state.breadcrumbs.joinToString("/") { it.label }
         updateUiState {
             it.copy(
-                items = emptyList(),
                 breadcrumbs = state.breadcrumbs + C189Breadcrumb(item.name, item.path),
                 scrollTargetIndex = index, scrollTargetParentKey = parentKey
             )
         }
-        loadDirectory(item.path)
+        _navigationStack.update { it + DirectoryStackEntry(fileId = item.path, label = item.name) }
+        loadDirectoryCached(item.path)
     }
 
     fun clearScrollTarget() { updateUiState { it.copy(scrollTargetIndex = -1) } }
@@ -284,7 +323,8 @@ class C189BrowserViewModel @Inject constructor(
         if (breadcrumbs.size <= 1) return
         val target = breadcrumbs[breadcrumbs.size - 2]
         updateUiState { it.copy(breadcrumbs = breadcrumbs.dropLast(1)) }
-        loadDirectory(target.fileId)
+        _navigationStack.update { if (it.size > 1) it.dropLast(1) else it }
+        loadDirectoryCached(target.fileId)
     }
 
     fun navigateToBreadcrumb(index: Int) {
@@ -293,7 +333,8 @@ class C189BrowserViewModel @Inject constructor(
         val target = breadcrumbs[index]
         if (target.fileId.isEmpty()) return
         updateUiState { it.copy(breadcrumbs = breadcrumbs.subList(0, index + 1)) }
-        loadDirectory(target.fileId)
+        _navigationStack.update { it.take(index + 1) }
+        loadDirectoryCached(target.fileId)
     }
 
     // endregion
@@ -310,23 +351,6 @@ class C189BrowserViewModel @Inject constructor(
     // region ==================== 刷新 ====================
 
     fun refresh() { loadDirectory(_uiState.value.currentFolderId) }
-
-    // endregion
-
-    // region ==================== 足迹 ====================
-
-    fun recordFootprint(path: String) {
-        val dir = _uiState.value.currentFolderId
-        updateUiState { it.copy(currentFootprint = path) }
-        viewModelScope.launch {
-            try {
-                val appPrefs = preferencesRepository.applicationPreferences.value
-                val footprintMap = appPrefs.latestFootprintPerDir.toMutableMap()
-                footprintMap["cloud189:$dir"] = path
-                preferencesRepository.updateApplicationPreferences { it.copy(latestFootprintPerDir = footprintMap) }
-            } catch (_: Exception) {}
-        }
-    }
 
     // endregion
 

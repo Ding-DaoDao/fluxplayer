@@ -21,6 +21,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -226,22 +227,11 @@ private fun SourceItem(
                 maxLines = 1,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = onToggleEnabled,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (source.enabled) Color(0xFF4CAF50)
-                    else Color.White.copy(alpha = 0.2f),
-                ),
-                shape = RoundedCornerShape(6.dp),
-                contentPadding = ButtonDefaults.TextButtonContentPadding,
-            ) {
-                Text(
-                    if (source.enabled) "禁用" else "启用",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                )
-            }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = source.enabled,
+                onCheckedChange = { onToggleEnabled() },
+            )
             if (source.type == DanmakuSourceType.CUSTOM) {
                 Button(
                     onClick = onDelete,

@@ -1,5 +1,6 @@
 package dev.anilbeesetti.nextplayer.core.data.yun139
 
+import android.util.Log
 import dev.anilbeesetti.nextplayer.core.data.BaseCloudApiClient
 import dev.anilbeesetti.nextplayer.core.data.CloudHttpClient
 import okhttp3.OkHttpClient
@@ -14,70 +15,190 @@ class Yun139ApiClient(
 
     companion object {
         private const val TAG = "Yun139Api"
-        private const val API_BASE = "https://yun.139.com"
+        private const val BASE_URL = "https://personal-kd-njs.yun.139.com"
+        private const val USER_BASE = "https://user-njs.yun.139.com"
+        private val DEFAULT_UA = "okhttp/4.12.0"
     }
 
-    private fun buildHeaders(): Map<String, String> = mapOf(
-        "Authorization" to Yun139AuthProvider.token,
-        "Content-Type" to "application/json",
-        "User-Agent" to Yun139AuthProvider.userAgent,
-        "Referer" to "https://yun.139.com/"
-    )
+    // region ==================== Auth helpers ====================
 
-    private suspend fun apiGet(url: String): JSONObject {
-        val builder = Request.Builder().url(url).get()
-        buildHeaders().forEach { (k, v) -> builder.header(k, v) }
-        val resp = executeRequestAndGetResponse(builder.build())
-        val body = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
-        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code} from $url: $body")
-        return JSONObject(body)
+    private fun auth(): String = Yun139AuthProvider.authorization
+    private fun uni(): String = Yun139AuthProvider.userDomainId
+    private fun devInfo(): String = Yun139AuthProvider.deviceInfo
+
+    fun setToken(authorization: String, phoneNumber: String, userDomainId: String) {
+        Yun139AuthProvider.authorization = authorization
+        Yun139AuthProvider.phoneNumber = phoneNumber
+        Yun139AuthProvider.userDomainId = userDomainId
+        Yun139AuthProvider.isActive = true
     }
 
-    private suspend fun apiPost(url: String, body: JSONObject? = null): JSONObject {
+    fun logout() {
+        Yun139AuthProvider.authorization = ""
+        Yun139AuthProvider.phoneNumber = ""
+        Yun139AuthProvider.userDomainId = ""
+        Yun139AuthProvider.isActive = false
+    }
+
+    fun isLoggedIn(): Boolean = Yun139AuthProvider.isActive
+
+    // endregion
+
+    // region ==================== Headers ====================
+
+    private val filterHeaders: Map<String, String>
+        get() = mapOf(
+            "x-yun-api-version" to "v2",
+            "x-yun-net-type" to "",
+            "x-yun-device-id" to devInfo(),
+            "x-yun-client-info" to devInfo(),
+            "x-yun-User-Agent" to "android|24031PN0DC|android 10|mCloud12.4.1-0000",
+            "x-yun-svc-type" to "1",
+            "x-yun-module-type" to "100",
+            "x-yun-app-channel" to "10000023",
+            "authorization" to auth(),
+            "content-type" to "application/json; charset=UTF-8",
+            "User-Agent" to DEFAULT_UA,
+            "x-yun-uni" to uni()
+        )
+
+    private val downloadHeaders: Map<String, String>
+        get() = mapOf(
+            "x-yun-url-type" to "1",
+            "x-yun-api-version" to "v1",
+            "x-yun-client-info" to devInfo(),
+            "x-yun-app-channel" to "10000023",
+            "x-huawei-channelsrc" to "10000023",
+            "authorization" to auth(),
+            "content-type" to "application/json; charset=UTF-8",
+            "User-Agent" to DEFAULT_UA,
+            "x-yun-uni" to uni()
+        )
+
+    private val videoPreviewHeaders: Map<String, String>
+        get() = mapOf(
+            "x-yun-url-type" to "3",
+            "x-yun-module-type" to "100",
+            "x-yun-api-version" to "v1",
+            "x-yun-net-type" to "1",
+            "x-yun-svc-type" to "1",
+            "x-yun-app-channel" to "10000023",
+            "x-yun-client-info" to devInfo(),
+            "x-yun-device-id" to devInfo(),
+            "x-yun-User-Agent" to "android|24031PN0DC|android 10|mCloud12.4.1-0000",
+            "authorization" to auth(),
+            "content-type" to "application/json; charset=UTF-8",
+            "User-Agent" to DEFAULT_UA,
+            "x-yun-uni" to uni()
+        )
+
+    private val fileMgmtHeaders: Map<String, String>
+        get() = mapOf(
+            "x-yun-api-version" to "v1",
+            "x-yun-net-type" to "1",
+            "x-yun-svc-type" to "1",
+            "x-yun-device-id" to devInfo(),
+            "x-yun-client-info" to devInfo(),
+            "x-yun-app-channel" to "10000023",
+            "x-yun-module-type" to "100",
+            "x-mm-source" to "0000",
+            "authorization" to auth(),
+            "content-type" to "application/json; charset=UTF-8",
+            "User-Agent" to DEFAULT_UA,
+            "x-yun-uni" to uni()
+        )
+
+    // endregion
+
+    // region ==================== HTTP ====================
+
+    private suspend fun apiPost(
+        url: String,
+        body: JSONObject?,
+        headers: Map<String, String>
+    ): JSONObject {
+        val bodyStr = body?.toString() ?: ""
         val builder = Request.Builder().url(url)
-        if (body != null) builder.post(body.toString().toRequestBody(jsonMediaType))
-        else builder.post("".toRequestBody(null))
-        buildHeaders().forEach { (k, v) -> builder.header(k, v) }
-        val resp = executeRequestAndGetResponse(builder.build())
-        val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
-        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code} from $url: $respBody")
-        return JSONObject(respBody)
+            .post(bodyStr.toRequestBody(jsonMediaType))
+        headers.forEach { (k, v) -> builder.header(k, v) }
+        val req = builder.build()
+        Log.d(TAG, "POST $url body=${bodyStr.take(200)}")
+        // 整个请求 + 读取 body 都在 IO 线程完成
+        val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val resp = executeRequestAndGetResponse(req)
+            resp.body?.string() ?: ""
+        }
+        Log.d(TAG, "response len=${text.length} body=${text.take(2000)}")
+        return JSONObject(text)
     }
+
+    // endregion
+
+    // region ==================== File list (v2 hcy API) ====================
 
     suspend fun listFiles(
-        folderId: String = "root",
+        folderId: String = "/",
         pageNum: Int = 1,
         pageSize: Int = 100
     ): Result<Yun139ListResult> = runCatching {
         val body = JSONObject().apply {
-            put("folderId", folderId)
-            put("pageNum", pageNum)
-            put("pageSize", pageSize)
+            put("fields", "thumbnailUrls,addressDetail,mediaMetaInfo,metadataAuditInfo,userTags,contentAuditInfo,starredAt,starred,localCreatedAt,localUpdatedAt")
+            put("imageThumbnailStyleList", JSONArray(listOf("Small", "Big")))
+            put("orderBy", "updated_at")
+            put("orderDirection", "DESC")
+            put("ownerId", JSONObject.NULL)
+            put("pageInfo", JSONObject().apply {
+                put("needTotalCount", 0)
+                put("pageCursor", JSONObject.NULL)
+                put("pageSize", pageSize)
+            })
+            put("parentFileId", folderId)
+            put("parentFilePath", true)
+            put("type", JSONObject.NULL)
         }
-        val json = apiPost("$API_BASE/ori/file/listFiles.action", body)
-        val itemsArray = json.optJSONArray("data") ?: JSONArray()
+        val json = apiPost("$BASE_URL/hcy/file/list", body, filterHeaders)
+
+        // 检查 API 级错误
+        val success = json.optBoolean("success", true)
+        if (!success) {
+            val msg = json.optString("message", "未知错误")
+            throw IllegalStateException("API error: $msg")
+        }
+
+        // 响应格式: data.items
+        val data = json.optJSONObject("data")
+        val itemsArray = data?.optJSONArray("items") ?: JSONArray()
         val items = (0 until itemsArray.length()).map { i ->
             val item = itemsArray.getJSONObject(i)
+            val type = item.optString("type", "")
             Yun139FileItem(
                 fileId = item.optString("fileId", ""),
-                fileName = item.optString("fileName", ""),
-                fileSize = item.optLong("fileSize", 0),
-                isDir = item.optBoolean("isDir", false),
-                createDate = item.optString("createDate", ""),
-                lastOpTime = item.optString("lastOpTime", ""),
-                contentType = item.optString("contentType", ""),
-                thumbnailUrl = item.optString("thumbnailUrl", null)
+                fileName = item.optString("name", ""),
+                fileSize = item.optLong("size", 0),
+                isDir = type == "folder",
+                createDate = "",
+                lastOpTime = item.optString("updatedAt", "").replace("\\..*".toRegex(), ""),
+                contentType = item.optString("category", ""),
+                thumbnailUrl = item.optJSONArray("thumbnailUrls")?.optJSONObject(1)?.optString("url", null)
             )
         }
-        Yun139ListResult(items, json.optInt("totalCount", 0), json.optString("nextMarker", ""))
+        Yun139ListResult(items, 0, "")
     }
+
+    // endregion
+
+    // region ==================== Other operations ====================
 
     suspend fun getVideoPreviewUrl(fileId: String): Result<String> = runCatching {
         val body = JSONObject().apply {
+            put("category", "video")
+            put("expireSec", 14400)
             put("fileId", fileId)
+            put("qualityList", JSONObject.NULL)
         }
-        val json = apiPost("$API_BASE/ori/file/getVideoPreview.action", body)
-        json.optString("playUrl", "")
+        val json = apiPost("$BASE_URL/hcy/videoPreview/getPreviewInfo", body, videoPreviewHeaders)
+        json.optJSONObject("data")?.optJSONObject("previewInfo")?.optString("url", "")
+            ?: json.optString("playUrl", "")
     }
 
     suspend fun getDownloadUrl(fileId: String, fileName: String): Result<String> = runCatching {
@@ -85,25 +206,35 @@ class Yun139ApiClient(
             put("fileId", fileId)
             put("fileName", fileName)
         }
-        val json = apiPost("$API_BASE/ori/file/getDownloadUrl.action", body)
-        json.optString("downloadUrl", "")
+        val json = apiPost("$BASE_URL/hcy/file/getDownloadUrl", body, downloadHeaders)
+        json.optJSONObject("data")?.optString("url", "")
+            ?: json.optString("downloadUrl", "")
     }
 
     suspend fun createFolder(parentFolderId: String, folderName: String): Result<Boolean> = runCatching {
         val body = JSONObject().apply {
-            put("parentFolderId", parentFolderId)
-            put("folderName", folderName)
+            put("contentType", JSONObject.NULL)
+            put("description", JSONObject.NULL)
+            put("fileId", JSONObject.NULL)
+            put("fileRenameMode", JSONObject.NULL)
+            put("name", folderName)
+            put("ownerId", JSONObject.NULL)
+            put("parentFileId", parentFolderId)
+            put("parentPath", JSONObject.NULL)
+            put("type", "folder")
         }
-        apiPost("$API_BASE/ori/file/createFolder.action", body)
+        apiPost("$BASE_URL/hcy/file/create", body, fileMgmtHeaders)
         true
     }
 
     suspend fun renameFile(fileId: String, newName: String): Result<Boolean> = runCatching {
         val body = JSONObject().apply {
+            put("FileRenameMode", JSONObject.NULL)
+            put("description", JSONObject.NULL)
             put("fileId", fileId)
-            put("newName", newName)
+            put("name", newName)
         }
-        apiPost("$API_BASE/ori/file/renameFile.action", body)
+        apiPost("$BASE_URL/hcy/file/update", body, fileMgmtHeaders)
         true
     }
 
@@ -111,16 +242,56 @@ class Yun139ApiClient(
         val body = JSONObject().apply {
             put("fileIds", JSONArray(fileIds))
         }
-        apiPost("$API_BASE/ori/file/deleteFiles.action", body)
+        apiPost("$BASE_URL/hcy/recyclebin/batchTrash", body, fileMgmtHeaders)
         true
     }
 
     suspend fun moveFiles(fileIds: List<String>, targetFolderId: String): Result<Boolean> = runCatching {
         val body = JSONObject().apply {
             put("fileIds", JSONArray(fileIds))
-            put("targetFolderId", targetFolderId)
+            put("toParentFileId", targetFolderId)
         }
-        apiPost("$API_BASE/ori/file/moveFiles.action", body)
+        apiPost("$BASE_URL/hcy/file/batchMove", body, fileMgmtHeaders)
         true
     }
+
+    // endregion
+
+    // region ==================== Token 刷新 ====================
+
+    suspend fun refreshToken(): Result<Unit> = runCatching {
+        val body = JSONObject().apply {
+            put("clientType", "414")
+        }
+        val loginHeaders = mapOf(
+            "x-nationcode" to "+86",
+            "x-nettype" to "1",
+            "x-deviceinfo" to devInfo(),
+            "x-yun-client-info" to devInfo(),
+            "x-yun-app-channel" to "10000023",
+            "x-huawei-channelsrc" to "10000023",
+            "x-mm-source" to "0000",
+            "x-svctype" to "1",
+            "content-type" to "application/json; charset=UTF-8",
+            "User-Agent" to DEFAULT_UA,
+            "authorization" to auth(),
+            "x-yun-uni" to uni()
+        )
+        val json = apiPost("$USER_BASE/user/auth/refreshToken", body, loginHeaders)
+        val success = json.optBoolean("success", false) || json.optString("message", "") == "请求成功"
+        if (success) {
+            val token = json.optJSONObject("data")?.optString("token", "")
+                ?: json.optString("token", "")
+            if (token.isNotBlank()) {
+                val phone = Yun139AuthProvider.phoneNumber
+                val newAuth = "Basic " + android.util.Base64.encodeToString(
+                    "mobile:$phone:$token".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP
+                )
+                Yun139AuthProvider.authorization = newAuth
+                Log.d(TAG, "refreshToken success")
+            }
+        }
+    }
+
+    // endregion
 }

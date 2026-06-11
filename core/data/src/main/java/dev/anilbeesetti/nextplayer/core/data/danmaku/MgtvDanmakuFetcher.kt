@@ -236,10 +236,12 @@ class MgtvDanmakuFetcher(
     }
 
     override suspend fun search(keyword: String): List<AnimeMatch> {
+        Log.d(TAG, "========== search START: keyword=$keyword ==========")
         return try {
             val encoded = URLEncoder.encode(keyword, "UTF-8")
             val url = "https://mobileso.bz.mgtv.com/msite/search/v2?q=$encoded&pc=30&pn=1&sort=0&ty=0&du=0&pt=0&corr=1&abroad=0&_support=10000000000000000&callback=jsonp_ltdyqd2pcfsnbnr"
 
+            Log.d(TAG, "search: GET $url")
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", PC_UA)
@@ -247,15 +249,25 @@ class MgtvDanmakuFetcher(
                 .build()
 
             val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return emptyList()
+            Log.d(TAG, "search: HTTP ${response.code}")
+            if (!response.isSuccessful) {
+                Log.w(TAG, "search: HTTP ${response.code} FAILED")
+                return emptyList()
+            }
 
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: ""
+            if (body.isBlank()) { Log.w(TAG, "search: empty body"); return emptyList() }
+            Log.d(TAG, "search: body len=${body.length}, sample=${body.take(200)}")
 
             val jsonMatch = Regex("""\{[\S\s]+\}""").find(body)
-            if (jsonMatch == null) return emptyList()
+            if (jsonMatch == null) {
+                Log.w(TAG, "search: no JSON object found in body")
+                return emptyList()
+            }
 
             val json = JSONObject(jsonMatch.value)
             val rawData = json.opt("data")
+            Log.d(TAG, "search: rawData type=${rawData?.javaClass?.simpleName}")
 
             val contents: JSONArray? = when (rawData) {
                 is JSONObject -> rawData.optJSONArray("contents")
@@ -264,14 +276,19 @@ class MgtvDanmakuFetcher(
             }
 
             if (contents == null) {
-                Log.w(TAG, "search: cannot find data.contents, response sample=${body.take(500)}")
+                Log.w(TAG, "search: cannot find data.contents, json keys=${json.keys().asSequence().toList()}")
                 return emptyList()
             }
+            Log.d(TAG, "search: contents array length=${contents.length()}")
 
             val results = mutableListOf<AnimeMatch>()
             for (i in 0 until contents.length()) {
                 val movie = contents.optJSONObject(i) ?: continue
-                if (movie.optString("name", "") != "媒资头部") continue
+                val name = movie.optString("name", "")
+                if (name != "媒资头部") {
+                    Log.d(TAG, "search: skipping contents[$i] name='$name'")
+                    continue
+                }
 
                 val dataArr = movie.optJSONArray("data") ?: continue
                 if (dataArr.length() == 0) continue
@@ -280,7 +297,10 @@ class MgtvDanmakuFetcher(
                 val title = Regex("<[^>]+>").replace(firstData.optString("title", ""), "")
                 val epUrl = firstData.optString("url", "")
 
-                if (epUrl.contains("qq") || epUrl.contains("youku") || epUrl.contains("qiyi") || epUrl.contains("bili")) continue
+                if (epUrl.contains("qq") || epUrl.contains("youku") || epUrl.contains("qiyi") || epUrl.contains("bili")) {
+                    Log.d(TAG, "search: skipping external url: $epUrl")
+                    continue
+                }
                 if (title.isBlank() || epUrl.isBlank()) continue
 
                 val fullUrl = "https://www.mgtv.com$epUrl"
@@ -294,27 +314,30 @@ class MgtvDanmakuFetcher(
                 )
             }
 
-            Log.d(TAG, "search parsed ${results.size} results")
+            Log.d(TAG, "search: parsed ${results.size} results")
             results
         } catch (e: Exception) {
-            Log.e(TAG, "search failed", e)
+            Log.e(TAG, "search: EXCEPTION ${e.javaClass.simpleName}: ${e.message}", e)
             emptyList()
+        }.also {
+            Log.d(TAG, "========== search END: ${it.size} results ==========")
         }
     }
 
     override suspend fun getEpisodes(anime: AnimeMatch): List<EpisodeInfo> {
-        val url = anime.url ?: return emptyList()
+        val url = anime.url ?: run { Log.w(TAG, "getEpisodes: anime.url is null"); return emptyList() }
         val vid = extractMgtvVid(url) ?: run {
-            Log.w(TAG, "getEpisodes: cannot extract vid from $url")
+            Log.w(TAG, "getEpisodes: cannot extract vid from url=$url")
             return emptyList()
         }
-        Log.d(TAG, "getEpisodes: vid=$vid from $url")
+        Log.d(TAG, "========== getEpisodes START: vid=$vid url=$url ==========")
 
         return try {
             val allEpisodes = mutableListOf<EpisodeInfo>()
             val seenUrls = mutableSetOf<String>()
 
             val firstUrl = "https://pcweb.api.mgtv.com/episode/list?_support=10000000&version=5.5.35&video_id=$vid&page=1&size=30&allowedRC=1&_support=10000000"
+            Log.d(TAG, "getEpisodes: page 1 GET $firstUrl")
             val firstResp = client.newCall(
                 Request.Builder()
                     .url(firstUrl)
@@ -324,11 +347,21 @@ class MgtvDanmakuFetcher(
                     .build()
             ).execute()
 
-            if (!firstResp.isSuccessful) return emptyList()
-            val firstBody = firstResp.body?.string() ?: return emptyList()
+            Log.d(TAG, "getEpisodes: page 1 HTTP ${firstResp.code}")
+            if (!firstResp.isSuccessful) {
+                Log.w(TAG, "getEpisodes: page 1 HTTP ${firstResp.code} FAILED")
+                return emptyList()
+            }
+            val firstBody = firstResp.body?.string() ?: ""
+            if (firstBody.isBlank()) { Log.w(TAG, "getEpisodes: page 1 empty body"); return emptyList() }
+            Log.d(TAG, "getEpisodes: page 1 body len=${firstBody.length}, sample=${firstBody.take(200)}")
 
             val firstJson = JSONObject(firstBody)
-            val episodeData = firstJson.optJSONObject("data") ?: return emptyList()
+            val episodeData = firstJson.optJSONObject("data")
+            if (episodeData == null) {
+                Log.w(TAG, "getEpisodes: no 'data' in page 1, keys=${firstJson.keys().asSequence().toList()}")
+                return emptyList()
+            }
             val totalPage = episodeData.optInt("total_page", 0)
             val list = episodeData.optJSONArray("list") ?: JSONArray()
 
@@ -364,8 +397,10 @@ class MgtvDanmakuFetcher(
             Log.d(TAG, "getEpisodes: total ${allEpisodes.size} episodes")
             allEpisodes
         } catch (e: Exception) {
-            Log.e(TAG, "getEpisodes failed for vid=$vid", e)
+            Log.e(TAG, "getEpisodes: EXCEPTION ${e.javaClass.simpleName}: ${e.message}", e)
             emptyList()
+        }.also {
+            Log.d(TAG, "========== getEpisodes END: ${it.size} episodes ==========")
         }
     }
 

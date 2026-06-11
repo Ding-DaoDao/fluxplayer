@@ -3,7 +3,6 @@ package dev.anilbeesetti.nextplayer.feature.videopicker.openlist
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -31,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +42,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import dev.anilbeesetti.nextplayer.core.ui.designsystem.NextIcons
+import dev.anilbeesetti.nextplayer.feature.videopicker.DirectoryStackEntry
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CenterCircularProgressBar
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.FileTypeIcon
 
@@ -57,6 +59,7 @@ fun OpenListBrowserTabContent(
     viewModel: OpenListBrowserViewModel = hiltViewModel(),
 ) {
     val state by viewModel.stateFlow.collectAsStateWithLifecycle()
+    val navigationStack by viewModel.navigationStack.collectAsStateWithLifecycle()
 
     BackHandler(enabled = state.breadcrumbs.size > 1) {
         viewModel.navigateUp()
@@ -64,9 +67,9 @@ fun OpenListBrowserTabContent(
 
     OpenListBrowserPanel(
         state = state,
+        navigationStack = navigationStack,
         onPlayVideo = onPlayVideo,
         onPlayVideos = onPlayVideos,
-        onRecordFootprint = viewModel::recordFootprint,
         onDownloadFile = { /* OpenList 下载使用基类的 downloadFile */ },
         onNavigateToDir = viewModel::navigateToDir,
         onNavigateUpDir = viewModel::navigateUp,
@@ -84,7 +87,6 @@ internal fun OpenListBrowserPanel(
     state: dev.anilbeesetti.nextplayer.feature.videopicker.CommonStateSnapshot<OpenListBreadcrumb>,
     onPlayVideo: (Uri, String?) -> Unit,
     onPlayVideos: (List<Uri>, Uri) -> Unit,
-    onRecordFootprint: (String) -> Unit,
     onDownloadFile: (Int) -> Unit,
     onNavigateToDir: (Int) -> Unit,
     onNavigateUpDir: () -> Unit,
@@ -93,6 +95,7 @@ internal fun OpenListBrowserPanel(
     onSettingsClick: () -> Unit,
     getPlayUri: (WebDavResource) -> Uri,
     modifier: Modifier = Modifier,
+    navigationStack: List<DirectoryStackEntry> = emptyList(),
 ) {
     val serverUrl = "http://127.0.0.1:5244"
 
@@ -110,6 +113,28 @@ internal fun OpenListBrowserPanel(
                 onNavigateUpDir = onNavigateUpDir,
             )
 
+            if (navigationStack.isNotEmpty()) {
+                // 栈式渲染
+                Box(modifier = Modifier.weight(1f)) {
+                    navigationStack.forEachIndexed { index, entry ->
+                        val isTop = index == navigationStack.lastIndex
+                        key(entry.fileId) {
+                            val listState = rememberLazyListState()
+                            if (isTop) {
+                                OpenListDirectoryContent(
+                                    entry = entry,
+                                    listState = listState,
+                                    serverUrl = serverUrl,
+                                    onNavigateToDir = onNavigateToDir,
+                                    onPlayVideos = onPlayVideos,
+                                    onDownloadFile = onDownloadFile,
+                                    onRefresh = onRefresh,
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
             PullToRefreshBox(
                 isRefreshing = state.isLoading && state.items.isNotEmpty(),
                 onRefresh = onRefresh,
@@ -125,15 +150,6 @@ internal fun OpenListBrowserPanel(
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     ) {
                         itemsIndexed(state.items) { index, item ->
-                            val currentItemUri = if (item.isVideo)
-                                "$serverUrl/d${item.path}"
-                            else null
-                            val hasPlayFootprint = currentItemUri != null &&
-                                state.currentFootprint == currentItemUri
-                            val isDirFootprint = item.isDirectory &&
-                                state.currentFootprint == item.path
-                            val hasFootprint = hasPlayFootprint || isDirFootprint
-
                             Card(
                                 onClick = {
                                     if (item.isDirectory) {
@@ -144,7 +160,6 @@ internal fun OpenListBrowserPanel(
                                         val videoUris = allVideos.map { Uri.parse("$serverUrl/d${it.path}") }
                                         val clickedUri = Uri.parse(clickedVideoUri)
                                         if (videoUris.isNotEmpty()) {
-                                            onRecordFootprint(clickedVideoUri)
                                             onPlayVideos(videoUris, clickedUri)
                                         }
                                     } else {
@@ -162,33 +177,12 @@ internal fun OpenListBrowserPanel(
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Box {
-                                        FileTypeIcon(
-                                            item = item,
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(RoundedCornerShape(8.dp)),
-                                        )
-                                        if (hasFootprint) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .size(16.dp)
-                                                    .background(
-                                                        color = MaterialTheme.colorScheme.primary,
-                                                        shape = CircleShape,
-                                                    ),
-                                                contentAlignment = Alignment.Center,
-                                            ) {
-                                                Icon(
-                                                    imageVector = NextIcons.Check,
-                                                    contentDescription = "足迹",
-                                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                                    modifier = Modifier.size(10.dp),
-                                                )
-                                            }
-                                        }
-                                    }
+                                    FileTypeIcon(
+                                        item = item,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                    )
                                     Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(
@@ -196,11 +190,6 @@ internal fun OpenListBrowserPanel(
                                             style = MaterialTheme.typography.bodyLarge,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
-                                            color = if (hasPlayFootprint) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurface
-                                            },
                                         )
                                         if (!item.isDirectory && item.size > 0) {
                                             Text(
@@ -222,6 +211,7 @@ internal fun OpenListBrowserPanel(
                         }
                     }
                 }
+            }
             }
 
             state.error?.let { error ->
@@ -350,6 +340,97 @@ internal fun EmptyFolderHint() {
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun OpenListDirectoryContent(
+    entry: DirectoryStackEntry,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    serverUrl: String,
+    onNavigateToDir: (Int) -> Unit,
+    onPlayVideos: (List<Uri>, Uri) -> Unit,
+    onDownloadFile: (Int) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    if (entry.isLoading && entry.items.isEmpty()) {
+        CenterCircularProgressBar(modifier = Modifier.fillMaxSize())
+    } else if (entry.items.isEmpty()) {
+        EmptyFolderHint()
+    } else {
+        PullToRefreshBox(
+            isRefreshing = entry.isLoading && entry.items.isNotEmpty(),
+            onRefresh = onRefresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                itemsIndexed(entry.items) { index, item ->
+                    Card(
+                        onClick = {
+                            if (item.isDirectory) {
+                                onNavigateToDir(index)
+                            } else if (item.isVideo) {
+                                val clickedVideoUri = "$serverUrl/d${item.path}"
+                                val allVideos = entry.items.filter { it.isVideo }
+                                val videoUris = allVideos.map { Uri.parse("$serverUrl/d${it.path}") }
+                                val clickedUri = Uri.parse(clickedVideoUri)
+                                if (videoUris.isNotEmpty()) {
+                                    onPlayVideos(videoUris, clickedUri)
+                                }
+                            } else {
+                                onDownloadFile(index)
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            FileTypeIcon(
+                                item = item,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = item.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (!item.isDirectory && item.size > 0) {
+                                    Text(
+                                        text = formatFileSize(item.size),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            if (item.isDirectory) {
+                                Text(
+                                    text = "›",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.titleLarge,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

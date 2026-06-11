@@ -15,7 +15,6 @@ data class WebDavBrowserUiState(
     val isConfigured: Boolean = false,
     val playedUriStrings: Set<String> = emptySet(),
     val visitedDirPaths: Set<String> = emptySet(),
-    val currentFootprint: String? = null,
     val scrollTargetIndex: Int = -1,
     val scrollTargetParentKey: String? = null,
     val pendingAction: String? = null,

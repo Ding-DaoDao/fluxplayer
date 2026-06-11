@@ -60,6 +60,7 @@ class YoukuDanmakuFetcher(
                         .get()
                         .build()
                     val resp = client.newCall(req).execute()
+                    Log.d(TAG, "tryJsonSearch: HTTP ${resp.code}")
                     if (resp.isSuccessful) {
                         val body = resp.body?.string()
                         if (body != null) {
@@ -68,15 +69,20 @@ class YoukuDanmakuFetcher(
                                 val json = JSONObject(body)
                                 val youkuResults = parseYoukuJsonSearch(json)
                                 if (youkuResults.isNotEmpty()) return youkuResults
-                            } catch (_: Exception) {
+                            } catch (e: Exception) {
+                                Log.d(TAG, "tryJsonSearch: parse failed: ${e.message}")
                             }
                         }
+                    } else {
+                        Log.d(TAG, "tryJsonSearch: HTTP ${resp.code} FAILED")
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    Log.d(TAG, "tryJsonSearch: network error: ${e.message}")
                 }
             }
             emptyList()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d(TAG, "tryJsonSearch: outer error: ${e.message}")
             emptyList()
         }
     }
@@ -137,6 +143,7 @@ class YoukuDanmakuFetcher(
                         .get()
                         .build()
                     val htmlResp = client.newCall(htmlReq).execute()
+                    Log.d(TAG, "tryHtmlSearch: $searchUrl HTTP ${htmlResp.code}")
                     if (htmlResp.isSuccessful) {
                         val html = htmlResp.body?.string()
                         if (html != null) {
@@ -146,12 +153,16 @@ class YoukuDanmakuFetcher(
                             val cardResults = parseSearchCards(html)
                             if (cardResults.isNotEmpty()) return cardResults
                         }
+                    } else {
+                        Log.d(TAG, "tryHtmlSearch: HTTP ${htmlResp.code} FAILED")
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    Log.d(TAG, "tryHtmlSearch: network error: ${e.message}")
                 }
             }
             emptyList()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d(TAG, "tryHtmlSearch: outer error: ${e.message}")
             emptyList()
         }
     }
@@ -245,13 +256,13 @@ class YoukuDanmakuFetcher(
     }
 
     override suspend fun getEpisodes(anime: AnimeMatch): List<EpisodeInfo> {
-        val url = anime.url ?: return emptyList()
+        val url = anime.url ?: run { Log.w(TAG, "getEpisodes: anime.url is null"); return emptyList() }
         val idMatch = Regex("""id_([^\.?\?]+)""").find(url)
         val currentId = idMatch?.groupValues?.get(1) ?: run {
-            Log.w(TAG, "getEpisodes: cannot extract currentId from $url")
+            Log.w(TAG, "getEpisodes: cannot extract currentId from url=$url")
             return emptyList()
         }
-        Log.d(TAG, "getEpisodes: currentId=$currentId")
+        Log.d(TAG, "========== getEpisodes START: currentId=$currentId url=$url ==========")
 
         return try {
             val episodes = mutableListOf<EpisodeInfo>()
@@ -259,6 +270,7 @@ class YoukuDanmakuFetcher(
 
             // Try h5 API first
             val h5Url = "https://search.youku.com/api/search?appScene=show_episode&showIds=$currentId&appCaller=h5"
+            Log.d(TAG, "getEpisodes: h5 GET $h5Url")
             val h5Resp = client.newCall(
                 Request.Builder()
                     .url(h5Url)
@@ -267,16 +279,21 @@ class YoukuDanmakuFetcher(
                     .get()
                     .build()
             ).execute()
+            Log.d(TAG, "getEpisodes: h5 HTTP ${h5Resp.code}")
             if (h5Resp.isSuccessful) {
                 val h5Body = h5Resp.body?.string() ?: ""
+                Log.d(TAG, "getEpisodes: h5 body len=${h5Body.length}, sample=${h5Body.take(200)}")
                 try {
                     addYoukuEpisodes(JSONObject(h5Body), episodes, seenVids)
-                } catch (_: Exception) {
+                    Log.d(TAG, "getEpisodes: h5 added, now ${episodes.size} episodes")
+                } catch (e: Exception) {
+                    Log.w(TAG, "getEpisodes: h5 parse failed: ${e.message}")
                 }
             }
 
             // Try pc API
             val pcUrl = "https://search.youku.com/api/search?appScene=show_episode&showIds=$currentId&appCaller=pc"
+            Log.d(TAG, "getEpisodes: pc GET $pcUrl")
             val pcResp = client.newCall(
                 Request.Builder()
                     .url(pcUrl)
@@ -285,10 +302,13 @@ class YoukuDanmakuFetcher(
                     .get()
                     .build()
             ).execute()
+            Log.d(TAG, "getEpisodes: pc HTTP ${pcResp.code}")
             if (pcResp.isSuccessful) {
                 val pcBody = pcResp.body?.string() ?: ""
+                Log.d(TAG, "getEpisodes: pc body len=${pcBody.length}, sample=${pcBody.take(200)}")
                 val pcJson = JSONObject(pcBody)
                 val pcSeries = pcJson.optJSONArray("serisesList") ?: JSONArray()
+                Log.d(TAG, "getEpisodes: pc serisesList length=${pcSeries.length()}")
 
                 for (i in 0 until pcSeries.length()) {
                     val item = pcSeries.optJSONObject(i) ?: continue
@@ -323,13 +343,16 @@ class YoukuDanmakuFetcher(
                         )
                     }
                 }
+                Log.d(TAG, "getEpisodes: pc added, now ${episodes.size} episodes")
             }
 
             Log.d(TAG, "getEpisodes: total ${episodes.size} episodes")
             episodes
         } catch (e: Exception) {
-            Log.e(TAG, "getEpisodes failed for currentId=$currentId", e)
+            Log.e(TAG, "getEpisodes: EXCEPTION ${e.javaClass.simpleName}: ${e.message}", e)
             emptyList()
+        }.also {
+            Log.d(TAG, "========== getEpisodes END: ${it.size} episodes ==========")
         }
     }
 
@@ -428,7 +451,7 @@ class YoukuDanmakuFetcher(
                     }
                     val msgStr = msg.toString()
                     val msgB64 = Base64.encodeToString(msgStr.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                    msg.put("message", msgB64)
+                    msg.put("msg", msgB64)
                     msg.put("sign", ykMsgSign(msgB64))
                     val dataStr = msg.toString()
 

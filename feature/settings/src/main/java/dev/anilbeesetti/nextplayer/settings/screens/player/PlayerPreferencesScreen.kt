@@ -32,6 +32,7 @@ import dev.anilbeesetti.nextplayer.core.ui.R
 import dev.anilbeesetti.nextplayer.core.ui.components.ClickablePreferenceItem
 import dev.anilbeesetti.nextplayer.core.ui.components.ListSectionTitle
 import dev.anilbeesetti.nextplayer.core.ui.components.NextTopAppBar
+import dev.anilbeesetti.nextplayer.core.model.DanmakuSource
 import dev.anilbeesetti.nextplayer.settings.screens.player.DanmakuSourceManagerDialog
 import dev.anilbeesetti.nextplayer.core.ui.components.PreferenceSlider
 import dev.anilbeesetti.nextplayer.core.ui.components.PreferenceSwitch
@@ -199,7 +200,7 @@ private fun PlayerPreferencesContent(
                 )
                 ClickablePreferenceItem(
                     title = "弹幕源管理",
-                    description = "${uiState.preferences.danmakuSources.size} 个弹幕源",
+                    description = "${DanmakuSource.filterValid(uiState.preferences.danmakuSources).size} 个弹幕源",
                     icon = NextIcons.Caption,
                     onClick = {
                         onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.DanmakuSourceManagerDialog))
@@ -275,9 +276,9 @@ private fun PlayerPreferencesContent(
 
                 PlayerPreferenceDialog.DanmakuSourceManagerDialog -> {
                     DanmakuSourceManagerDialog(
-                        sources = uiState.preferences.danmakuSources,
+                        sources = DanmakuSource.filterValid(uiState.preferences.danmakuSources),
                         onUpdateSources = { sources ->
-                            onEvent(PlayerPreferencesUiEvent.UpdateDanmakuSources(sources))
+                            onEvent(PlayerPreferencesUiEvent.UpdateDanmakuSources(DanmakuSource.filterValid(sources)))
                         },
                         onDismiss = {
                             onEvent(PlayerPreferencesUiEvent.ShowDialog(null))

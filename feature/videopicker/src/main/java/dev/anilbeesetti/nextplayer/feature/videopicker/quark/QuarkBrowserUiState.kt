@@ -15,7 +15,6 @@ data class QuarkBrowserUiState(
     val currentPage: Int = 1,
     val isLoggedIn: Boolean = false,
     val error: String? = null,
-    val currentFootprint: String? = null,
     val scrollTargetIndex: Int = -1,
     val scrollTargetParentKey: String? = null,
     val driveType: String = "quark",

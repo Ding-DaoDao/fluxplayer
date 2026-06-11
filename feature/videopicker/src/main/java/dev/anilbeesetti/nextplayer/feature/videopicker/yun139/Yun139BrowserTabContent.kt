@@ -1,18 +1,20 @@
 package dev.anilbeesetti.nextplayer.feature.videopicker.yun139
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.net.Uri
+import android.util.Log
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -21,7 +23,11 @@ import dev.anilbeesetti.nextplayer.core.common.CloudUriScheme
 import dev.anilbeesetti.nextplayer.core.model.WebDavResource
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+private const val TAG = "Yun139Login"
 
 /**
  * 移动云盘浏览器 Tab 内容
@@ -37,6 +43,7 @@ fun Yun139BrowserTabContent(
     LaunchedEffect(Unit) { onLogoutReady { viewModel.logout() } }
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val navigationStack by viewModel.navigationStack.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     BackHandler(enabled = state.breadcrumbs.size > 1 && state.isLoggedIn) {
@@ -50,11 +57,11 @@ fun Yun139BrowserTabContent(
         items = state.items, breadcrumbs = state.breadcrumbs,
         isLoading = state.isLoading, isConfigured = state.isLoggedIn,
         error = state.error, isLoadingMore = state.isLoadingMore, reLoginRequired = false,
+        navigationStack = navigationStack,
         onItemClick = { item ->
             if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
             else {
                 scope.launch {
-                    // 只解析点击的视频，其余视频用 cloud:// URI 按需加载
                     val clickedUri = viewModel.resolveVideoUri(item)
                     if (clickedUri != null) {
                         val videoItems = state.items.filter { !it.isDirectory }
@@ -87,32 +94,48 @@ fun Yun139BrowserTabContent(
         breadcrumbLabel = { it.label },
         loginContent = {
             Yun139LoginScreen(
-                uiState = state,
-                onLoginWithToken = { token -> viewModel.loginWithToken(token) },
-                onLoginWithWeb = { auth, udId -> viewModel.loginWithToken(auth) },
-                viewModel = viewModel
+                onLoginWithWeb = { auth, udId -> viewModel.loginWithWeb(auth, udId) }
             )
         }
     )
 }
 
 /**
- * 移动云盘登录界面 —— 纯 WebView 登录
+ * 移动云盘登录界面 — 纯 WebView 登录
  *
- * 加载移动云盘 H5 页面，用户登录后自动提取 cookie 作为凭证
+ * 加载移动云盘 PC 版登录页，用户登录后通过协程轮询 CookieManager 提取凭证。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun Yun139LoginScreen(
-    uiState: Yun139BrowserUiState,
-    onLoginWithToken: (String) -> Unit,
     onLoginWithWeb: (String, String) -> Unit,
-    viewModel: Yun139BrowserViewModel,
     modifier: Modifier = Modifier
 ) {
     var statusText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     var loginTriggered by remember { mutableStateOf(false) }
+
+    // Cookie 轮询提取 —— 当 isLoading 变为 false 时启动
+    LaunchedEffect(isLoading) {
+        if (isLoading || loginTriggered) return@LaunchedEffect
+        statusText = "请在页面中登录移动云盘"
+        while (isActive && !loginTriggered) {
+            val cookies = CookieManager.getInstance().getCookie("https://yun.139.com") ?: ""
+            val authMatch = Regex("authorization=([^;]+)").find(cookies)
+            val udMatch = Regex("ud_id=([^;]+)").find(cookies)
+
+            if (authMatch != null && udMatch != null) {
+                loginTriggered = true
+                val auth = authMatch.groupValues[1]
+                val udId = udMatch.groupValues[1]
+                Log.d(TAG, "Credential extracted: auth=${auth.take(20)}..., udId=$udId")
+                statusText = "登录成功，正在获取凭证..."
+                onLoginWithWeb(auth, udId)
+                return@LaunchedEffect
+            }
+            delay(300)
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         // 顶部状态提示
@@ -139,61 +162,94 @@ fun Yun139LoginScreen(
         // WebView 登录
         AndroidView(
             factory = { ctx ->
-                WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                    CookieManager.getInstance().removeAllCookies(null)
-                    webViewClient = object : WebViewClient() {
-                        private var authExtracted = false
-                        private var jsChecked = false
+                try {
+                    WebView(ctx).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        settings.userAgentString = UA_PC
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = true
+                        settings.allowFileAccess = false
+                        settings.allowContentAccess = false
+                        settings.databaseEnabled = true
+                        settings.mediaPlaybackRequiresUserGesture = false
 
-                        override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
-                            isLoading = true
-                            statusText = "正在加载..."
-                        }
+                        CookieManager.getInstance().removeAllCookies(null)
 
-                        override fun onPageFinished(view: WebView, url: String) {
-                            if (loginTriggered) return
-                            isLoading = false
-                            statusText = "请在页面中完成登录"
+                        webChromeClient = WebChromeClient()
 
-                            // 每次页面加载完都尝试通过 JS 提取 token
-                            if (!authExtracted) {
-                                jsChecked = false
-                                view.evaluateJavascript(
-                                    "(function(){" +
-                                    " try{var t=localStorage.getItem('token');if(t&&t.length>50)return t;}catch(e){}" +
-                                    " try{var s=sessionStorage.getItem('token');if(s&&s.length>50)return s;}catch(e){}" +
-                                    " return'';" +
-                                    "})()"
-                                ) { result ->
-                                    jsChecked = true
-                                    if (loginTriggered || authExtracted) return@evaluateJavascript
-                                    val raw = result?.trim('"') ?: ""
-                                    if (raw.isNotBlank() && raw != "null" && raw.length > 20) {
-                                        authExtracted = true
-                                        loginTriggered = true
-                                        statusText = "登录成功，正在获取凭证..."
-                                        onLoginWithToken(raw)
-                                    }
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                                isLoading = true
+                                statusText = "正在加载..."
+                                Log.d(TAG, "onPageStarted: $url")
+                            }
+
+                            override fun onPageFinished(view: WebView, url: String) {
+                                if (loginTriggered) return
+                                isLoading = false
+                                statusText = "请在页面中登录移动云盘"
+                                Log.d(TAG, "onPageFinished: $url")
+                            }
+
+                            // 拦截外部 scheme（mcloud://、intent:// 等），防止页面跳转客户端导致白屏
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView,
+                                request: WebResourceRequest
+                            ): Boolean {
+                                val url = request.url.toString()
+                                Log.d(TAG, "shouldOverrideUrlLoading: $url")
+                                if (url.startsWith("http://") || url.startsWith("https://")) {
+                                    return false // 正常加载
                                 }
+                                // 拦截所有非 http/https scheme
+                                Log.w(TAG, "Blocked external scheme: $url")
+                                return true
+                            }
 
-                                // JS 回调是异步的，延迟 500ms 后再检查 cookie（给 JS 时间）
-                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                    if (loginTriggered || authExtracted || !jsChecked) return@postDelayed
-                                    val cookies = CookieManager.getInstance().getCookie(url) ?: ""
-                                    if (cookies.isNotBlank() && cookies.length > 100) {
-                                        authExtracted = true
-                                        loginTriggered = true
-                                        statusText = "登录成功，正在获取凭证..."
-                                        onLoginWithToken(cookies)
-                                    }
-                                }, 500)
+                            @Suppress("DEPRECATION")
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView,
+                                url: String
+                            ): Boolean {
+                                Log.d(TAG, "shouldOverrideUrlLoading(deprecated): $url")
+                                if (url.startsWith("http://") || url.startsWith("https://")) {
+                                    return false
+                                }
+                                Log.w(TAG, "Blocked external scheme: $url")
+                                return true
+                            }
+
+                            override fun onReceivedError(
+                                view: WebView,
+                                request: WebResourceRequest,
+                                error: android.webkit.WebResourceError
+                            ) {
+                                if (request.isForMainFrame) {
+                                    Log.e(TAG, "onReceivedError: ${error.description} url=${request.url}")
+                                    statusText = "页面加载失败: ${error.description}"
+                                }
+                            }
+
+                            @Suppress("DEPRECATION")
+                            override fun onReceivedError(
+                                view: WebView,
+                                errorCode: Int,
+                                description: String,
+                                failingUrl: String
+                            ) {
+                                Log.e(TAG, "onReceivedError(deprecated): $description")
+                                statusText = "页面加载失败: $description"
                             }
                         }
+
+                        loadUrl("https://yun.139.com/m/#/login")
                     }
-                    loadUrl("https://yun.139.com/")
+                } catch (e: Exception) {
+                    Log.e(TAG, "WebView factory failed", e)
+                    statusText = "WebView初始化失败: ${e.message}"
+                    WebView(ctx)
                 }
             },
             modifier = Modifier.fillMaxSize()
@@ -201,3 +257,4 @@ fun Yun139LoginScreen(
     }
 }
 
+private const val UA_PC = "Mozilla/5.0 (Linux; Android 14; 24031PN0DC) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6649.40 Mobile Safari/537.36"

@@ -17,7 +17,6 @@ data class C189BrowserUiState(
     val error: String? = null,
     val orderBy: String = "filename",
     val descending: Boolean = false,
-    val currentFootprint: String? = null,
     val scrollTargetIndex: Int = -1,
     val scrollTargetParentKey: String? = null,
     val loginLoading: Boolean = false,

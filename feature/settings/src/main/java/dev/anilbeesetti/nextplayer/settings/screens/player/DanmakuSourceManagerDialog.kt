@@ -14,9 +14,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 
@@ -67,14 +67,12 @@ fun DanmakuSourceManagerDialog(
         text = {
             if (showAddForm) {
                 AddSourceForm(
-                    onAdd = { name, url, appId, appSecret ->
+                    onAdd = { name, url ->
                         val newSource = DanmakuSource(
                             id = UUID.randomUUID().toString(),
                             name = name,
                             baseUrl = url.trimEnd('/'),
                             type = DanmakuSourceType.CUSTOM,
-                            appId = appId,
-                            token = appSecret,
                         )
                         onUpdateSources(sources + newSource)
                         showAddForm = false
@@ -121,13 +119,11 @@ fun DanmakuSourceManagerDialog(
 
 @Composable
 private fun AddSourceForm(
-    onAdd: (name: String, url: String, appId: String, appSecret: String) -> Unit,
+    onAdd: (name: String, url: String) -> Unit,
     onCancel: () -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
-    var appId by remember { mutableStateOf("") }
-    var appSecret by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -152,22 +148,6 @@ private fun AddSourceForm(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = appId,
-            onValueChange = { appId = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("AppId（弹弹play开放平台凭证，可选）") },
-            singleLine = true,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = appSecret,
-            onValueChange = { appSecret = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("AppSecret / Token（可选）") },
-            singleLine = true,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
@@ -177,7 +157,7 @@ private fun AddSourceForm(
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(
-                onClick = { onAdd(name, url, appId, appSecret) },
+                onClick = { onAdd(name, url) },
                 enabled = name.isNotBlank() && url.isNotBlank(),
                 shape = RoundedCornerShape(8.dp),
             ) {
@@ -195,10 +175,6 @@ private fun SourceRow(
     onToggleEnabled: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    var showEdit by remember { mutableStateOf(false) }
-    var editAppId by remember(source) { mutableStateOf(source.appId) }
-    var editToken by remember(source) { mutableStateOf(source.token) }
-
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -215,57 +191,17 @@ private fun SourceRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (source.appId.isNotBlank()) {
-                    Text(
-                        text = "AppId: ${source.appId}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { showEdit = !showEdit }) {
-                    Text(if (showEdit) "收起" else "凭证")
-                }
-                TextButton(onClick = onToggleEnabled) {
-                    Text(if (source.enabled) "禁用" else "启用")
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = source.enabled,
+                    onCheckedChange = { onToggleEnabled() },
+                )
                 if (source.type == DanmakuSourceType.CUSTOM) {
                     TextButton(onClick = onDelete) {
                         Text("删除", color = MaterialTheme.colorScheme.error)
                     }
                 }
-            }
-        }
-
-        if (showEdit) {
-            OutlinedTextField(
-                value = editAppId,
-                onValueChange = { editAppId = it },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                placeholder = { Text("AppId") },
-                singleLine = true,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            OutlinedTextField(
-                value = editToken,
-                onValueChange = { editToken = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("AppSecret / Token") },
-                singleLine = true,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            TextButton(
-                onClick = {
-                    onUpdateSources(
-                        sources.map { s ->
-                            if (s.id == source.id) s.copy(appId = editAppId, token = editToken) else s
-                        }
-                    )
-                    showEdit = false
-                },
-            ) {
-                Text("保存凭证")
             }
         }
     }

@@ -24,12 +24,14 @@ data class DanmakuSource(
     val enabled: Boolean = true,
 ) {
     companion object {
-        /** 弹弹 play 官方源 */
+        /** 弹弹 play 官方源（已内置 AppId 和密钥，自动签名） */
         val DANDANPLAY = DanmakuSource(
             id = "dandanplay",
             name = "弹弹play",
             baseUrl = "https://api.dandanplay.net",
             type = DanmakuSourceType.BUILT_IN,
+            appId = "nxyzp2mmex",
+            token = "w2UjLEr7HurnKBS9GkhbdKmkYSL3ujR9",
         )
 
         /** B站弹幕平台源 */
@@ -77,21 +79,24 @@ data class DanmakuSource(
             enabled = false,
         )
 
-        /** 人人视频弹幕平台源 */
-        val RRSP = DanmakuSource(
-            id = "platform:rrsp",
-            name = "人人弹幕",
-            baseUrl = "",
-            type = DanmakuSourceType.PLATFORM,
-            enabled = false,
-        )
 
         /** 所有平台源列表 */
-        val PLATFORM_SOURCES = listOf(BILIBILI, TENCENT, MGTV, YOUKU, QIYI, RRSP)
+        val PLATFORM_SOURCES = listOf(BILIBILI, TENCENT, MGTV, YOUKU, QIYI)
 
         /** 判断是否为平台源 */
         fun isPlatformSource(source: DanmakuSource): Boolean {
             return source.type == DanmakuSourceType.PLATFORM
+        }
+
+        /** 过滤掉已删除/废弃的弹幕源，并注入内置源的凭证 */
+        fun filterValid(sources: List<DanmakuSource>): List<DanmakuSource> {
+            val removedIds = setOf("platform:rrsp")
+            return sources
+                .filter { it.id !in removedIds }
+                .map { s ->
+                    if (s.id == DANDANPLAY.id) s.copy(appId = DANDANPLAY.appId, token = DANDANPLAY.token)
+                    else s
+                }
         }
     }
 }

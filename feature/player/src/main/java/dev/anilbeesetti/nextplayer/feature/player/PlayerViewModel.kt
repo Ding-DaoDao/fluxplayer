@@ -20,6 +20,7 @@ import dev.anilbeesetti.nextplayer.core.model.Video
 import dev.anilbeesetti.nextplayer.core.model.VideoContentScale
 import dev.anilbeesetti.nextplayer.feature.player.danmaku.Danmaku
 import dev.anilbeesetti.nextplayer.feature.player.danmaku.DanmakuParser
+import dev.anilbeesetti.nextplayer.feature.player.danmaku.DanmakuSearchViewMode
 import dev.anilbeesetti.nextplayer.feature.player.state.SubtitleOptionsEvent
 import dev.anilbeesetti.nextplayer.feature.player.state.VideoZoomEvent
 import android.util.Log
@@ -85,11 +86,25 @@ class PlayerViewModel @Inject constructor(
     /** 上次选择的动漫信息（用于切集后回退到剧集列表） */
     private var lastAnimeInfo: DanmakuDownloadState.AnimeSelected? = null
 
+    /** 上次搜索结果（用于从剧集列表退回搜索结果） */
+    private var lastSearchResults: DanmakuDownloadState.SearchResult? = null
+
+    // ── 弹幕搜索弹窗 UI 状态（跨 show/hide 持久化） ──
+
+    private val _danmakuSearchViewMode = MutableStateFlow(DanmakuSearchViewMode.SEARCH)
+    val danmakuSearchViewMode = _danmakuSearchViewMode.asStateFlow()
+
+    private val _danmakuLocalBrowserDir = MutableStateFlow<String?>(null)
+    val danmakuLocalBrowserDir = _danmakuLocalBrowserDir.asStateFlow()
+
+    private val _danmakuSearchKeyword = MutableStateFlow("")
+    val danmakuSearchKeyword = _danmakuSearchKeyword.asStateFlow()
+
     init {
         viewModelScope.launch {
             preferencesRepository.playerPreferences.collect { prefs ->
                 internalUiState.update { it.copy(playerPreferences = prefs) }
-                danmakuSources.value = prefs.danmakuSources
+                danmakuSources.value = DanmakuSource.filterValid(prefs.danmakuSources)
             }
         }
     }
@@ -140,14 +155,23 @@ class PlayerViewModel @Inject constructor(
      * @param keyword 搜索关键词
      */
     fun searchDanmaku(source: DanmakuSource, keyword: String) {
+        Log.d(TAG, "searchDanmaku: source=$source keyword=$keyword")
         currentSource = source
         _danmakuDownloadState.value = DanmakuDownloadState.Searching(source)
         viewModelScope.launch(Dispatchers.IO) {
-            val animes = danmakuRepository.searchAnime(source, keyword)
-            if (animes.isEmpty()) {
-                _danmakuDownloadState.value = DanmakuDownloadState.Error("未找到匹配结果", source)
-            } else {
-                _danmakuDownloadState.value = DanmakuDownloadState.SearchResult(animes, source)
+            try {
+                val animes = danmakuRepository.searchAnime(source, keyword)
+                Log.d(TAG, "searchDanmaku: found ${animes.size} results for keyword=$keyword")
+                if (animes.isEmpty()) {
+                    _danmakuDownloadState.value = DanmakuDownloadState.Error("未找到匹配结果", source)
+                } else {
+                    val result = DanmakuDownloadState.SearchResult(animes, source)
+                    lastSearchResults = result
+                    _danmakuDownloadState.value = result
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "searchDanmaku failed", e)
+                _danmakuDownloadState.value = DanmakuDownloadState.Error(e.message ?: "搜索失败", source)
             }
         }
     }
@@ -157,12 +181,19 @@ class PlayerViewModel @Inject constructor(
      */
     fun selectAnime(anime: AnimeMatch) {
         val source = currentSource ?: return
+        Log.d(TAG, "selectAnime: animeId=${anime.animeId} title=${anime.title} source=$source")
         _danmakuDownloadState.value = DanmakuDownloadState.Searching(source)
         viewModelScope.launch(Dispatchers.IO) {
-            val episodes = danmakuRepository.getEpisodes(source, anime.animeId)
-            val state = DanmakuDownloadState.AnimeSelected(anime, episodes)
-            lastAnimeInfo = state
-            _danmakuDownloadState.value = state
+            try {
+                val episodes = danmakuRepository.getEpisodes(source, anime)
+                Log.d(TAG, "selectAnime: got ${episodes.size} episodes for anime=${anime.title}")
+                val state = DanmakuDownloadState.AnimeSelected(anime, episodes)
+                lastAnimeInfo = state
+                _danmakuDownloadState.value = state
+            } catch (e: Exception) {
+                Log.e(TAG, "selectAnime failed", e)
+                _danmakuDownloadState.value = DanmakuDownloadState.Error(e.message ?: "获取剧集失败", source)
+            }
         }
     }
 
@@ -171,11 +202,11 @@ class PlayerViewModel @Inject constructor(
      */
     fun selectEpisode(context: Context, episode: EpisodeInfo) {
         val source = currentSource ?: return
-        Log.d(TAG, "selectEpisode: episodeId=${episode.episodeId} source=${source.baseUrl}")
+        Log.d(TAG, "selectEpisode: episodeId=${episode.episodeId} title=${episode.title} source=${source.id} url=${episode.url}")
         _danmakuDownloadState.value = DanmakuDownloadState.Downloading(source)
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val uri = danmakuRepository.downloadAndCache(source, episode.episodeId)
+                val uri = danmakuRepository.downloadAndCache(source, episode)
                 Log.d(TAG, "selectEpisode: download result uri=$uri")
                 if (uri != null) {
                     // 直接用 FileInputStream 读取本地缓存文件
@@ -229,7 +260,43 @@ class PlayerViewModel @Inject constructor(
         _danmakuDownloadState.value = DanmakuDownloadState.Idle
         currentSource = null
         lastAnimeInfo = null
+        lastSearchResults = null
         danmakuForCurrentEpisode.value = false
+    }
+
+    /**
+     * 弹幕搜索弹窗内返回上一步：
+     * - AnimeSelected → 回到搜索结果列表
+     * - SearchResult → 回到 Idle
+     */
+    fun navigateDanmakuBack() {
+        val current = _danmakuDownloadState.value
+        when {
+            current is DanmakuDownloadState.AnimeSelected -> {
+                lastSearchResults?.let {
+                    _danmakuDownloadState.value = it
+                } ?: run {
+                    _danmakuDownloadState.value = DanmakuDownloadState.Idle
+                }
+            }
+            current is DanmakuDownloadState.SearchResult -> {
+                _danmakuDownloadState.value = DanmakuDownloadState.Idle
+                lastSearchResults = null
+            }
+            else -> resetDanmakuSearch()
+        }
+    }
+
+    fun setDanmakuSearchViewMode(mode: DanmakuSearchViewMode) {
+        _danmakuSearchViewMode.value = mode
+    }
+
+    fun setDanmakuLocalBrowserDir(path: String?) {
+        _danmakuLocalBrowserDir.value = path
+    }
+
+    fun setDanmakuSearchKeyword(keyword: String) {
+        _danmakuSearchKeyword.value = keyword
     }
 
     /**
@@ -263,7 +330,9 @@ class PlayerViewModel @Inject constructor(
             if (animes.isEmpty()) {
                 _danmakuDownloadState.value = DanmakuDownloadState.Error("未找到匹配结果", source)
             } else {
-                _danmakuDownloadState.value = DanmakuDownloadState.SearchResult(animes, source)
+                val result = DanmakuDownloadState.SearchResult(animes, source)
+                lastSearchResults = result
+                _danmakuDownloadState.value = result
             }
         }
     }

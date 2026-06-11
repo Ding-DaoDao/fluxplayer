@@ -39,10 +39,11 @@ data class BrowseProvider(
 internal val providers = listOf(
     BrowseProvider("webdav", "WebDAV", "浏览远程服务器文件", UiR.drawable.ic_provider_webdav),
     BrowseProvider("openlist", "OpenList", "浏览本地文件服务器", UiR.drawable.ic_provider_openlist),
+    BrowseProvider("alipan", "阿里云盘", "阿里云盘文件浏览", UiR.drawable.ic_provider_alipan),
+    BrowseProvider("yun139", "移动云盘", "移动云盘文件浏览", UiR.drawable.ic_provider_yun139),
     BrowseProvider("pan123", "123云盘", "123云盘文件浏览", UiR.drawable.ic_provider_pan123),
     BrowseProvider("quark", "夸克网盘", "夸克网盘文件浏览", UiR.drawable.ic_provider_quark),
     BrowseProvider("cloud189", "天翼云盘", "天翼云盘文件浏览", UiR.drawable.ic_provider_cloud189),
-    BrowseProvider("yun139", "移动云盘", "移动云盘文件浏览", UiR.drawable.ic_provider_yun139),
 )
 
 /**
