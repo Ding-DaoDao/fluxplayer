@@ -15,10 +15,14 @@ object ApplicationPreferencesSerializer : Serializer<ApplicationPreferences> {
         get() = ApplicationPreferences()
 
     override suspend fun readFrom(input: InputStream): ApplicationPreferences {
+        val bytes = input.readBytes()
+        if (bytes.isEmpty()) return defaultValue
+        val string = bytes.decodeToString().trim()
+        if (string.isEmpty() || !string.startsWith("{")) return defaultValue
         try {
             return jsonFormat.decodeFromString(
                 deserializer = ApplicationPreferences.serializer(),
-                string = input.readBytes().decodeToString(),
+                string = string,
             )
         } catch (exception: SerializationException) {
             throw CorruptionException("Cannot read datastore", exception)

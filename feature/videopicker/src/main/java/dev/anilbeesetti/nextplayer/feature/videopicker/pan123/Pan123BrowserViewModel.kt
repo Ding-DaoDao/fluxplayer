@@ -62,6 +62,7 @@ class Pan123BrowserViewModel @Inject constructor(
 
     private var loadSequence: Int = 0
     private var loadDirectoryJob: kotlinx.coroutines.Job? = null
+    private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
 
@@ -170,6 +171,8 @@ class Pan123BrowserViewModel @Inject constructor(
 
     fun loadDirectory(parentFileId: String) {
         loadDirectoryJob?.cancel()
+        loadMoreJob?.cancel()
+        loadingMore = false
         loadSequence++
         val seq = loadSequence
         updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
@@ -187,6 +190,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onSuccess = { items ->
                     cachedFileItems = items
                     // 缓存文件元数据到 CloudPlaylistCache，供播放器显示标题和 CloudUriResolver 解析
+                    val currentDirLabel = _navigationStack.value.lastOrNull()?.label
                     items.forEach { file ->
                         if (file.isVideo) {
                             CloudPlaylistCache.putFileMetadata(
@@ -197,6 +201,7 @@ class Pan123BrowserViewModel @Inject constructor(
                                     size = file.size,
                                     s3keyFlag = file.s3keyFlag,
                                     downloadUrl = file.downloadUrl,
+                                    parentPath = currentDirLabel,
                                 )
                             )
                         }
@@ -230,12 +235,17 @@ class Pan123BrowserViewModel @Inject constructor(
     private fun loadDirectoryCached(fileId: String) {
         val cached = directoryCache[fileId]
         if (cached != null) {
+            loadMoreJob?.cancel()
+            loadingMore = false
             updateUiState {
                 it.copy(
                     items = cached,
                     currentFileId = fileId,
                     isLoading = false,
-                    error = null
+                    isLoadingMore = false,
+                    error = null,
+                    currentPage = (cached.size + 99) / 100,
+                    hasMore = cached.size >= 100
                 )
             }
             syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
@@ -257,47 +267,56 @@ class Pan123BrowserViewModel @Inject constructor(
         val nextPage = state.currentPage + 1
         updateUiState { it.copy(isLoadingMore = true) }
 
-        viewModelScope.launch {
-            val result = apiClient.listFiles(
-                parentFileId = state.currentFileId,
-                page = nextPage,
-                orderBy = state.orderBy,
-                orderDirection = state.orderDirection
-            )
-            result.fold(
-                onSuccess = { items ->
-                    cachedFileItems = cachedFileItems + items
-                    // 缓存文件元数据到 CloudPlaylistCache（loadMore 也需要）
-                    items.forEach { file ->
-                        if (file.isVideo) {
-                            CloudPlaylistCache.putFileMetadata(
-                                "pan123", file.fileId,
-                                CloudPlaylistCache.FileMetadata(
-                                    fileName = file.fileName,
-                                    etag = file.etag,
-                                    size = file.size,
-                                    s3keyFlag = file.s3keyFlag,
-                                    downloadUrl = file.downloadUrl,
+        loadMoreJob = viewModelScope.launch {
+            try {
+                val result = apiClient.listFiles(
+                    parentFileId = state.currentFileId,
+                    page = nextPage,
+                    orderBy = state.orderBy,
+                    orderDirection = state.orderDirection
+                )
+                result.fold(
+                    onSuccess = { items ->
+                        cachedFileItems = cachedFileItems + items
+                        val currentDirLabel = _navigationStack.value.lastOrNull()?.label
+                        items.forEach { file ->
+                            if (file.isVideo) {
+                                CloudPlaylistCache.putFileMetadata(
+                                    "pan123", file.fileId,
+                                    CloudPlaylistCache.FileMetadata(
+                                        fileName = file.fileName,
+                                        etag = file.etag,
+                                        size = file.size,
+                                        s3keyFlag = file.s3keyFlag,
+                                        downloadUrl = file.downloadUrl,
+                                        parentPath = currentDirLabel,
+                                    )
                                 )
+                            }
+                        }
+                        val newItems = items.map { fileToResource(it) }
+                        val existingPaths = _uiState.value.items.map { it.path }.toSet()
+                        val filtered = newItems.filter { it.path !in existingPaths }
+                        if (filtered.isEmpty()) {
+                            updateUiState { it.copy(isLoadingMore = false, hasMore = false) }
+                            return@fold
+                        }
+                        updateUiState {
+                            it.copy(
+                                items = _uiState.value.items + filtered, isLoadingMore = false,
+                                hasMore = items.size >= 100, currentPage = nextPage
                             )
                         }
+                        syncStackTop { it.copy(items = _uiState.value.items, isLoading = false, error = null) }
+                    },
+                    onFailure = { e ->
+                        updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
                     }
-                    val newItems = items.map { fileToResource(it) }
-                    val existingPaths = state.items.map { it.path }.toSet()
-                    val filtered = newItems.filter { it.path !in existingPaths }
-                    updateUiState {
-                        it.copy(
-                            items = state.items + filtered, isLoadingMore = false,
-                            hasMore = items.size >= 100, currentPage = nextPage
-                        )
-                    }
-                    loadingMore = false
-                },
-                onFailure = { e ->
-                    updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
-                    loadingMore = false
-                }
-            )
+                )
+            } finally {
+                loadingMore = false
+                updateUiState { it.copy(isLoadingMore = false) }
+            }
         }
     }
 
@@ -551,8 +570,18 @@ class Pan123BrowserViewModel @Inject constructor(
             name = file.fileName,
             isDirectory = file.type == 1,
             size = file.size,
-            lastModified = file.createAt
+            lastModified = file.createAt,
+            thumbnailUrl = file.thumbnailUrl,
+            folderSize = if (file.isDirectory) file.size else 0,
+            category = pan123CategoryToLabel(file.category),
+            createdAt = file.createAt
         )
+    }
+
+    private fun pan123CategoryToLabel(category: Int): String = when (category) {
+        4 -> "doc"
+        10 -> "archive"
+        else -> ""
     }
 
     private fun buildBreadcrumbs(fileId: String, label: String?): List<Pan123Breadcrumb> {

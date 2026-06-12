@@ -289,5 +289,8 @@ private fun OpenListFileItem.toWebDavResource(): WebDavResource {
         isDirectory = isDirectory,
         size = size,
         lastModified = modified,
+        thumbnailUrl = thumb.ifBlank { null },
+        folderSize = if (isDirectory) size else 0,
+        createdAt = created,
     )
 }

@@ -5,6 +5,7 @@ data class Pan123FileItem(
     val fileName: String,
     val type: Int,
     val size: Long,
+    val category: Int = 0,
     val etag: String,
     val s3keyFlag: String,
     val downloadUrl: String,

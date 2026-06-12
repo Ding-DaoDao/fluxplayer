@@ -276,6 +276,7 @@ class Pan123ApiClient(
                 fileName = item.getString("FileName"),
                 type = item.getInt("Type"),
                 size = item.optLong("Size", 0),
+                category = item.optInt("Category", 0),
                 etag = item.optString("Etag", ""),
                 s3keyFlag = item.optString("S3KeyFlag", ""),
                 downloadUrl = downloadUrl,

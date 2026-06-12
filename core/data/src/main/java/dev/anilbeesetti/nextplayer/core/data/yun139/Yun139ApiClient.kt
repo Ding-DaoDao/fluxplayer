@@ -138,25 +138,20 @@ class Yun139ApiClient(
 
     suspend fun listFiles(
         folderId: String = "/",
-        pageNum: Int = 1,
+        pageCursor: String? = null,
         pageSize: Int = 100,
         orderBy: String = "updated_at",
         orderDirection: String = "DESC"
     ): Result<Yun139ListResult> = runCatching {
         val body = JSONObject().apply {
-            put("fields", "thumbnailUrls,addressDetail,mediaMetaInfo,metadataAuditInfo,userTags,contentAuditInfo,starredAt,starred,localCreatedAt,localUpdatedAt")
-            put("imageThumbnailStyleList", JSONArray(listOf("Small", "Big")))
+            put("pageInfo", JSONObject().apply {
+                put("pageSize", pageSize)
+                put("pageCursor", pageCursor ?: JSONObject.NULL)
+            })
             put("orderBy", orderBy)
             put("orderDirection", orderDirection)
-            put("ownerId", JSONObject.NULL)
-            put("pageInfo", JSONObject().apply {
-                put("needTotalCount", 0)
-                put("pageCursor", JSONObject.NULL)
-                put("pageSize", pageSize)
-            })
             put("parentFileId", folderId)
-            put("parentFilePath", true)
-            put("type", JSONObject.NULL)
+            put("imageThumbnailStyleList", JSONArray(listOf("Small", "Large")))
         }
         val json = apiPost("$BASE_URL/hcy/file/list", body, filterHeaders)
 
@@ -167,9 +162,11 @@ class Yun139ApiClient(
             throw IllegalStateException("API error: $msg")
         }
 
-        // 响应格式: data.items
+        // 响应格式: data.items + data.nextPageCursor
         val data = json.optJSONObject("data")
+        val nextPageCursor = data?.optString("nextPageCursor", "") ?: ""
         val itemsArray = data?.optJSONArray("items") ?: JSONArray()
+        Log.d(TAG, "listFiles cursor=$pageCursor got ${itemsArray.length()} items, nextPageCursor=$nextPageCursor")
         val items = (0 until itemsArray.length()).map { i ->
             val item = itemsArray.getJSONObject(i)
             val type = item.optString("type", "")
@@ -184,7 +181,7 @@ class Yun139ApiClient(
                 thumbnailUrl = item.optJSONArray("thumbnailUrls")?.optJSONObject(1)?.optString("url", null)
             )
         }
-        Yun139ListResult(items, 0, "")
+        Yun139ListResult(items, 0, nextPageCursor)
     }
 
     // endregion

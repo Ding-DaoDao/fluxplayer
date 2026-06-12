@@ -176,6 +176,8 @@ class OpenListApiClient(
                 isDirectory = item.optBoolean("is_dir", false),
                 size = item.optLong("size", 0L),
                 modified = item.optString("modified", ""),
+                created = item.optString("created", ""),
+                thumb = item.optString("thumb", ""),
             )
         }
     }
@@ -273,4 +275,6 @@ data class OpenListFileItem(
     val isDirectory: Boolean,
     val size: Long = 0,
     val modified: String = "",
+    val created: String = "",
+    val thumb: String = "",
 )

@@ -184,39 +184,16 @@ internal fun MediaPickerScreen(
     var providerLogout by remember { mutableStateOf<(() -> Unit)?>(null) }
     var showLogoutConfirmation by rememberSaveable { mutableStateOf(false) }
 
+
+
+
     val selectedItemsSize = selectionManager.selectedFolders.size + selectionManager.selectedVideos.size
     val totalItemsSize = (uiState.mediaDataState as? DataState.Success)?.value?.run { folderList.size + mediaList.size } ?: 0
 
     Scaffold(
         topBar = {
-            if (selectedTab == 1 && selectedProvider != null && !selectionManager.isInSelectionMode) {
-                // 已进入 provider → provider 名称 + 返回 + 退出登录
-                val providerName = providers.find { it.id == selectedProvider }?.name ?: selectedProvider.orEmpty()
-                NextTopAppBar(
-                    title = providerName,
-                    fontWeight = FontWeight.Bold,
-                    navigationIcon = {
-                        FilledTonalIconButton(onClick = {
-                            selectedProvider = null
-                            providerLogout = null
-                        }) {
-                            Icon(
-                                imageVector = NextIcons.ArrowBack,
-                                contentDescription = "返回",
-                            )
-                        }
-                    },
-                    actions = {
-                        if (providerLogout != null) {
-                            IconButton(onClick = { showLogoutConfirmation = true }) {
-                                Icon(
-                                    imageVector = NextIcons.Logout,
-                                    contentDescription = "退出登录",
-                                )
-                            }
-                        }
-                    },
-                )
+            if (selectedProvider != null && selectedTab == 1 && !selectionManager.isInSelectionMode) {
+                // 已进入 provider → 不显示 Scaffold 顶栏，由 TabContent 内部 ProviderTopBar 接管
             } else if ((selectedTab == 1 || selectedTab == 2) && !selectionManager.isInSelectionMode) {
                 // 浏览 / 历史标签页 → 简单标题 + 设置按钮
                 NextTopAppBar(

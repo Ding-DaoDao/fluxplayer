@@ -76,4 +76,13 @@ object CloudDirectoryCache {
             .forEach { editor.remove(it) }
         editor.apply()
     }
+
+    /** 清除所有云盘目录缓存（清除历史时使用） */
+    fun clearAll(context: Context) {
+        val p = ensurePrefs(context)
+        val editor = p.edit()
+        p.all.keys.filter { it.startsWith("dir_") }
+            .forEach { editor.remove(it) }
+        editor.apply()
+    }
 }

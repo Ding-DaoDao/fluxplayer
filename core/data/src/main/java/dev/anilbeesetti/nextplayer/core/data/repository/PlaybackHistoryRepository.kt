@@ -16,6 +16,7 @@ interface PlaybackHistoryRepository {
         duration: Long,
         originalUriString: String? = null,
         thumbnailPath: String? = null,
+        parentPath: String? = null,
     )
 
     suspend fun isPlayed(uriString: String): Boolean

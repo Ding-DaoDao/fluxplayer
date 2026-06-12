@@ -84,6 +84,7 @@ class LocalPlaybackHistoryRepository @Inject constructor(
         duration: Long,
         originalUriString: String?,
         thumbnailPath: String?,
+        parentPath: String?,
     ) {
         // 新的缩略图优先使用；如果本次未截取，保留数据库中已有的缩略图
         val finalThumbnailPath = thumbnailPath
@@ -99,6 +100,7 @@ class LocalPlaybackHistoryRepository @Inject constructor(
                 duration = duration,
                 originalUriString = originalUriString,
                 thumbnailPath = finalThumbnailPath,
+                parentPath = parentPath,
             ),
         )
         // 只有完全没有缩略图时才异步提取
@@ -144,6 +146,7 @@ class LocalPlaybackHistoryRepository @Inject constructor(
             duration = duration,
             originalUriString = originalUriString,
             thumbnailPath = thumbnailPath,
+            parentPath = parentPath,
         )
     }
 }

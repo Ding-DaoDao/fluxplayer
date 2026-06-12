@@ -25,4 +25,6 @@ data class PlaybackHistoryEntity(
     val originalUriString: String? = null,
     @ColumnInfo(name = "thumbnail_path")
     val thumbnailPath: String? = null,
+    @ColumnInfo(name = "parent_path")
+    val parentPath: String? = null,
 )

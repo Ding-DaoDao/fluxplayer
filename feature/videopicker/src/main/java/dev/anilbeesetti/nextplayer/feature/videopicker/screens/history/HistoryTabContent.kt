@@ -187,6 +187,18 @@ fun HistoryTabContent(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             )
+                            if (historyItem.parentPath != null) {
+                                Text(
+                                    text = " · ",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                )
+                                Text(
+                                    text = "${historyItem.parentPath}/",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                )
+                            }
                         }
                         if (historyItem.duration > 0) {
                             PlaybackProgressBar(

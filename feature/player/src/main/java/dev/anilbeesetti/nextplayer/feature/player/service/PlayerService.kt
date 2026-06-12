@@ -792,6 +792,8 @@ class PlayerService : MediaSessionService() {
         val source = VideoSource.fromUri(uri)
         // 从 PlayerFrameCapture 取出退出时截取的缩略图路径
         val preCapturedPath = PlayerFrameCapture.take(uri)
+        // 计算父目录名
+        val parentPath = computeParentPath(uri, source)
         playbackHistoryRepository.recordPlayback(
             uriString = uri,
             title = title,
@@ -800,7 +802,36 @@ class PlayerService : MediaSessionService() {
             duration = duration,
             originalUriString = if (source == VideoSource.WEBDAV) uri else null,
             thumbnailPath = preCapturedPath,
+            parentPath = parentPath,
         )
+    }
+
+    private fun computeParentPath(uriString: String, source: VideoSource): String? {
+        val uri = uriString.toUri()
+        return when (source) {
+            VideoSource.LOCAL -> {
+                try {
+                    File(uri.path).parentFile?.name
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            VideoSource.WEBDAV -> {
+                // WebDAV: 从路径的倒数第二段作为父目录
+                val segments = uri.path?.trimEnd('/')?.split("/")?.filter { it.isNotEmpty() } ?: return null
+                segments.dropLast(1).lastOrNull()
+            }
+            VideoSource.QUARK, VideoSource.UC,
+            VideoSource.ALIYUN,
+            VideoSource.PAN123,
+            VideoSource.CLOUD189,
+            VideoSource.YUN139 -> {
+                val provider = CloudUriScheme.getProvider(uri) ?: return null
+                val fileId = CloudUriScheme.getFileId(uri) ?: return null
+                CloudPlaylistCache.getFileMetadata(provider, fileId)?.parentPath
+            }
+            else -> null
+        }
     }
 
     private fun getDefaultArtworkUri(): Uri = Uri.Builder().apply {

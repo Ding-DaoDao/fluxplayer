@@ -277,8 +277,8 @@ class WebDavBrowserViewModel @Inject constructor(
             "modified" -> compareBy { it.lastModified }
             else -> compareBy { it.name.lowercase() }
         }
-        return if (orderDirection.equals("DESC", ignoreCase = true)) items.sortedWith(comparator.reversed())
-        else items.sortedWith(comparator)
+        val finalComparator = if (orderDirection.equals("DESC", ignoreCase = true)) comparator.reversed() else comparator
+        return items.sortedWith(compareByDescending<WebDavResource> { it.isDirectory }.then(finalComparator))
     }
 
     // endregion

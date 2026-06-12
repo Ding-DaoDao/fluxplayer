@@ -26,7 +26,7 @@ import dev.anilbeesetti.nextplayer.core.database.entities.VideoStreamInfoEntity
         AudioStreamInfoEntity::class,
         SubtitleStreamInfoEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class MediaDatabase : RoomDatabase() {
@@ -213,6 +213,14 @@ abstract class MediaDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "ALTER TABLE `playback_history` ADD COLUMN `thumbnail_path` TEXT DEFAULT NULL",
+                )
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `playback_history` ADD COLUMN `parent_path` TEXT DEFAULT NULL",
                 )
             }
         }

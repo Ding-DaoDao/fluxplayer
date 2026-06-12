@@ -10,8 +10,10 @@ import androidx.media3.datasource.DataSource
 import dev.anilbeesetti.nextplayer.core.common.CloudPlayHeaders
 import dev.anilbeesetti.nextplayer.core.data.openlist.OpenListTokenProvider
 import dev.anilbeesetti.nextplayer.core.data.aliyun.AliyunAuthProvider
+import dev.anilbeesetti.nextplayer.core.data.cloud189.C189AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.pan123.Pan123AuthProvider
 import dev.anilbeesetti.nextplayer.core.data.quark.QuarkAuthProvider
+import dev.anilbeesetti.nextplayer.core.data.yun139.Yun139AuthProvider
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.FileDataSource
@@ -168,11 +170,52 @@ private class AuthAwareDataSource(
             Log.w(TAG, "pan123Play detected but Pan123AuthProvider.isActive=false!")
         }
 
+        // 天翼云盘播放认证
+        if ("189Play" in fragment && C189AuthProvider.isActive) {
+            http.setRequestProperty("Cookie", "COOKIE_LOGIN_USER=${C189AuthProvider.accessToken}")
+            http.setRequestProperty("User-Agent", C189AuthProvider.userAgent)
+            return
+        }
+
+        // 移动云盘播放认证
+        if ("yun139Play" in fragment && Yun139AuthProvider.isActive) {
+            http.setRequestProperty("Authorization", Yun139AuthProvider.authorization)
+            http.setRequestProperty("x-yun-device-id", Yun139AuthProvider.deviceInfo)
+            http.setRequestProperty("x-yun-client-info", Yun139AuthProvider.deviceInfo)
+            http.setRequestProperty("x-yun-api-version", "v2")
+            http.setRequestProperty("x-yun-svc-type", "1")
+            http.setRequestProperty("x-yun-module-type", "100")
+            http.setRequestProperty("x-yun-app-channel", "10000023")
+            return
+        }
+
         val userInfo = uri.userInfo
         if (userInfo.isNullOrEmpty()) {
             val token = OpenListTokenProvider.bearerToken
             if (token != null && uri.host == "127.0.0.1" && uri.port == 5244) {
                 http.setRequestProperty("Authorization", "Bearer $token")
+            }
+            // HLS .ts 分片兜底：当 fragment 和 CloudPlayHeaders 域名均未命中时，
+            // 为当前 active 的云盘注入基础认证头，防止 CDN 边缘节点拒绝请求。
+            // 由于 resolve 时已执行 clearOtherProviders()，同一时刻只有一个 Provider active。
+            if (QuarkAuthProvider.isActive) {
+                http.setRequestProperty("Cookie", QuarkAuthProvider.cookie)
+                http.setRequestProperty("User-Agent", QuarkAuthProvider.userAgent)
+            } else if (AliyunAuthProvider.isActive) {
+                http.setRequestProperty("Authorization", AliyunAuthProvider.authorization)
+                http.setRequestProperty("Referer", "https://www.alipan.com/")
+                http.setRequestProperty("User-Agent", AliyunAuthProvider.userAgent)
+            } else if (Pan123AuthProvider.isActive) {
+                http.setRequestProperty("Referer", Pan123AuthProvider.referer)
+                http.setRequestProperty("User-Agent", Pan123AuthProvider.userAgent)
+                http.setRequestProperty("X-MF-PAN-RANGE", "1")
+            } else if (C189AuthProvider.isActive) {
+                http.setRequestProperty("Cookie", "COOKIE_LOGIN_USER=${C189AuthProvider.accessToken}")
+                http.setRequestProperty("User-Agent", C189AuthProvider.userAgent)
+            } else if (Yun139AuthProvider.isActive) {
+                http.setRequestProperty("Authorization", Yun139AuthProvider.authorization)
+                http.setRequestProperty("x-yun-device-id", Yun139AuthProvider.deviceInfo)
+                http.setRequestProperty("x-yun-api-version", "v2")
             }
             return
         }

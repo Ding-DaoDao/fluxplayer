@@ -163,6 +163,7 @@ class WebDavClient(
         var currentIsDir = false
         var currentSize = 0L
         var currentLastModified = ""
+        var currentCreatedAt = ""
         var inResponse = false
         var inProp = false
         var inPropstat = false
@@ -180,6 +181,7 @@ class WebDavClient(
                             currentIsDir = false
                             currentSize = 0L
                             currentLastModified = ""
+                            currentCreatedAt = ""
                         }
                         tagName.endsWith("propstat") -> inPropstat = true
                         tagName.endsWith("prop") -> if (inPropstat) inProp = true
@@ -195,6 +197,9 @@ class WebDavClient(
                         }
                         tagName.endsWith("getlastmodified") -> {
                             currentLastModified = parser.nextText().trim()
+                        }
+                        tagName.endsWith("creationdate") -> {
+                            currentCreatedAt = parser.nextText().trim()
                         }
                         tagName.endsWith("collection") -> {
                             currentIsDir = true
@@ -243,6 +248,7 @@ class WebDavClient(
                                             isDirectory = currentIsDir,
                                             size = currentSize,
                                             lastModified = currentLastModified,
+                                            createdAt = currentCreatedAt,
                                         )
                                     )
                                 }

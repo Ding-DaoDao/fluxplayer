@@ -49,6 +49,7 @@ class C189BrowserViewModel @Inject constructor(
 
     private var loadSequence: Int = 0
     private var loadDirectoryJob: kotlinx.coroutines.Job? = null
+    private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
 
@@ -203,6 +204,8 @@ class C189BrowserViewModel @Inject constructor(
 
     fun loadDirectory(parentFileId: String) {
         loadDirectoryJob?.cancel()
+        loadMoreJob?.cancel()
+        loadingMore = false
         loadSequence++
         val seq = loadSequence
         updateUiState { it.copy(isLoading = true, error = null, currentFolderId = parentFileId) }
@@ -220,11 +223,15 @@ class C189BrowserViewModel @Inject constructor(
             result.fold(
                 onSuccess = { listResult ->
                     // 缓存文件元数据到 CloudPlaylistCache，供播放器显示标题
+                    val currentDirLabel = _navigationStack.value.lastOrNull()?.label
                     listResult.items.forEach { file ->
                         if (file.isVideo) {
                             CloudPlaylistCache.putFileMetadata(
                                 "cloud189", file.id,
-                                CloudPlaylistCache.FileMetadata(fileName = file.name)
+                                CloudPlaylistCache.FileMetadata(
+                                    fileName = file.name,
+                                    parentPath = currentDirLabel,
+                                )
                             )
                         }
                     }
@@ -257,13 +264,18 @@ class C189BrowserViewModel @Inject constructor(
     private fun loadDirectoryCached(fileId: String) {
         val cached = directoryCache[fileId]
         if (cached != null) {
+            loadMoreJob?.cancel()
+            loadingMore = false
             val sorted = sortResources(cached)
             updateUiState {
                 it.copy(
                     items = sorted,
                     currentFolderId = fileId,
                     isLoading = false,
-                    error = null
+                    isLoadingMore = false,
+                    error = null,
+                    currentPage = (cached.size + 99) / 100,
+                    hasMore = cached.size >= 100
                 )
             }
             syncStackTop { it.copy(items = sorted, isLoading = false, error = null) }
@@ -285,30 +297,38 @@ class C189BrowserViewModel @Inject constructor(
         val nextPage = state.currentPage + 1
         updateUiState { it.copy(isLoadingMore = true) }
 
-        viewModelScope.launch {
-            val apiOrderBy = if (state.orderBy == "filesize") "lastOpTime" else state.orderBy
-            val result = apiClient.listFiles(
-                state.currentFolderId, nextPage, 100, apiOrderBy, state.descending
-            )
-            result.fold(
-                onSuccess = { listResult ->
-                    val newItems = sortResources(listResult.items.map { fileToResource(it) })
-                    val existingPaths = state.items.map { it.path }.toSet()
-                    val filtered = newItems.filter { it.path !in existingPaths }
-                    val combined = sortResources(state.items + filtered)
-                    updateUiState {
-                        it.copy(
-                            items = combined, isLoadingMore = false,
-                            hasMore = listResult.items.size >= 100, currentPage = nextPage
-                        )
+        loadMoreJob = viewModelScope.launch {
+            try {
+                val apiOrderBy = if (state.orderBy == "filesize") "lastOpTime" else state.orderBy
+                val result = apiClient.listFiles(
+                    state.currentFolderId, nextPage, 100, apiOrderBy, state.descending
+                )
+                result.fold(
+                    onSuccess = { listResult ->
+                        val newItems = sortResources(listResult.items.map { fileToResource(it) })
+                        val existingPaths = _uiState.value.items.map { it.path }.toSet()
+                        val filtered = newItems.filter { it.path !in existingPaths }
+                        if (filtered.isEmpty()) {
+                            updateUiState { it.copy(isLoadingMore = false, hasMore = false) }
+                            return@fold
+                        }
+                        val combined = sortResources(_uiState.value.items + filtered)
+                        updateUiState {
+                            it.copy(
+                                items = combined, isLoadingMore = false,
+                                hasMore = listResult.items.size >= 100, currentPage = nextPage
+                            )
+                        }
+                        syncStackTop { it.copy(items = combined, isLoading = false, error = null) }
+                    },
+                    onFailure = { e ->
+                        updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
                     }
-                    loadingMore = false
-                },
-                onFailure = { e ->
-                    updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
-                    loadingMore = false
-                }
-            )
+                )
+            } finally {
+                loadingMore = false
+                updateUiState { it.copy(isLoadingMore = false) }
+            }
         }
     }
 
@@ -573,8 +593,20 @@ class C189BrowserViewModel @Inject constructor(
     private fun fileToResource(file: C189FileItem): WebDavResource {
         return WebDavResource(
             path = file.id, name = file.name,
-            isDirectory = file.isDir, size = file.size, lastModified = file.lastOpTime
+            isDirectory = file.isDir, size = file.size, lastModified = file.lastOpTime,
+            thumbnailUrl = file.thumbnailUrl,
+            fileCount = if (file.isDir && file.fileCount > 0) file.fileCount else null,
+            folderSize = if (file.isDir) file.folderSize else 0,
+            category = mediaTypeToCategory(file.mediaType),
+            createdAt = file.createDate
         )
+    }
+
+    private fun mediaTypeToCategory(mediaType: Int): String = when (mediaType) {
+        1 -> "image"
+        2 -> "audio"
+        3 -> "video"
+        else -> ""
     }
 
     private fun buildBreadcrumbs(fileId: String, label: String?): List<C189Breadcrumb> {

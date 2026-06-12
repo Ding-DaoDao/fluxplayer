@@ -32,4 +32,13 @@ object C189AuthProvider {
         expiresIn = 0
         isActive = false
     }
+
+    fun getPlayHeaders(): Map<String, String> {
+        return if (isActive) {
+            mapOf(
+                "Cookie" to "COOKIE_LOGIN_USER=$accessToken",
+                "User-Agent" to userAgent
+            )
+        } else emptyMap()
+    }
 }

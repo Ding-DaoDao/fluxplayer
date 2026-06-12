@@ -7,7 +7,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -48,6 +47,12 @@ fun <T> CloudBrowserPanel(
     breadcrumbActions: @Composable (RowScope.() -> Unit)? = null,
     onSortClick: (() -> Unit)? = null,
     onCreateFolder: (() -> Unit)? = null,
+    providerName: String = "",
+    onSettingsClick: (() -> Unit)? = null,
+    onExitClick: (() -> Unit)? = null,
+    showSortMenu: Boolean = false,
+    onSortMenuDismiss: () -> Unit = {},
+    sortMenuContent: @Composable ColumnScope.() -> Unit = {},
 ) {
     // 从 navigationStack 或扁平参数获取当前目录状态
     val topEntry = navigationStack.lastOrNull()
@@ -60,14 +65,35 @@ fun <T> CloudBrowserPanel(
             if (!isConfigured) {
                 loginContent()
             } else {
-            // 面包屑
+            // 顶层：网盘名 + 设置按钮
+            ProviderTopBar(
+                providerName = providerName,
+                onSettingsClick = onSettingsClick,
+            )
+
+            // 面包屑行：路径 + 排序 + 驱动切换(阿里云盘) + 退出
             BreadcrumbBar(
                 breadcrumbs = breadcrumbs,
                 breadcrumbLabel = breadcrumbLabel,
                 onNavigateToBreadcrumb = onBreadcrumbClick,
                 onSortClick = onSortClick,
                 actions = breadcrumbActions,
+                onExitClick = onExitClick,
+                showSortMenu = showSortMenu,
+                onSortMenuDismiss = onSortMenuDismiss,
+                sortMenuContent = sortMenuContent,
             )
+
+            // 统计行
+            val summaryText = remember(curItems) { ItemCounts.from(curItems).toSummaryText() }
+            if (summaryText != null) {
+                Text(
+                    text = summaryText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 2.dp),
+                )
+            }
 
             if (navigationStack.isNotEmpty()) {
                 // 栈式渲染：每个目录层级有自己的 key + rememberLazyListState
@@ -87,96 +113,73 @@ fun <T> CloudBrowserPanel(
                                     onMenuDismiss = onMenuDismiss,
                                     menuContent = menuContent,
                                     onRefresh = onRefresh,
+                                    onLoadMore = onLoadMore,
                                 )
                             }
                         }
                     }
                 }
-            } else if (curLoading && curItems.isEmpty()) {
-                CenterCircularProgressBar(modifier = Modifier.weight(1f))
-            } else if (curItems.isEmpty() && curError == null) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("此目录为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else if (curError != null && curItems.isEmpty()) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("加载失败", color = MaterialTheme.colorScheme.error)
-                        Text(curError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedButton(onClick = onRefresh) { Text("重试") }
-                    }
-                }
             } else {
                 PullToRefreshBox(
-                    isRefreshing = curLoading && curItems.isNotEmpty(),
+                    isRefreshing = false,
                     onRefresh = onRefresh,
                     modifier = Modifier.weight(1f)
                 ) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        itemsIndexed(curItems) { index, item ->
-                            Card(
-                                onClick = { onItemClick(item) },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    FileTypeIcon(
-                                        item = item,
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(8.dp)),
-                                    )
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            text = item.name,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        if (!item.isDirectory && item.size > 0) {
-                                            Text(
-                                                text = formatFileSize(item.size),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        when {
+                            curLoading && curItems.isEmpty() -> {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator()
+                                }
+                            }
+                            curItems.isEmpty() && curError == null -> {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("此目录为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            curError != null && curItems.isEmpty() -> {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("加载失败", color = MaterialTheme.colorScheme.error)
+                                        Text(curError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(Modifier.height(8.dp))
+                                        OutlinedButton(onClick = onRefresh) { Text("重试") }
                                     }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (item.isDirectory) {
-                                            Text(
-                                                text = "›",
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                style = MaterialTheme.typography.titleLarge,
-                                            )
+                                }
+                            }
+                            else -> {
+                                val flatListState = rememberLazyListState()
+                                LaunchedEffect(flatListState, onLoadMore) {
+                                    snapshotFlow { flatListState.layoutInfo.visibleItemsInfo }
+                                        .collect { visibleItems ->
+                                            val lastVisible = visibleItems.lastOrNull()?.index ?: 0
+                                            val total = flatListState.layoutInfo.totalItemsCount
+                                            if (lastVisible >= total - 5 && total > 0) {
+                                                onLoadMore()
+                                            }
                                         }
-                                        if (onItemMoreClick != null) {
-                                            Box {
-                                                IconButton(
-                                                    onClick = { onItemMoreClick(index) },
-                                                    modifier = Modifier.size(32.dp),
-                                                ) {
-                                                    Icon(
-                                                        imageVector = NextIcons.MoreVert,
-                                                        contentDescription = "更多操作",
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        modifier = Modifier.size(20.dp),
-                                                    )
-                                                }
-                                                if (menuContent != null && expandedMenuIndex == index) {
-                                                    menuContent(index, onMenuDismiss)
-                                                }
+                                }
+                                LazyColumn(
+                                    state = flatListState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    itemsIndexed(curItems) { index, item ->
+                                        ItemCard(
+                                            item = item,
+                                            index = index,
+                                            onClick = { onItemClick(item) },
+                                            onItemMoreClick = onItemMoreClick,
+                                            expandedMenuIndex = expandedMenuIndex,
+                                            onMenuDismiss = onMenuDismiss,
+                                            menuContent = menuContent,
+                                        )
+                                    }
+
+                                    if (isLoadingMore) {
+                                        item {
+                                            Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
                                             }
                                         }
                                     }
@@ -184,11 +187,12 @@ fun <T> CloudBrowserPanel(
                             }
                         }
 
-                        if (isLoadingMore) {
-                            item {
-                                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                }
+                        if (curLoading && curItems.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator()
                             }
                         }
                     }
@@ -230,18 +234,52 @@ fun <T> CloudBrowserPanel(
 }
 
 @Composable
+private fun ProviderTopBar(
+    providerName: String,
+    onSettingsClick: (() -> Unit)?,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = providerName,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
+        )
+        if (onSettingsClick != null) {
+            IconButton(onClick = onSettingsClick) {
+                Icon(
+                    imageVector = NextIcons.Settings,
+                    contentDescription = "设置",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun <T> BreadcrumbBar(
     breadcrumbs: List<T>,
     breadcrumbLabel: (T) -> String,
     onNavigateToBreadcrumb: (Int) -> Unit,
     onSortClick: (() -> Unit)? = null,
     actions: @Composable (RowScope.() -> Unit)? = null,
+    onExitClick: (() -> Unit)? = null,
+    showSortMenu: Boolean = false,
+    onSortMenuDismiss: () -> Unit = {},
+    sortMenuContent: @Composable ColumnScope.() -> Unit = {},
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = 8.dp, end = 4.dp, top = 2.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
@@ -275,17 +313,39 @@ private fun <T> BreadcrumbBar(
             }
         }
         if (onSortClick != null) {
-            IconButton(onClick = onSortClick, modifier = Modifier.size(32.dp)) {
-                Icon(
-                    imageVector = Icons.Default.SwapVert,
-                    contentDescription = "排序",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
+            Box {
+                TextButton(
+                    onClick = onSortClick,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = "排序",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                DropdownMenu(
+                    expanded = showSortMenu,
+                    onDismissRequest = onSortMenuDismiss,
+                ) {
+                    sortMenuContent()
+                }
             }
         }
         if (actions != null) {
             actions()
+        }
+        if (onExitClick != null) {
+            TextButton(
+                onClick = onExitClick,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    text = "退出",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -302,111 +362,186 @@ private fun DirectoryStackContent(
     onMenuDismiss: () -> Unit,
     menuContent: @Composable ((index: Int, onDismiss: () -> Unit) -> Unit)?,
     onRefresh: () -> Unit,
+    onLoadMore: () -> Unit,
 ) {
-    if (entry.isLoading && entry.items.isEmpty()) {
-        CenterCircularProgressBar(modifier = Modifier.fillMaxSize())
-    } else if (entry.items.isEmpty() && entry.error == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("此目录为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    } else if (entry.error != null && entry.items.isEmpty()) {
-        val errorMsg = entry.error!!
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("加载失败", color = MaterialTheme.colorScheme.error)
-                Text(errorMsg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = onRefresh) { Text("重试") }
+    LaunchedEffect(listState, onLoadMore) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo }
+            .collect { visibleItems ->
+                val lastVisible = visibleItems.lastOrNull()?.index ?: 0
+                val total = listState.layoutInfo.totalItemsCount
+                if (lastVisible >= total - 5 && total > 0) {
+                    onLoadMore()
+                }
             }
-        }
-    } else {
-        PullToRefreshBox(
-            isRefreshing = entry.isLoading && entry.items.isNotEmpty(),
-            onRefresh = onRefresh,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            ) {
-                itemsIndexed(entry.items) { index, item ->
-                    Card(
-                        onClick = { onItemClick(item) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+    }
+    PullToRefreshBox(
+        isRefreshing = false,
+        onRefresh = onRefresh,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            when {
+                entry.isLoading && entry.items.isEmpty() -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+                entry.items.isEmpty() && entry.error == null -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("此目录为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                entry.error != null && entry.items.isEmpty() -> {
+                    val errorMsg = entry.error!!
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("加载失败", color = MaterialTheme.colorScheme.error)
+                            Text(errorMsg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(onClick = onRefresh) { Text("重试") }
+                        }
+                    }
+                }
+                else -> {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            FileTypeIcon(
+                        itemsIndexed(entry.items) { index, item ->
+                            ItemCard(
                                 item = item,
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                index = index,
+                                onClick = { onItemClick(item) },
+                                onItemMoreClick = onItemMoreClick,
+                                expandedMenuIndex = expandedMenuIndex,
+                                onMenuDismiss = onMenuDismiss,
+                                menuContent = menuContent,
                             )
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    text = item.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (!item.isDirectory && item.size > 0) {
-                                    Text(
-                                        text = formatFileSize(item.size),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (item.isDirectory) {
-                                    Text(
-                                        text = "›",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.titleLarge,
-                                    )
-                                }
-                                if (onItemMoreClick != null) {
-                                    Box {
-                                        IconButton(
-                                            onClick = { onItemMoreClick(index) },
-                                            modifier = Modifier.size(32.dp),
-                                        ) {
-                                            Icon(
-                                                imageVector = NextIcons.MoreVert,
-                                                contentDescription = "更多操作",
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(20.dp),
-                                            )
-                                        }
-                                        if (menuContent != null && expandedMenuIndex == index) {
-                                            menuContent(index, onMenuDismiss)
-                                        }
-                                    }
+                        }
+
+                        if (isLoadingMore) {
+                            item {
+                                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
                                 }
                             }
                         }
                     }
                 }
+            }
 
-                if (isLoadingMore) {
-                    item {
-                        Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+            if (entry.isLoading && entry.items.isNotEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ItemCard(
+    item: WebDavResource,
+    index: Int,
+    onClick: () -> Unit,
+    onItemMoreClick: ((Int) -> Unit)?,
+    expandedMenuIndex: Int?,
+    onMenuDismiss: () -> Unit,
+    menuContent: @Composable ((index: Int, onDismiss: () -> Unit) -> Unit)?,
+) {
+    val subtitle = remember(item) { buildItemSubtitle(item) }
+
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FileTypeIcon(
+                item = item,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = item.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (item.isDirectory) {
+                    Text(
+                        text = "›",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                }
+                if (onItemMoreClick != null) {
+                    Box {
+                        IconButton(
+                            onClick = { onItemMoreClick(index) },
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector = NextIcons.MoreVert,
+                                contentDescription = "更多操作",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        if (menuContent != null && expandedMenuIndex == index) {
+                            menuContent(index, onMenuDismiss)
                         }
                     }
                 }
             }
         }
     }
+}
+
+private fun buildItemSubtitle(item: WebDavResource): String {
+    if (item.isDirectory) {
+        val parts = buildList {
+            item.fileCount?.let { if (it > 0) add("${it}个子项") }
+            if (item.folderSize > 0) add(formatFileSize(item.folderSize))
+            val date = formatRelativeDate(item.createdAt)
+            if (date != null) add(date)
+        }
+        return parts.joinToString(" · ")
+    }
+
+    val parts = buildList {
+        val typeLabel = item.fileTypeLabel
+        if (typeLabel.isNotBlank()) add(typeLabel)
+        val date = formatRelativeDate(item.createdAt)
+        if (date != null) add(date)
+        if (item.size > 0) add(formatFileSize(item.size))
+    }
+    return parts.joinToString(" · ")
 }
 
 fun formatFileSize(bytes: Long): String {

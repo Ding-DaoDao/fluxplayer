@@ -9,6 +9,7 @@ data class PlaybackHistory(
     val duration: Long,
     val originalUriString: String? = null,
     val thumbnailPath: String? = null,
+    val parentPath: String? = null,
 ) {
     val playedPercentage: Float
         get() = if (duration > 0) {

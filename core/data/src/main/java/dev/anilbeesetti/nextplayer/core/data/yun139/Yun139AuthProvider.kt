@@ -26,6 +26,25 @@ object Yun139AuthProvider {
         }.joinToString("")
     }
 
+    fun clear() {
+        authorization = ""
+        isActive = false
+    }
+
+    fun getPlayHeaders(): Map<String, String> {
+        return if (isActive) {
+            mapOf(
+                "Authorization" to authorization,
+                "x-yun-device-id" to deviceInfo,
+                "x-yun-client-info" to deviceInfo,
+                "x-yun-api-version" to "v2",
+                "x-yun-svc-type" to "1",
+                "x-yun-module-type" to "100",
+                "x-yun-app-channel" to "10000023"
+            )
+        } else emptyMap()
+    }
+
     private val DEVICE_TYPES = listOf(
         "2312DRAABC", "2312DR AABI", "2312DR AABG",
         "2310RK86C", "2310RK86I", "24122RKC7C",

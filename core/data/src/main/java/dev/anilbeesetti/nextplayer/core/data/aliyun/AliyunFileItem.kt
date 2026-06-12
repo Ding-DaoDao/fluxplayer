@@ -6,6 +6,7 @@ data class AliyunFileItem(
     val type: String,
     val category: String,
     val size: Long,
+    val createdAt: String,
     val updatedAt: String,
     val thumbnail: String,
     val mimeType: String,

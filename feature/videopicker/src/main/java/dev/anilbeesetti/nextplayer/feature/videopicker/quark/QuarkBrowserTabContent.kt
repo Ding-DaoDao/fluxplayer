@@ -24,7 +24,7 @@ import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextAction
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
-import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortDropdownMenuContent
 
 /**
  * 夸克网盘浏览器 Tab 内容
@@ -35,6 +35,7 @@ fun QuarkBrowserTabContent(
     onPlayVideos: (List<Uri>, Uri) -> Unit,
     onLogoutReady: (() -> Unit) -> Unit = {},
     driveType: String = "quark",
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: QuarkBrowserViewModel = hiltViewModel()
 ) {
@@ -52,7 +53,7 @@ fun QuarkBrowserTabContent(
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
-    var showSortSheet by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
 
     val currentSortKey = remember(state.orderBy) {
         when (state.orderBy) {
@@ -107,7 +108,28 @@ fun QuarkBrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = { viewModel.loadMore() },
-        onSortClick = { showSortSheet = true },
+        onSortClick = { showSortMenu = true },
+        showSortMenu = showSortMenu,
+        onSortMenuDismiss = { showSortMenu = false },
+        sortMenuContent = {
+            SortDropdownMenuContent(
+                currentKey = currentSortKey,
+                onSelect = { option ->
+                    showSortMenu = false
+                    val providerOrderBy = when (option.key) {
+                        "name:asc" -> "file_name:asc"
+                        "name:desc" -> "file_name:desc"
+                        "time:asc" -> "updated_at:asc"
+                        "time:desc" -> "updated_at:desc"
+                        "size:asc" -> "size:asc"
+                        "size:desc" -> "size:desc"
+                        else -> "file_name:asc"
+                    }
+                    viewModel.setSort(providerOrderBy)
+                },
+                onDismiss = { showSortMenu = false },
+            )
+        },
         breadcrumbLabel = { it.label },
         loginContent = {
             QuarkLoginScreen(
@@ -117,7 +139,10 @@ fun QuarkBrowserTabContent(
                 cookieDomains = if (driveType == "uc") listOf("drive.uc.cn") else listOf("pan.quark.cn", "drive-pc.quark.cn"),
             )
         },
-        onCreateFolder = { showCreateFolderDialog = true }
+        onCreateFolder = { showCreateFolderDialog = true },
+        providerName = if (driveType == "uc") "UC网盘" else "夸克网盘",
+        onSettingsClick = onSettingsClick,
+        onExitClick = { viewModel.logout() }
     )
 
     val renameItem = state.items.getOrNull(renameIndex)
@@ -136,25 +161,6 @@ fun QuarkBrowserTabContent(
         )
     }
 
-    if (showSortSheet) {
-        SortOptionSheet(
-            currentKey = currentSortKey,
-            onSelect = { option ->
-                showSortSheet = false
-                val providerOrderBy = when (option.key) {
-                    "name:asc" -> "file_name:asc"
-                    "name:desc" -> "file_name:desc"
-                    "time:asc" -> "updated_at:asc"
-                    "time:desc" -> "updated_at:desc"
-                    "size:asc" -> "size:asc"
-                    "size:desc" -> "size:desc"
-                    else -> "file_name:asc"
-                }
-                viewModel.setSort(providerOrderBy)
-            },
-            onDismiss = { showSortSheet = false },
-        )
-    }
 }
 
 /**

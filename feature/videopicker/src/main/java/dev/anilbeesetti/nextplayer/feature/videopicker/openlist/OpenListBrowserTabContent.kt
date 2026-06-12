@@ -18,7 +18,7 @@ import dev.anilbeesetti.nextplayer.core.ui.designsystem.NextIcons
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
-import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortDropdownMenuContent
 
 /**
  * OpenList 浏览标签页内容。
@@ -42,7 +42,7 @@ fun OpenListBrowserTabContent(
 
     val context = LocalContext.current
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
-    var showSortSheet by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
 
     val currentSortKey = remember(state.orderBy, state.orderDirection) {
         val dir = state.orderDirection.uppercase()
@@ -97,8 +97,29 @@ fun OpenListBrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = {},
-        onSortClick = { showSortSheet = true },
+        onSortClick = { showSortMenu = true },
+        showSortMenu = showSortMenu,
+        onSortMenuDismiss = { showSortMenu = false },
+        sortMenuContent = {
+            SortDropdownMenuContent(
+                currentKey = currentSortKey,
+                onSelect = { option ->
+                    showSortMenu = false
+                    val field = when (option.key) {
+                        "name:asc", "name:desc" -> "name"
+                        "time:asc", "time:desc" -> "modified"
+                        "size:asc", "size:desc" -> "size"
+                        else -> "name"
+                    }
+                    val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
+                    viewModel.setSort(field, dir)
+                },
+                onDismiss = { showSortMenu = false },
+            )
+        },
         breadcrumbLabel = { it.label },
+        providerName = "OpenList",
+        onSettingsClick = onSettingsClick,
         loginContent = {
             OpenListNoServerPlaceholder(
                 error = state.error,
@@ -107,23 +128,6 @@ fun OpenListBrowserTabContent(
         },
     )
 
-    if (showSortSheet) {
-        SortOptionSheet(
-            currentKey = currentSortKey,
-            onSelect = { option ->
-                showSortSheet = false
-                val field = when (option.key) {
-                    "name:asc", "name:desc" -> "name"
-                    "time:asc", "time:desc" -> "modified"
-                    "size:asc", "size:desc" -> "size"
-                    else -> "name"
-                }
-                val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
-                viewModel.setSort(field, dir)
-            },
-            onDismiss = { showSortSheet = false },
-        )
-    }
 }
 
 @Composable

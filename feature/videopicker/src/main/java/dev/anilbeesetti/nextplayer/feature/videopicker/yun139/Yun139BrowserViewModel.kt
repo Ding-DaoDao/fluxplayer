@@ -63,8 +63,10 @@ class Yun139BrowserViewModel @Inject constructor(
 
     private var loadSequence: Int = 0
     private var loadDirectoryJob: kotlinx.coroutines.Job? = null
+    private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
+    private val directoryCursorCache = mutableMapOf<String, String>()
 
     // endregion
 
@@ -154,6 +156,7 @@ class Yun139BrowserViewModel @Inject constructor(
     fun logout() {
         apiClient.logout()
         directoryCache.clear()
+        directoryCursorCache.clear()
         CloudDirectoryCache.clear(getApplication(), "yun139")
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
@@ -174,6 +177,8 @@ class Yun139BrowserViewModel @Inject constructor(
 
     fun loadDirectory(parentFileId: String) {
         loadDirectoryJob?.cancel()
+        loadMoreJob?.cancel()
+        loadingMore = false
         loadSequence++
         val seq = loadSequence
         updateUiState { it.copy(isLoading = true, error = null, currentFolderId = parentFileId) }
@@ -190,22 +195,31 @@ class Yun139BrowserViewModel @Inject constructor(
             result.fold(
                 onSuccess = { listResult ->
                     // 缓存文件元数据到 CloudPlaylistCache，供播放器显示标题
+                    val currentDirLabel = _navigationStack.value.lastOrNull()?.label
                     listResult.items.forEach { file ->
                         if (file.isVideo) {
                             CloudPlaylistCache.putFileMetadata(
                                 "yun139", file.fileId,
-                                CloudPlaylistCache.FileMetadata(fileName = file.fileName)
+                                CloudPlaylistCache.FileMetadata(
+                                    fileName = file.fileName,
+                                    parentPath = currentDirLabel,
+                                )
                             )
                         }
                     }
                     val resources = listResult.items.map { fileToResource(it) }
                     directoryCache[parentFileId] = resources
                     CloudDirectoryCache.put(getApplication(), "yun139", parentFileId, resources)
+                    val nextCursor = listResult.nextMarker.ifBlank { null }
+                    val hasMore = nextCursor != null && listResult.items.size >= 100
+                    if (hasMore && nextCursor != null) directoryCursorCache[parentFileId] = nextCursor
+                    else directoryCursorCache.remove(parentFileId)
                     updateUiState {
                         it.copy(
                             items = resources,
-                            isLoading = false, hasMore = listResult.items.size >= 100,
-                            nextPageCursor = listResult.nextMarker.ifEmpty { null }
+                            isLoading = false,
+                            hasMore = hasMore,
+                            nextPageCursor = if (hasMore) nextCursor else null
                         )
                     }
                     syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
@@ -240,12 +254,18 @@ class Yun139BrowserViewModel @Inject constructor(
     private fun loadDirectoryCached(fileId: String) {
         val cached = directoryCache[fileId]
         if (cached != null) {
+            loadMoreJob?.cancel()
+            loadingMore = false
+            val cursor = directoryCursorCache[fileId]
             updateUiState {
                 it.copy(
                     items = cached,
                     currentFolderId = fileId,
                     isLoading = false,
-                    error = null
+                    isLoadingMore = false,
+                    error = null,
+                    hasMore = cursor != null,
+                    nextPageCursor = cursor
                 )
             }
             syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
@@ -263,31 +283,52 @@ class Yun139BrowserViewModel @Inject constructor(
     fun loadMore() {
         val state = _uiState.value
         if (!state.hasMore || loadingMore || state.isLoading) return
-        val nextPage = state.items.size / 100 + 2
+        val cursor = state.nextPageCursor
+        if (cursor.isNullOrBlank()) return
         loadingMore = true
         updateUiState { it.copy(isLoadingMore = true) }
 
-        viewModelScope.launch {
-            val result = apiClient.listFiles(state.currentFolderId, nextPage, 100)
-            result.fold(
-                onSuccess = { listResult ->
-                    val newItems = listResult.items.map { fileToResource(it) }
-                    val existingPaths = state.items.map { it.path }.toSet()
-                    val filtered = newItems.filter { it.path !in existingPaths }
-                    updateUiState {
-                        it.copy(
-                            items = state.items + filtered, isLoadingMore = false,
-                            hasMore = listResult.items.size >= 100,
-                            nextPageCursor = listResult.nextMarker.ifEmpty { null }
-                        )
+        loadMoreJob = viewModelScope.launch {
+            try {
+                val result = apiClient.listFiles(
+                    state.currentFolderId, pageCursor = cursor,
+                    orderBy = state.orderBy, orderDirection = state.orderDirection
+                )
+                result.fold(
+                    onSuccess = { listResult ->
+                        val newItems = listResult.items.map { fileToResource(it) }
+                        val existingPaths = _uiState.value.items.map { it.path }.toSet()
+                        val filtered = newItems.filter { it.path !in existingPaths }
+                        if (filtered.isEmpty()) {
+                            updateUiState { it.copy(isLoadingMore = false, hasMore = false, nextPageCursor = null) }
+                            directoryCursorCache.remove(state.currentFolderId)
+                            return@fold
+                        }
+                        val allItems = _uiState.value.items + filtered
+                        val nextCursor = listResult.nextMarker.ifBlank { null }
+                        val hasMore = nextCursor != null && listResult.items.size >= 100
+                        directoryCache[state.currentFolderId] = allItems
+                        if (hasMore && nextCursor != null) directoryCursorCache[state.currentFolderId] = nextCursor
+                        else directoryCursorCache.remove(state.currentFolderId)
+                        updateUiState {
+                            it.copy(
+                                items = allItems, isLoadingMore = false,
+                                hasMore = hasMore,
+                                nextPageCursor = if (hasMore) nextCursor else null
+                            )
+                        }
+                        syncStackTop { it.copy(items = allItems, isLoading = false, error = null) }
+                    },
+                    onFailure = { e ->
+                        if (e !is kotlinx.coroutines.CancellationException) {
+                            updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
+                        }
                     }
-                    loadingMore = false
-                },
-                onFailure = { e ->
-                    updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
-                    loadingMore = false
-                }
-            )
+                )
+            } finally {
+                loadingMore = false
+                updateUiState { it.copy(isLoadingMore = false) }
+            }
         }
     }
 
@@ -545,7 +586,11 @@ class Yun139BrowserViewModel @Inject constructor(
         return WebDavResource(
             path = file.fileId, name = file.fileName,
             isDirectory = file.isDir, size = file.fileSize,
-            lastModified = file.lastOpTime.ifEmpty { file.createDate }
+            lastModified = file.lastOpTime.ifEmpty { file.createDate },
+            thumbnailUrl = file.thumbnailUrl,
+            folderSize = if (file.isDir) file.fileSize else 0,
+            category = file.contentType,
+            createdAt = file.createDate
         )
     }
 

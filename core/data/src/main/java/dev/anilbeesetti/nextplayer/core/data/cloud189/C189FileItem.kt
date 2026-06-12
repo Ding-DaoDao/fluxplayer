@@ -6,7 +6,9 @@ data class C189FileItem(
     val isDir: Boolean,
     val size: Long = 0,
     val lastOpTime: String = "",
+    val createDate: String = "",
     val fileCount: Int = 0,
+    val folderSize: Long = 0,
     val mediaType: Int = -1,
     val thumbnailUrl: String? = null
 ) {

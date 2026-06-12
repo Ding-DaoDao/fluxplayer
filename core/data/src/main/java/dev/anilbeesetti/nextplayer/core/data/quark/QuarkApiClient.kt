@@ -53,7 +53,7 @@ class QuarkApiClient(
         val headers = mapOf(
             "cookie" to getCookie(),
             "User-Agent" to QUARK_UA,
-            "referer" to baseUrl
+            "referer" to homeUrl
         )
         Log.d(TAG, "buildHeaders: cookie长度=${getCookie().length}")
         return headers
@@ -114,12 +114,14 @@ class QuarkApiClient(
             append(baseUrl)
             append("/1/clouddrive/file/sort?pr=$pr&fr=pc")
             append("&pdir_fid=$pdirFid")
-            append("&force=0")
+
             append("&_page=$page")
             append("&_size=100")
             append("&uc_param_str=")
             append("&_fetch_total=1")
             append("&_fetch_sub_dirs=0")
+            append("&__t=${System.currentTimeMillis()}")
+            append("&__dt=1000")
             append("&_sort=file_type:asc,$orderBy")
         }
         Log.d(TAG, "listFiles: pdirFid=$pdirFid, page=$page, driveType=$driveType, url=$url")
@@ -144,6 +146,7 @@ class QuarkApiClient(
                 objCategory = item.optString("obj_category", ""),
                 size = item.optLong("size", 0),
                 updatedAt = item.optLong("updated_at", 0),
+                createdAt = item.optLong("created_at", 0),
                 thumbnail = item.optString("thumbnail", ""),
                 shareFidToken = item.optString("share_fid_token", ""),
                 includeItems = item.optInt("include_items", 0)
@@ -160,8 +163,8 @@ class QuarkApiClient(
         }
         val json = apiPost("$baseUrl/1/clouddrive/file/v2/play?pr=$pr&fr=pc", body)
 
-        // status=200 表示错误
-        if (json.optInt("status", -1) == 200) {
+        // status 不为 200 表示错误
+        if (json.optInt("status", -1) != 200) {
             throw IllegalStateException(json.optString("message", "获取视频信息失败"))
         }
 
@@ -196,6 +199,10 @@ class QuarkApiClient(
             put("fids", JSONArray().apply { put(fid) })
         }
         val json = apiPost("$baseUrl/1/clouddrive/file/download?pr=$pr&fr=pc", body)
+        // 检查 API 业务层错误（code!=0 时 data 不可用）
+        if (json.optInt("code", 0) != 0) {
+            throw IllegalStateException(json.optString("message", "下载接口错误"))
+        }
         val data = json.optJSONArray("data") ?: JSONArray()
         if (data.length() == 0) throw IllegalStateException("无下载链接")
         data.getJSONObject(0).optString("download_url", "")

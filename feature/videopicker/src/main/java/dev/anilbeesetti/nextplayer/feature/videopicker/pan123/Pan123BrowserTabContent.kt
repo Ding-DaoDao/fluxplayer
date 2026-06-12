@@ -21,7 +21,7 @@ import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextAction
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
-import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortDropdownMenuContent
 
 /**
  * 123云盘浏览器 Tab 内容
@@ -31,6 +31,7 @@ fun Pan123BrowserTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
     onPlayVideos: (List<Uri>, Uri) -> Unit,
     onLogoutReady: (() -> Unit) -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: Pan123BrowserViewModel = hiltViewModel()
 ) {
@@ -47,7 +48,7 @@ fun Pan123BrowserTabContent(
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
-    var showSortSheet by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
 
     val currentSortKey = remember(state.orderBy, state.orderDirection) {
         val dir = state.orderDirection.lowercase()
@@ -96,7 +97,26 @@ fun Pan123BrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = { viewModel.loadMore() },
-        onSortClick = { showSortSheet = true },
+        onSortClick = { showSortMenu = true },
+        showSortMenu = showSortMenu,
+        onSortMenuDismiss = { showSortMenu = false },
+        sortMenuContent = {
+            SortDropdownMenuContent(
+                currentKey = currentSortKey,
+                onSelect = { option ->
+                    showSortMenu = false
+                    val field = when (option.key) {
+                        "name:asc", "name:desc" -> "file_name"
+                        "time:asc", "time:desc" -> "update_time"
+                        "size:asc", "size:desc" -> "size"
+                        else -> "file_name"
+                    }
+                    val dir = if (option.key.endsWith(":desc")) "desc" else "asc"
+                    viewModel.setSort(field, dir)
+                },
+                onDismiss = { showSortMenu = false },
+            )
+        },
         breadcrumbLabel = { it.label },
         loginContent = {
             LoginScreen(
@@ -106,7 +126,10 @@ fun Pan123BrowserTabContent(
                 onLoginWithToken = { token -> viewModel.loginWithToken(token) }
             )
         },
-        onCreateFolder = { showCreateFolderDialog = true }
+        onCreateFolder = { showCreateFolderDialog = true },
+        providerName = "123云盘",
+        onSettingsClick = onSettingsClick,
+        onExitClick = { viewModel.logout() }
     )
 
     val renameItem = state.items.getOrNull(renameIndex)
@@ -125,23 +148,6 @@ fun Pan123BrowserTabContent(
         )
     }
 
-    if (showSortSheet) {
-        SortOptionSheet(
-            currentKey = currentSortKey,
-            onSelect = { option ->
-                showSortSheet = false
-                val field = when (option.key) {
-                    "name:asc", "name:desc" -> "file_name"
-                    "time:asc", "time:desc" -> "update_time"
-                    "size:asc", "size:desc" -> "size"
-                    else -> "file_name"
-                }
-                val dir = if (option.key.endsWith(":desc")) "desc" else "asc"
-                viewModel.setSort(field, dir)
-            },
-            onDismiss = { showSortSheet = false },
-        )
-    }
 }
 
 /**

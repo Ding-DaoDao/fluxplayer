@@ -18,8 +18,7 @@ import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CloudBrowserP
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextActionMenu
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
-import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
-import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortDropdownMenuContent
 
 /**
  * WebDAV 浏览标签页内容。
@@ -49,7 +48,7 @@ fun WebDavBrowserTabContent(
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
-    var showSortSheet by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
 
     val currentSortKey = remember(state.orderBy, state.orderDirection) {
         val dir = state.orderDirection.uppercase()
@@ -105,8 +104,29 @@ fun WebDavBrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = {},
-        onSortClick = { showSortSheet = true },
+        onSortClick = { showSortMenu = true },
+        showSortMenu = showSortMenu,
+        onSortMenuDismiss = { showSortMenu = false },
+        sortMenuContent = {
+            SortDropdownMenuContent(
+                currentKey = currentSortKey,
+                onSelect = { option ->
+                    showSortMenu = false
+                    val field = when (option.key) {
+                        "name:asc", "name:desc" -> "name"
+                        "time:asc", "time:desc" -> "modified"
+                        "size:asc", "size:desc" -> "size"
+                        else -> "name"
+                    }
+                    val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
+                    viewModel.setSort(field, dir)
+                },
+                onDismiss = { showSortMenu = false },
+            )
+        },
         breadcrumbLabel = { it.label },
+        providerName = "WebDAV",
+        onSettingsClick = onSettingsClick,
         loginContent = {
             WebDavNoServerPlaceholder(onSettingsClick = onSettingsClick)
         },
@@ -129,23 +149,6 @@ fun WebDavBrowserTabContent(
         )
     }
 
-    if (showSortSheet) {
-        SortOptionSheet(
-            currentKey = currentSortKey,
-            onSelect = { option ->
-                showSortSheet = false
-                val field = when (option.key) {
-                    "name:asc", "name:desc" -> "name"
-                    "time:asc", "time:desc" -> "modified"
-                    "size:asc", "size:desc" -> "size"
-                    else -> "name"
-                }
-                val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
-                viewModel.setSort(field, dir)
-            },
-            onDismiss = { showSortSheet = false },
-        )
-    }
 }
 
 @Composable

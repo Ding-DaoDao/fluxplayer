@@ -26,7 +26,7 @@ import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextAction
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
-import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortDropdownMenuContent
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -38,6 +38,7 @@ fun AliyunBrowserTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
     onPlayVideos: (List<Uri>, Uri) -> Unit,
     onLogoutReady: (() -> Unit) -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: AliyunBrowserViewModel = hiltViewModel()
 ) {
@@ -57,7 +58,7 @@ fun AliyunBrowserTabContent(
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var showDriveMenu by remember { mutableStateOf(false) }
-    var showSortSheet by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
 
     val currentSortKey = remember(state.orderBy) {
         when (state.orderBy) {
@@ -112,7 +113,29 @@ fun AliyunBrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = { viewModel.loadMore() },
-        onSortClick = { showSortSheet = true },
+        onSortClick = { showSortMenu = true },
+        showSortMenu = showSortMenu,
+        onSortMenuDismiss = { showSortMenu = false },
+        sortMenuContent = {
+            SortDropdownMenuContent(
+                currentKey = currentSortKey,
+                onSelect = { option ->
+                    showSortMenu = false
+                    val field = when (option.key) {
+                        "name:asc" -> "name"
+                        "name:desc" -> "name"
+                        "time:asc" -> "updated_at"
+                        "time:desc" -> "updated_at"
+                        "size:asc" -> "size"
+                        "size:desc" -> "size"
+                        else -> "name"
+                    }
+                    val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
+                    viewModel.setSort(field, dir)
+                },
+                onDismiss = { showSortMenu = false },
+            )
+        },
         breadcrumbLabel = { it.label },
         breadcrumbActions = {
             if (state.driveOptions.size > 1) {
@@ -163,7 +186,10 @@ fun AliyunBrowserTabContent(
                 autoOpenWebView = state.reLoginRequired
             )
         },
-        onCreateFolder = { showCreateFolderDialog = true }
+        onCreateFolder = { showCreateFolderDialog = true },
+        providerName = "阿里云盘",
+        onSettingsClick = onSettingsClick,
+        onExitClick = { viewModel.logout() }
     )
 
     val renameItem = state.items.getOrNull(renameIndex)
@@ -182,26 +208,6 @@ fun AliyunBrowserTabContent(
         )
     }
 
-    if (showSortSheet) {
-        SortOptionSheet(
-            currentKey = currentSortKey,
-            onSelect = { option ->
-                showSortSheet = false
-                val field = when (option.key) {
-                    "name:asc" -> "name"
-                    "name:desc" -> "name"
-                    "time:asc" -> "updated_at"
-                    "time:desc" -> "updated_at"
-                    "size:asc" -> "size"
-                    "size:desc" -> "size"
-                    else -> "name"
-                }
-                val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
-                viewModel.setSort(field, dir)
-            },
-            onDismiss = { showSortSheet = false },
-        )
-    }
 }
 
 /**

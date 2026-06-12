@@ -5,7 +5,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
@@ -62,20 +64,25 @@ fun BrowseTabs(
     }
 
     if (selectedProvider == null) {
-        // 平台选择列表 — 所有 provider 在同一个白色圆角卡片内
-        Card(
+        // 平台选择列表 — 每个 provider 一个独立圆角卡片，卡片间有间隙
+        Column(
             modifier = modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column {
-                providers.forEachIndexed { index, provider ->
+            providers.forEach { provider ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onProviderSelected(provider.id) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onProviderSelected(provider.id) }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -105,13 +112,6 @@ fun BrowseTabs(
                             modifier = Modifier.size(20.dp),
                         )
                     }
-                    if (index < providers.lastIndex) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                            thickness = 0.5.dp,
-                        )
-                    }
                 }
             }
         }
@@ -135,32 +135,38 @@ fun BrowseTabs(
                     onPlayVideo = onPlayVideo,
                     onPlayVideos = onPlayVideos,
                     onLogoutReady = onProviderLogoutChanged,
+                    onSettingsClick = onSettingsClick,
                 )
                 "quark" -> QuarkBrowserTabContent(
                     onPlayVideo = onPlayVideo,
                     onPlayVideos = onPlayVideos,
                     onLogoutReady = onProviderLogoutChanged,
+                    onSettingsClick = onSettingsClick,
                 )
                 "uc" -> QuarkBrowserTabContent(
                     driveType = "uc",
                     onPlayVideo = onPlayVideo,
                     onPlayVideos = onPlayVideos,
                     onLogoutReady = onProviderLogoutChanged,
+                    onSettingsClick = onSettingsClick,
                 )
                 "cloud189" -> C189BrowserTabContent(
                     onPlayVideo = onPlayVideo,
                     onPlayVideos = onPlayVideos,
                     onLogoutReady = onProviderLogoutChanged,
+                    onSettingsClick = onSettingsClick,
                 )
                 "pan123" -> Pan123BrowserTabContent(
                     onPlayVideo = onPlayVideo,
                     onPlayVideos = onPlayVideos,
                     onLogoutReady = onProviderLogoutChanged,
+                    onSettingsClick = onSettingsClick,
                 )
                 "yun139" -> Yun139BrowserTabContent(
                     onPlayVideo = onPlayVideo,
                     onPlayVideos = onPlayVideos,
                     onLogoutReady = onProviderLogoutChanged,
+                    onSettingsClick = onSettingsClick,
                 )
                 "openlist" -> OpenListBrowserTabContent(
                     onPlayVideo = onPlayVideo,

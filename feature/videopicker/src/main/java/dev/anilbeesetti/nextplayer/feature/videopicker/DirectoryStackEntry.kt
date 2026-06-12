@@ -10,7 +10,7 @@ data class DirectoryStackEntry(
     val fileId: String,
     val label: String,
     override val items: List<WebDavResource> = emptyList(),
-    override val isLoading: Boolean = false,
+    override val isLoading: Boolean = true,
     override val error: String? = null,
 ) : DirectoryState {
     override val key: String get() = fileId

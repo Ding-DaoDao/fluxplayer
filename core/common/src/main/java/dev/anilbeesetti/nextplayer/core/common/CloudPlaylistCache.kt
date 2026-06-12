@@ -6,7 +6,8 @@ object CloudPlaylistCache {
         val etag: String? = null,
         val size: Long? = null,
         val s3keyFlag: String? = null,
-        val downloadUrl: String? = null
+        val downloadUrl: String? = null,
+        val parentPath: String? = null,
     )
 
     private data class CachedUrl(val url: String, val timestamp: Long)

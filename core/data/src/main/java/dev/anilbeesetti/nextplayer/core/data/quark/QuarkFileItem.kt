@@ -7,6 +7,7 @@ data class QuarkFileItem(
     val objCategory: String,
     val size: Long,
     val updatedAt: Long,
+    val createdAt: Long,
     val thumbnail: String,
     val shareFidToken: String,
     val includeItems: Int = 0

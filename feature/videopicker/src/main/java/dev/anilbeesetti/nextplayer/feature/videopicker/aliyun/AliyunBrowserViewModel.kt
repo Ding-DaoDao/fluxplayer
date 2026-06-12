@@ -63,6 +63,7 @@ class AliyunBrowserViewModel @Inject constructor(
 
     private var loadSequence: Int = 0
     private var loadDirectoryJob: kotlinx.coroutines.Job? = null
+    private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
 
@@ -298,6 +299,8 @@ class AliyunBrowserViewModel @Inject constructor(
 
     fun loadDirectory(parentFileId: String) {
         loadDirectoryJob?.cancel()
+        loadMoreJob?.cancel()
+        loadingMore = false
         loadSequence++
         val seq = loadSequence
         updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
@@ -314,11 +317,15 @@ class AliyunBrowserViewModel @Inject constructor(
             result.fold(
                 onSuccess = { listResult ->
                     // 缓存文件元数据到 CloudPlaylistCache，供播放器显示标题
+                    val currentDirLabel = _navigationStack.value.lastOrNull()?.label
                     listResult.items.forEach { file ->
                         if (file.category == "video") {
                             CloudPlaylistCache.putFileMetadata(
                                 "alipan", file.fileId,
-                                CloudPlaylistCache.FileMetadata(fileName = file.fileName)
+                                CloudPlaylistCache.FileMetadata(
+                                    fileName = file.fileName,
+                                    parentPath = currentDirLabel,
+                                )
                             )
                         }
                     }
@@ -360,12 +367,16 @@ class AliyunBrowserViewModel @Inject constructor(
     private fun loadDirectoryCached(fileId: String) {
         val cached = directoryCache[fileId]
         if (cached != null) {
+            loadMoreJob?.cancel()
+            loadingMore = false
             updateUiState {
                 it.copy(
                     items = cached,
                     currentFileId = fileId,
                     isLoading = false,
-                    error = null
+                    isLoadingMore = false,
+                    error = null,
+                    nextMarker = null
                 )
             }
             syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
@@ -386,30 +397,40 @@ class AliyunBrowserViewModel @Inject constructor(
         loadingMore = true
         updateUiState { it.copy(isLoadingMore = true) }
 
-        viewModelScope.launch {
-            val result = apiClient.listFiles(
-                parentFileId = state.currentFileId,
-                nextMarker = state.nextMarker
-            )
-            result.fold(
-                onSuccess = { listResult ->
-                    val newItems = listResult.items.map { fileToResource(it) }
-                    updateUiState {
-                        it.copy(
-                            items = state.items + newItems,
-                            isLoadingMore = false,
-                            nextMarker = listResult.nextMarker.ifEmpty { null }
-                        )
+        loadMoreJob = viewModelScope.launch {
+            try {
+                val result = apiClient.listFiles(
+                    parentFileId = state.currentFileId,
+                    nextMarker = state.nextMarker
+                )
+                result.fold(
+                    onSuccess = { listResult ->
+                        val newItems = listResult.items.map { fileToResource(it) }
+                        val existingPaths = _uiState.value.items.map { it.path }.toSet()
+                        val filtered = newItems.filter { it.path !in existingPaths }
+                        if (filtered.isEmpty()) {
+                            updateUiState { it.copy(isLoadingMore = false, nextMarker = null) }
+                            return@fold
+                        }
+                        updateUiState {
+                            it.copy(
+                                items = _uiState.value.items + filtered,
+                                isLoadingMore = false,
+                                nextMarker = listResult.nextMarker.ifEmpty { null }
+                            )
+                        }
+                        syncStackTop { it.copy(items = _uiState.value.items, isLoading = false, error = null) }
+                    },
+                    onFailure = { e ->
+                        updateUiState {
+                            it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}")
+                        }
                     }
-                    loadingMore = false
-                },
-                onFailure = { e ->
-                    updateUiState {
-                        it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}")
-                    }
-                    loadingMore = false
-                }
-            )
+                )
+            } finally {
+                loadingMore = false
+                updateUiState { it.copy(isLoadingMore = false) }
+            }
         }
     }
 
@@ -715,7 +736,11 @@ class AliyunBrowserViewModel @Inject constructor(
             name = file.fileName,
             isDirectory = file.type == "folder",
             size = file.size,
-            lastModified = file.updatedAt
+            lastModified = file.updatedAt,
+            thumbnailUrl = file.thumbnail.ifBlank { null },
+            folderSize = if (file.type == "folder") file.size else 0,
+            category = file.category,
+            createdAt = file.createdAt
         )
     }
 

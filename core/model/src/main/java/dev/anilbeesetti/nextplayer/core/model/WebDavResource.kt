@@ -7,6 +7,10 @@ data class WebDavResource(
     val size: Long = 0,
     val lastModified: String = "",
     val thumbnailUrl: String? = null,
+    val fileCount: Int? = null,
+    val folderSize: Long = 0,
+    val category: String = "",
+    val createdAt: String = "",
 ) {
     val isVideo: Boolean
         get() = !isDirectory && VIDEO_EXTENSIONS.any { name.endsWith(it, ignoreCase = true) }
@@ -43,6 +47,27 @@ data class WebDavResource(
             isImage -> "🖼️"
             isArchive -> "📦"
             else -> "❓"
+        }
+
+    val fileTypeLabel: String
+        get() = when {
+            isDirectory -> ""
+            category.isNotBlank() -> when (category.lowercase()) {
+                "video" -> "视频"
+                "audio" -> "音频"
+                "image" -> "图片"
+                "doc" -> "文档"
+                "archive" -> "压缩包"
+                else -> ""
+            }
+            else -> when (fileType) {
+                FileType.VIDEO -> "视频"
+                FileType.AUDIO -> "音频"
+                FileType.IMAGE -> "图片"
+                FileType.DOC -> "文档"
+                FileType.ARCHIVE -> "压缩包"
+                else -> ""
+            }
         }
 
     enum class FileType {

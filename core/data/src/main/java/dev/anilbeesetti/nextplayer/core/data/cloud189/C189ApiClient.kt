@@ -592,7 +592,9 @@ class C189ApiClient(
                     isDir = true,
                     size = f.optLong("size", 0),
                     lastOpTime = f.optString("lastOpTime", ""),
+                    createDate = f.optString("createDate", ""),
                     fileCount = f.optInt("fileCount", 0),
+                    folderSize = f.optLong("fileListSize", 0),
                     mediaType = -1,
                     thumbnailUrl = null
                 ))
@@ -608,6 +610,7 @@ class C189ApiClient(
                     isDir = false,
                     size = f.optLong("size", 0),
                     lastOpTime = f.optString("lastOpTime", ""),
+                    createDate = f.optString("createDate", ""),
                     fileCount = 0,
                     mediaType = f.optInt("mediaType", -1),
                     thumbnailUrl = icon?.optString("smallUrl", null) ?: icon?.optString("largeUrl", null)
@@ -624,7 +627,9 @@ class C189ApiClient(
                     isDir = item.optBoolean("isDir", false),
                     size = item.optLong("size", 0),
                     lastOpTime = item.optString("lastOpTime", ""),
+                    createDate = item.optString("createDate", ""),
                     fileCount = item.optInt("fileCount", 0),
+                    folderSize = item.optLong("fileListSize", 0),
                     mediaType = item.optInt("mediaType", -1),
                     thumbnailUrl = item.optString("thumbnailUrl", null)
                 )

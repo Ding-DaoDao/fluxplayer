@@ -105,6 +105,7 @@ class AliyunApiClient(
                 type = item.getString("type"),
                 category = item.optString("category", ""),
                 size = item.optLong("size", 0),
+                createdAt = item.optString("created_at", ""),
                 updatedAt = item.optString("updated_at", ""),
                 thumbnail = item.optString("thumbnail", ""),
                 mimeType = item.optString("mime_type", ""),

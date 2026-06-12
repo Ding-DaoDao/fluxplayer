@@ -27,7 +27,7 @@ import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextAction
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
-import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortDropdownMenuContent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -42,6 +42,7 @@ fun Yun139BrowserTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
     onPlayVideos: (List<Uri>, Uri) -> Unit,
     onLogoutReady: (() -> Unit) -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: Yun139BrowserViewModel = hiltViewModel()
 ) {
@@ -58,7 +59,7 @@ fun Yun139BrowserTabContent(
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
-    var showSortSheet by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
 
     val currentSortKey = remember(state.orderBy, state.orderDirection) {
         val dir = state.orderDirection.uppercase()
@@ -107,14 +108,36 @@ fun Yun139BrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = { viewModel.loadMore() },
-        onSortClick = { showSortSheet = true },
+        onSortClick = { showSortMenu = true },
+        showSortMenu = showSortMenu,
+        onSortMenuDismiss = { showSortMenu = false },
+        sortMenuContent = {
+            SortDropdownMenuContent(
+                currentKey = currentSortKey,
+                onSelect = { option ->
+                    showSortMenu = false
+                    val field = when (option.key) {
+                        "name:asc", "name:desc" -> "name"
+                        "time:asc", "time:desc" -> "updated_at"
+                        "size:asc", "size:desc" -> "size"
+                        else -> "name"
+                    }
+                    val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
+                    viewModel.setSort(field, dir)
+                },
+                onDismiss = { showSortMenu = false },
+            )
+        },
         breadcrumbLabel = { it.label },
         loginContent = {
             Yun139LoginScreen(
                 onLoginWithWeb = { auth, udId -> viewModel.loginWithWeb(auth, udId) }
             )
         },
-        onCreateFolder = { showCreateFolderDialog = true }
+        onCreateFolder = { showCreateFolderDialog = true },
+        providerName = "移动云盘",
+        onSettingsClick = onSettingsClick,
+        onExitClick = { viewModel.logout() }
     )
 
     val renameItem = state.items.getOrNull(renameIndex)
@@ -133,23 +156,6 @@ fun Yun139BrowserTabContent(
         )
     }
 
-    if (showSortSheet) {
-        SortOptionSheet(
-            currentKey = currentSortKey,
-            onSelect = { option ->
-                showSortSheet = false
-                val field = when (option.key) {
-                    "name:asc", "name:desc" -> "name"
-                    "time:asc", "time:desc" -> "updated_at"
-                    "size:asc", "size:desc" -> "size"
-                    else -> "name"
-                }
-                val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
-                viewModel.setSort(field, dir)
-            },
-            onDismiss = { showSortSheet = false },
-        )
-    }
 }
 
 /**

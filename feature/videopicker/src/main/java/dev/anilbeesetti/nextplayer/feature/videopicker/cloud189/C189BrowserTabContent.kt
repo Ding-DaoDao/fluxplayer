@@ -21,7 +21,7 @@ import dev.anilbeesetti.nextplayer.feature.videopicker.composables.ContextAction
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.CreateFolderDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.RenameDialog
 import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOption
-import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortOptionSheet
+import dev.anilbeesetti.nextplayer.feature.videopicker.composables.SortDropdownMenuContent
 
 /**
  * 天翼云盘浏览器 Tab 内容
@@ -31,6 +31,7 @@ fun C189BrowserTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
     onPlayVideos: (List<Uri>, Uri) -> Unit,
     onLogoutReady: (() -> Unit) -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: C189BrowserViewModel = hiltViewModel()
 ) {
@@ -47,7 +48,7 @@ fun C189BrowserTabContent(
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
-    var showSortSheet by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
 
     val currentSortKey = remember(state.orderBy, state.descending) {
         when {
@@ -98,7 +99,26 @@ fun C189BrowserTabContent(
         onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
         onRefresh = { viewModel.refresh() },
         onLoadMore = { viewModel.loadMore() },
-        onSortClick = { showSortSheet = true },
+        onSortClick = { showSortMenu = true },
+        showSortMenu = showSortMenu,
+        onSortMenuDismiss = { showSortMenu = false },
+        sortMenuContent = {
+            SortDropdownMenuContent(
+                currentKey = currentSortKey,
+                onSelect = { option ->
+                    showSortMenu = false
+                    val field = when (option.key) {
+                        "name:asc", "name:desc" -> "filename"
+                        "time:asc", "time:desc" -> "lastOpTime"
+                        "size:asc", "size:desc" -> "filesize"
+                        else -> "filename"
+                    }
+                    val desc = option.key.endsWith(":desc")
+                    viewModel.setSort(field, desc)
+                },
+                onDismiss = { showSortMenu = false },
+            )
+        },
         breadcrumbLabel = { it.label },
         loginContent = {
             C189LoginScreen(
@@ -106,7 +126,10 @@ fun C189BrowserTabContent(
                 onLoginWithPassword = { phone, password -> viewModel.loginByPassword(phone, password) }
             )
         },
-        onCreateFolder = { showCreateFolderDialog = true }
+        onCreateFolder = { showCreateFolderDialog = true },
+        providerName = "天翼云盘",
+        onSettingsClick = onSettingsClick,
+        onExitClick = { viewModel.logout() }
     )
 
     val renameItem = state.items.getOrNull(renameIndex)
@@ -125,23 +148,6 @@ fun C189BrowserTabContent(
         )
     }
 
-    if (showSortSheet) {
-        SortOptionSheet(
-            currentKey = currentSortKey,
-            onSelect = { option ->
-                showSortSheet = false
-                val field = when (option.key) {
-                    "name:asc", "name:desc" -> "filename"
-                    "time:asc", "time:desc" -> "lastOpTime"
-                    "size:asc", "size:desc" -> "filesize"
-                    else -> "filename"
-                }
-                val desc = option.key.endsWith(":desc")
-                viewModel.setSort(field, desc)
-            },
-            onDismiss = { showSortSheet = false },
-        )
-    }
 }
 
 /**

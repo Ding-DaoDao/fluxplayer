@@ -64,6 +64,7 @@ class QuarkBrowserViewModel @Inject constructor(
 
     private var loadSequence: Int = 0
     private var loadDirectoryJob: kotlinx.coroutines.Job? = null
+    private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
 
@@ -148,6 +149,8 @@ class QuarkBrowserViewModel @Inject constructor(
     fun loadDirectory(parentFileId: String) {
         Log.d(TAG, "loadDirectory: parentFileId=$parentFileId, hasValidCookie=${apiClient.hasValidCookie()}")
         loadDirectoryJob?.cancel()
+        loadMoreJob?.cancel()
+        loadingMore = false
         loadSequence++
         val seq = loadSequence
         updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
@@ -163,11 +166,15 @@ class QuarkBrowserViewModel @Inject constructor(
                     items.forEach { itemCache[it.fid] = it }
                     // 缓存文件元数据到 CloudPlaylistCache，供播放器显示标题
                     val provider = if (_uiState.value.driveType == "uc") "uc" else "quark"
+                    val currentDirLabel = _navigationStack.value.lastOrNull()?.label
                     items.forEach { file ->
                         if (file.isVideo) {
                             CloudPlaylistCache.putFileMetadata(
                                 provider, file.fid,
-                                CloudPlaylistCache.FileMetadata(fileName = file.fileName)
+                                CloudPlaylistCache.FileMetadata(
+                                    fileName = file.fileName,
+                                    parentPath = currentDirLabel,
+                                )
                             )
                         }
                     }
@@ -203,13 +210,18 @@ class QuarkBrowserViewModel @Inject constructor(
         val cached = directoryCache[fileId]
         if (cached != null) {
             loadDirectoryJob?.cancel()
+            loadMoreJob?.cancel()
+            loadingMore = false
             loadSequence++
             updateUiState {
                 it.copy(
                     items = cached,
                     currentFileId = fileId,
                     isLoading = false,
-                    error = null
+                    isLoadingMore = false,
+                    error = null,
+                    currentPage = (cached.size + 99) / 100,
+                    hasMore = cached.size >= 100
                 )
             }
             syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
@@ -231,33 +243,41 @@ class QuarkBrowserViewModel @Inject constructor(
         val nextPage = state.currentPage + 1
         updateUiState { it.copy(isLoadingMore = true) }
 
-        viewModelScope.launch {
-            val result = apiClient.listFiles(
-                pdirFid = state.currentFileId,
-                page = nextPage,
-                orderBy = state.orderBy
-            )
-            result.fold(
-                onSuccess = { items ->
-                    items.forEach { itemCache[it.fid] = it }
-                    val newItems = items.map { fileToResource(it) }
-                    val existingPaths = state.items.map { it.path }.toSet()
-                    val filtered = newItems.filter { it.path !in existingPaths }
-                    updateUiState {
-                        it.copy(
-                            items = state.items + filtered,
-                            isLoadingMore = false,
-                            hasMore = items.size >= 100,
-                            currentPage = nextPage
-                        )
+        loadMoreJob = viewModelScope.launch {
+            try {
+                val result = apiClient.listFiles(
+                    pdirFid = state.currentFileId,
+                    page = nextPage,
+                    orderBy = state.orderBy
+                )
+                result.fold(
+                    onSuccess = { items ->
+                        items.forEach { itemCache[it.fid] = it }
+                        val newItems = items.map { fileToResource(it) }
+                        val existingPaths = _uiState.value.items.map { it.path }.toSet()
+                        val filtered = newItems.filter { it.path !in existingPaths }
+                        if (filtered.isEmpty()) {
+                            updateUiState { it.copy(isLoadingMore = false, hasMore = false) }
+                            return@fold
+                        }
+                        updateUiState {
+                            it.copy(
+                                items = _uiState.value.items + filtered,
+                                isLoadingMore = false,
+                                hasMore = items.size >= 100,
+                                currentPage = nextPage
+                            )
+                        }
+                        syncStackTop { it.copy(items = _uiState.value.items, isLoading = false, error = null) }
+                    },
+                    onFailure = { e ->
+                        updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
                     }
-                    loadingMore = false
-                },
-                onFailure = { e ->
-                    updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
-                    loadingMore = false
-                }
-            )
+                )
+            } finally {
+                loadingMore = false
+                updateUiState { it.copy(isLoadingMore = false) }
+            }
         }
     }
 
@@ -518,7 +538,12 @@ class QuarkBrowserViewModel @Inject constructor(
             name = file.fileName,
             isDirectory = file.dir,
             size = file.size,
-            lastModified = if (file.updatedAt > 0) file.updatedAt.toString() else ""
+            lastModified = if (file.updatedAt > 0) file.updatedAt.toString() else "",
+            thumbnailUrl = file.thumbnail.ifBlank { null },
+            fileCount = if (file.dir && file.includeItems > 0) file.includeItems else null,
+            folderSize = if (file.dir) file.size else 0,
+            category = file.objCategory,
+            createdAt = if (file.createdAt > 0) file.createdAt.toString() else ""
         )
     }
 
