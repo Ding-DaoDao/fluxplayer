@@ -65,6 +65,16 @@ fun OpenListBrowserTabContent(
         }
     }
 
+    // 未挂载存储时显示专门引导页，而非通用错误页
+    if (state.isLoggedIn && state.items.isEmpty() && state.error?.contains("挂载") == true) {
+        OpenListNoStoragePlaceholder(
+            onRefresh = { viewModel.refresh() },
+            onSettingsClick = onSettingsClick,
+            modifier = modifier,
+        )
+        return
+    }
+
     SharedCloudBrowserPanel(
         modifier = modifier,
         items = state.items,
@@ -174,6 +184,49 @@ private fun OpenListNoServerPlaceholder(
             Spacer(Modifier.height(16.dp))
             Button(onClick = onSettingsClick) {
                 Text("前往设置")
+            }
+        }
+    }
+}
+
+@Composable
+private fun OpenListNoStoragePlaceholder(
+    onRefresh: () -> Unit,
+    onSettingsClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        ) {
+            Icon(
+                imageVector = NextIcons.Settings,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.size(80.dp),
+            )
+            Spacer(Modifier.height(20.dp))
+            Text(
+                text = "未挂载存储",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = "OpenList 中尚未添加任何存储，请前往网页后台添加云盘或本地目录",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.widthIn(max = 280.dp),
+            )
+            Spacer(Modifier.height(28.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onRefresh) {
+                    Text("重试")
+                }
+                Button(onClick = onSettingsClick) {
+                    Text("前往设置")
+                }
             }
         }
     }

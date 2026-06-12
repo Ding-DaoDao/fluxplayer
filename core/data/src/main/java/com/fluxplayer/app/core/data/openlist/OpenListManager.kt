@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.net.InetSocketAddress
+import java.net.Socket
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import java.util.concurrent.TimeUnit
@@ -62,6 +64,7 @@ class OpenListManager(
     private var healthJob: Job? = null
     private var restartCount = 0
     private var logReaderJob: Job? = null
+    private val logBuffer = StringBuilder()
 
     // ====================================================================
     // 启动 / 停止
@@ -86,7 +89,12 @@ class OpenListManager(
                 binaryPath = binary
 
                 val dataDir = context.filesDir.resolve("openlist_data").apply { mkdirs() }
+                // 为二进制创建临时目录，避免尝试在 app 根目录 mkdir 导致 permission denied
+                val tempDir = context.cacheDir.resolve("openlist_temp").apply { mkdirs() }
                 var savedPwd = getSavedPassword()
+
+                Log.d(TAG, "启动参数: binary=$binary, dataDir=${dataDir.absolutePath}, tempDir=${tempDir.absolutePath}")
+                Log.d(TAG, "filesDir=${context.filesDir.absolutePath}, cacheDir=${context.cacheDir.absolutePath}")
 
                 // 如果没有保存的密码，删除旧数据库重新开始
                 // （旧数据库的密码无法恢复，只能重建）
@@ -100,20 +108,37 @@ class OpenListManager(
                     }
                 }
 
+                // 写入 config.json，覆盖二进制硬编码的旧包名临时目录路径
+                val configFile = java.io.File(dataDir, "config.json")
+                val configContent = """{"temp_dir":"${tempDir.absolutePath}"}"""
+                configFile.writeText(configContent)
+                Log.d(TAG, "写入 config.json: $configContent")
+
                 val command = arrayOf(binary, "server", "--data", dataDir.absolutePath)
                 val env = mutableMapOf(
                     "OPENLIST_DATA" to dataDir.absolutePath,
                     "OPENLIST_PORT" to DEFAULT_PORT.toString(),
-                    "OPENLIST_LOG" to "info",
+                    "OPENLIST_LOG" to "debug",
+                    "OPENLIST_TEMP_DIR" to tempDir.absolutePath,
+                    "TMPDIR" to tempDir.absolutePath,
+                    "TMP" to tempDir.absolutePath,
+                    "TEMP" to tempDir.absolutePath,
+                    "XDG_CACHE_HOME" to tempDir.absolutePath,
+                    "HOME" to context.filesDir.absolutePath,
                 )
                 if (!savedPwd.isNullOrBlank()) {
                     env["OPENLIST_ADMIN_PASSWORD"] = savedPwd
                 }
 
+                Log.d(TAG, "环境变量: ${env.entries.joinToString { "${it.key}=${it.value}" }}")
+
                 val pb = ProcessBuilder(*command)
                 pb.redirectErrorStream(true)  // 合并 stderr 到 stdout，确保能捕获初始密码
                 pb.environment().putAll(env)
                 pb.directory(context.filesDir)
+
+                Log.d(TAG, "工作目录: ${context.filesDir.absolutePath}")
+                Log.d(TAG, "执行命令: ${command.joinToString(" ")}")
 
                 val proc = pb.start()
                 process = proc
@@ -123,15 +148,30 @@ class OpenListManager(
                     launchLogReader(proc)
                 }
 
-                // 进程已启动，立即标记为运行中（不依赖 ping 检测）
-                _state.value = OpenListServerState.Running(
-                    port = DEFAULT_PORT,
-                    pid = getPid(proc),
-                )
-
-                // 健康检查（监测进程存活 + ping）
-                healthJob = scope.launch {
-                    startHealthCheck(proc)
+                // 等待 HTTP 端口就绪后再标记 Running（TCP socket 检测，不依赖 HTTP API）
+                val ready = waitForPortReady(proc)
+                if (ready) {
+                    _state.value = OpenListServerState.Running(
+                        port = DEFAULT_PORT,
+                        pid = getPid(proc),
+                    )
+                    // 只在进程成功启动后才启动健康检查
+                    healthJob = scope.launch {
+                        startHealthCheck(proc)
+                    }
+                } else if (!proc.isAlive) {
+                    // 给日志读取器一点时间追上最后的输出
+                    delay(200)
+                    val exitCode = try { proc.exitValue() } catch (_: Exception) { -1 }
+                    val tail = logBuffer.toString().trim().takeLast(500)
+                    Log.e(TAG, "进程已退出: exitCode=$exitCode, output='$tail'")
+                    _state.value = OpenListServerState.Error(
+                        "OpenList 进程已退出 (exit=$exitCode)" +
+                            if (tail.isNotBlank()) "\n$tail" else ""
+                    )
+                } else {
+                    _state.value = OpenListServerState.Error("端口 $DEFAULT_PORT 未就绪，服务可能未正常启动")
+                    proc.destroy()
                 }
 
             } catch (e: Exception) {
@@ -139,6 +179,32 @@ class OpenListManager(
                 _state.value = OpenListServerState.Error("启动失败: ${e.message}", e)
             }
         }
+    }
+
+    /**
+     * 等待 HTTP 端口就绪（TCP socket 检测，不依赖 HTTP API）。
+     * 最多重试 20 次 × 500ms = 10 秒。
+     */
+    private fun waitForPortReady(proc: Process): Boolean {
+        val maxAttempts = 20
+        val retryDelayMs = 500L
+        // 给进程启动时间和 logReader 捕获输出的时间（500ms）
+        Thread.sleep(500)
+        for (i in 0 until maxAttempts) {
+            if (!proc.isAlive) return false
+            try {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress("127.0.0.1", DEFAULT_PORT), 2000)
+                }
+                Log.d(TAG, "端口 $DEFAULT_PORT 已就绪 (attempt ${i + 1})")
+                return true
+            } catch (_: Exception) {
+                if (i < maxAttempts - 1) {
+                    Thread.sleep(retryDelayMs)
+                }
+            }
+        }
+        return false
     }
 
     /**
@@ -215,6 +281,7 @@ class OpenListManager(
                 if (restartCount < MAX_RESTART_ATTEMPTS) {
                     restartCount++
                     Log.w(TAG, "进程挂了，自动重启 (attempt $restartCount/$MAX_RESTART_ATTEMPTS)")
+                    _state.value = OpenListServerState.Stopped
                     start()
                 } else {
                     _state.value = OpenListServerState.Error("自动重启失败（已尝试 $MAX_RESTART_ATTEMPTS 次）")
@@ -243,10 +310,12 @@ class OpenListManager(
     // ====================================================================
 
     private suspend fun launchLogReader(proc: Process) {
+        logBuffer.clear()
         try {
             val reader = BufferedReader(InputStreamReader(proc.inputStream))
             while (currentCoroutineContext().isActive) {
                 val text = reader.readLine() ?: break
+                logBuffer.appendLine(text)
                 Log.d(TAG, "[stdout] $text")
 
                 // 解析初始密码: "the initial password is: XXXXXXXX"

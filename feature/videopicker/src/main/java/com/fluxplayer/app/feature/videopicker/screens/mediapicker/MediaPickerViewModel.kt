@@ -51,15 +51,20 @@ class MediaPickerViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             playbackHistoryRepository.getHistoryFlow().collect { history ->
-                val historyUris = history.map { it.uriString }.toSet()
-                // 更新已播放 URI 集合（供足迹视觉标识使用）
+                // 按 parentPath 分组，每组只保留最新一条
+                val latestPerDir = history
+                    .filter { it.parentPath != null }
+                    .groupBy { it.parentPath!! }
+                    .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
+                    .values.map { it.uriString }.toSet()
                 uiStateInternal.update { currentState ->
-                    currentState.copy(playedUriSet = historyUris)
+                    currentState.copy(playedUriSet = latestPerDir)
                 }
                 // 清除已删除历史对应的足迹（仅清理视频类 URI）
+                val allUris = history.map { it.uriString }.toSet()
                 preferencesRepository.updateApplicationPreferences { prefs ->
                     val cleaned = prefs.latestFootprintPerDir.filterValues { value ->
-                        !value.startsWith("http") || value in historyUris
+                        !value.startsWith("http") || value in allUris
                     }
                     if (cleaned.size == prefs.latestFootprintPerDir.size) prefs
                     else prefs.copy(latestFootprintPerDir = cleaned)

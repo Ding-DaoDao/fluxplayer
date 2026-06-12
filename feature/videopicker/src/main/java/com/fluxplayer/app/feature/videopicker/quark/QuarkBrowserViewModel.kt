@@ -78,8 +78,12 @@ class QuarkBrowserViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             playbackHistoryRepository.getHistoryFlow().collect { history ->
-                val historyUris = history.map { it.uriString }.toSet()
-                _uiState.update { it.copy(playedUriSet = historyUris) }
+                val latestPerDir = history
+                    .filter { it.parentPath != null }
+                    .groupBy { it.parentPath!! }
+                    .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
+                    .values.map { it.uriString }.toSet()
+                _uiState.update { it.copy(playedUriSet = latestPerDir) }
             }
         }
     }

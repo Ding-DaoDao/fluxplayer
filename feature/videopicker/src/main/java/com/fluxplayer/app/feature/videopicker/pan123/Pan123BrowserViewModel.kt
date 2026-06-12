@@ -77,8 +77,12 @@ class Pan123BrowserViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             playbackHistoryRepository.getHistoryFlow().collect { history ->
-                val historyUris = history.map { it.uriString }.toSet()
-                _uiState.update { it.copy(playedUriStrings = historyUris) }
+                val latestPerDir = history
+                    .filter { it.parentPath != null }
+                    .groupBy { it.parentPath!! }
+                    .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
+                    .values.map { it.uriString }.toSet()
+                _uiState.update { it.copy(playedUriStrings = latestPerDir) }
             }
         }
     }
@@ -114,7 +118,7 @@ class Pan123BrowserViewModel @Inject constructor(
             Pan123AuthProvider.isActive = true
             CloudPlayHeaders.registerSuffix(".123pan.cn") { Pan123AuthProvider.getPlayHeaders() }
             CloudPlayHeaders.registerSuffix("cjjd19.com") { Pan123AuthProvider.getPlayHeaders() }
-            updateUiState { it.copy(isLoggedIn = true, isLoading = true) }
+            updateUiState { it.copy(isLoggedIn = true, isLoading = true, initializing = false) }
             syncStackTop { it.copy(isLoading = true, error = null) }
             // 从磁盘缓存预填根目录，加速子目录导航
             CloudDirectoryCache.get(getApplication(), "pan123", "0")?.let { directoryCache["0"] = it }
@@ -127,6 +131,9 @@ class Pan123BrowserViewModel @Inject constructor(
         // 尝试账号密码登录
         if (passport.isNotBlank() && password.isNotBlank()) {
             login(passport, password)
+        } else {
+            // 无任何保存的凭据，显示登录表单
+            updateUiState { it.copy(initializing = false) }
         }
     }
 
@@ -156,7 +163,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 },
                 onFailure = { e ->
                     updateUiState {
-                        it.copy(isLoading = false, error = "登录失败: ${e.message}")
+                        it.copy(isLoading = false, initializing = false, error = "登录失败: ${e.message}")
                     }
                 }
             )
@@ -198,7 +205,7 @@ class Pan123BrowserViewModel @Inject constructor(
         prefs.edit().clear().apply()
         directoryCache.clear()
         CloudDirectoryCache.clear(getApplication(), "pan123")
-        _uiState.value = Pan123BrowserUiState()
+        _uiState.value = Pan123BrowserUiState(initializing = false)
         _navigationStack.value = listOf(DirectoryStackEntry(fileId = "0", label = "根目录"))
     }
 

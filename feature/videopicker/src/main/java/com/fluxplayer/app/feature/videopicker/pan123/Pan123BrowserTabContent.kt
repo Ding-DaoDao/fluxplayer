@@ -130,12 +130,18 @@ fun Pan123BrowserTabContent(
         },
         breadcrumbLabel = { it.label },
         loginContent = {
-            LoginScreen(
-                isLoading = state.isLoading,
-                error = state.error,
-                onLogin = { passport, password -> viewModel.login(passport, password) },
-                onLoginWithToken = { token -> viewModel.loginWithToken(token) }
-            )
+            if (state.initializing) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else {
+                LoginScreen(
+                    isLoading = state.isLoading,
+                    error = state.error,
+                    onLogin = { passport, password -> viewModel.login(passport, password) },
+                    onLoginWithToken = { token -> viewModel.loginWithToken(token) }
+                )
+            }
         },
         onCreateFolder = { showCreateFolderDialog = true },
         providerName = "123云盘",

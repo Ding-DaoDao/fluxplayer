@@ -104,6 +104,7 @@ private fun VideoListItem(
         selected = selected,
         contentPadding = PaddingValues(8.dp),
         colors = ListItemDefaults.segmentedColors(
+            containerColor = if (isPlayed) Color(0xFFE3F2FD) else MaterialTheme.colorScheme.surfaceContainerLow,
             selectedContainerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f),
         ),
         isFirstItem = isFirstItem,
@@ -118,16 +119,6 @@ private fun VideoListItem(
                     modifier = Modifier
                         .width(min(150.dp, LocalConfiguration.current.screenWidthDp.dp * 0.35f)),
                 )
-                if (isPlayed) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .width(4.dp)
-                            .height(24.dp)
-                            .clip(MaterialTheme.shapes.small)
-                            .background(MaterialTheme.colorScheme.tertiary),
-                    )
-                }
             }
         },
         content = {
@@ -161,6 +152,9 @@ private fun VideoListItem(
                     if (preferences.showResolutionField && video.height > 0) {
                         InfoChip(text = "${video.height}p")
                     }
+                    if (isPlayed && video.playedPercentage > 0) {
+                        InfoChip(text = "已播放 ${(video.playedPercentage * 100).toInt()}%")
+                    }
                 }
             }
         },
@@ -185,6 +179,7 @@ private fun VideoGridItem(
         selected = selected,
         contentPadding = PaddingValues(8.dp),
         colors = ListItemDefaults.segmentedColors(
+            containerColor = if (isPlayed) Color(0xFFE3F2FD) else MaterialTheme.colorScheme.surfaceContainerLow,
             selectedContainerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f),
         ),
         isFirstItem = isFirstItem,
@@ -201,16 +196,6 @@ private fun VideoGridItem(
                         video = video,
                         preferences = preferences,
                     )
-                    if (isPlayed) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .width(4.dp)
-                                .fillMaxHeight()
-                                .clip(MaterialTheme.shapes.small)
-                                .background(MaterialTheme.colorScheme.tertiary),
-                        )
-                    }
                 }
                 Text(
                     text = if (preferences.showExtensionField) video.nameWithExtension else video.displayName,

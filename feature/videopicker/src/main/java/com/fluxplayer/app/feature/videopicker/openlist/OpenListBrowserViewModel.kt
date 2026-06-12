@@ -15,6 +15,7 @@ import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.feature.videopicker.BaseCloudBrowserViewModel
 import com.fluxplayer.app.feature.videopicker.CommonStateUpdate
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -30,6 +31,8 @@ class OpenListBrowserViewModel @Inject constructor(
     companion object {
         private const val TAG = "OpenListBrowserVM"
         private const val PREF_NAME = "openlist"
+        private const val MAX_LIST_RETRIES = 2
+        private const val LIST_RETRY_DELAY_MS = 800L
     }
 
     // region ==================== OpenList 特有 ====================
@@ -76,6 +79,21 @@ class OpenListBrowserViewModel @Inject constructor(
                     initialize()
                 } else if (state is OpenListServerState.Error) {
                     updateState(CommonStateUpdate(error = "服务异常: ${state.message}"))
+                }
+            }
+        }
+
+        // 监听密码就绪：首次安装时初始密码来自 stdout，晚于 Running 状态
+        // 当密码就绪 + 服务器已运行 + 之前因"密码未就绪"报错时，自动重新初始化
+        viewModelScope.launch {
+            val mgr = manager ?: return@launch
+            mgr.initialPassword.collect { pwd ->
+                if (pwd != null && mgr.state.value is OpenListServerState.Running) {
+                    val curError = readState().error
+                    if (!readState().isLoggedIn && curError != null && curError.contains("密码未就绪")) {
+                        Log.d(TAG, "初始密码已就绪，重新初始化")
+                        initialize()
+                    }
                 }
             }
         }
@@ -191,60 +209,100 @@ class OpenListBrowserViewModel @Inject constructor(
         loadDirectoryInternal(rootFileId)
     }
 
-    private fun loadDirectoryInternal(path: String) {
+    private fun loadDirectoryInternal(path: String, retryCount: Int = 0) {
         val client = apiClient ?: run {
             Log.e(TAG, "loadDirectory: apiClient is null!")
             return
         }
-        Log.d(TAG, "loadDirectory: path=$path, hasPassword=${currentAdminPassword != null}")
+        Log.d(TAG, "loadDirectory: path=$path, hasPassword=${currentAdminPassword != null}, retryCount=$retryCount")
 
-        updateState(CommonStateUpdate(isLoading = true, error = null))
+        // 仅在首次尝试时重置 loading 状态，重试时保持 isLoading = true
+        if (retryCount == 0) {
+            updateState(CommonStateUpdate(isLoading = true, error = null))
+        }
 
         viewModelScope.launch {
-            val state = readState()
-            val result = client.listFiles(path, currentAdminPassword, state.orderBy, state.orderDirection)
-            result.fold(
-                onSuccess = { items ->
-                    Log.d(TAG, "loadDirectory success: ${items.size} items for path=$path")
-                    val resources = items.map { it.toWebDavResource() }
-                    val sorted = sortItems(resources)
+            try {
+                val state = readState()
+                val result = client.listFiles(path, currentAdminPassword, state.orderBy, state.orderDirection)
+                result.fold(
+                    onSuccess = { items ->
+                        Log.d(TAG, "loadDirectory success: ${items.size} items for path=$path")
+                        val resources = items.map { it.toWebDavResource() }
+                        val sorted = sortItems(resources)
 
-                    // 将视频文件元数据写入 CloudPlaylistCache（供播放历史跳转使用）
-                    val breadcrumbPath = readState().breadcrumbs.joinToString("/") { "${breadcrumbLabel(it)}|${breadcrumbFileId(it)}" }
-                    sorted.filter { it.isVideo }.forEach { file ->
-                        CloudPlaylistCache.putFileMetadata(
-                            providerLabel, file.path,
-                            CloudPlaylistCache.FileMetadata(
-                                fileName = file.name,
-                                parentPath = "${path}|$breadcrumbPath",
+                        // 将视频文件元数据写入 CloudPlaylistCache（供播放历史跳转使用）
+                        val breadcrumbPath = readState().breadcrumbs.joinToString("/") { "${breadcrumbLabel(it)}|${breadcrumbFileId(it)}" }
+                        sorted.filter { it.isVideo }.forEach { file ->
+                            CloudPlaylistCache.putFileMetadata(
+                                providerLabel, file.path,
+                                CloudPlaylistCache.FileMetadata(
+                                    fileName = file.name,
+                                    parentPath = "${path}|$breadcrumbPath",
+                                )
+                            )
+                        }
+
+                        updateState(CommonStateUpdate(currentFileId = path))
+                        onDirectoryLoaded(path, sorted, hasMore = false)
+                    },
+                    onFailure = { e ->
+                        val msg = e.message ?: ""
+                        val isConnErr = msg.contains("Failed to connect") || msg.contains("Unable to resolve")
+                        if (isConnErr && retryCount < MAX_LIST_RETRIES) {
+                            Log.d(TAG, "loadDirectory connect failed, auto-retry ${retryCount + 1}/$MAX_LIST_RETRIES")
+                            delay(LIST_RETRY_DELAY_MS)
+                            loadDirectoryInternal(path, retryCount + 1)
+                            return@launch
+                        }
+                        Log.e(TAG, "loadDirectory failed for path=$path: ${e.message}")
+                        val friendlyMsg = e.message?.let { msg2 ->
+                            when {
+                                msg2.contains("storage not found") || msg2.contains("add a storage") ->
+                                    "OpenList 中没有挂载任何存储，请在 OpenList 网页后台添加存储"
+                                msg2.contains("Failed to connect") ->
+                                    "无法连接到 OpenList 服务（127.0.0.1:5244），请确认服务已启动"
+                                msg2.contains("401") || msg2.contains("token is invalidated") ->
+                                    "认证失败，请检查 OpenList 管理员密码"
+                                else -> null
+                            }
+                        }
+                        val finalError = friendlyMsg ?: "加载失败: ${e.message}"
+                        updateState(
+                            CommonStateUpdate(
+                                isLoading = false,
+                                error = finalError
                             )
                         )
+                        syncStackTop { it.copy(isLoading = false, error = finalError) }
                     }
-
-                    updateState(CommonStateUpdate(currentFileId = path))
-                    onDirectoryLoaded(path, sorted, hasMore = false)
-                },
-                onFailure = { e ->
-                    Log.e(TAG, "loadDirectory failed for path=$path: ${e.message}")
-                    val friendlyMsg = e.message?.let { msg ->
-                        when {
-                            msg.contains("storage not found") || msg.contains("add a storage") ->
-                                "OpenList 中没有挂载任何存储，请在 OpenList 网页后台添加存储"
-                            msg.contains("Failed to connect") ->
-                                "无法连接到 OpenList 服务（127.0.0.1:5244），请确认服务已启动"
-                            msg.contains("401") || msg.contains("token is invalidated") ->
-                                "认证失败，请检查 OpenList 管理员密码"
-                            else -> null
-                        }
-                    }
-                    updateState(
-                        CommonStateUpdate(
-                            isLoading = false,
-                            error = friendlyMsg ?: "加载失败: ${e.message}"
-                        )
-                    )
+                )
+            } catch (e: Exception) {
+                val msg = e.message ?: ""
+                val isConnErr = msg.contains("Failed to connect") || msg.contains("Unable to resolve")
+                if (isConnErr && retryCount < MAX_LIST_RETRIES) {
+                    Log.d(TAG, "loadDirectory connect exception, auto-retry ${retryCount + 1}/$MAX_LIST_RETRIES")
+                    delay(LIST_RETRY_DELAY_MS)
+                    loadDirectoryInternal(path, retryCount + 1)
+                    return@launch
                 }
-            )
+                Log.e(TAG, "loadDirectory exception for path=$path: ${e.message}", e)
+                val catchError = "加载异常: ${e.message}"
+                updateState(
+                    CommonStateUpdate(
+                        isLoading = false,
+                        error = catchError
+                    )
+                )
+                syncStackTop { it.copy(isLoading = false, error = catchError) }
+            } finally {
+                // 防御性重置：确保 isLoading 在任何情况下都会被重置
+                if (readState().isLoading) {
+                    Log.w(TAG, "loadDirectory: isLoading still true after completion, force resetting")
+                    updateState(CommonStateUpdate(isLoading = false))
+                    syncStackTop { it.copy(isLoading = false) }
+                }
+            }
         }
     }
 

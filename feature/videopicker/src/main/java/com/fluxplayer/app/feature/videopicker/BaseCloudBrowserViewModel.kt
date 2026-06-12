@@ -160,8 +160,8 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
     }
     val navigationStack: StateFlow<List<DirectoryStackEntry>> by lazy { _navigationStack.asStateFlow() }
 
-    /** 同步栈顶与扁平状态 */
-    private fun syncStackTop(transform: (DirectoryStackEntry) -> DirectoryStackEntry) {
+    /** 同步栈顶与扁平状态（子类可在加载失败等场景调用） */
+    protected fun syncStackTop(transform: (DirectoryStackEntry) -> DirectoryStackEntry) {
         _navigationStack.update { stack ->
             if (stack.isEmpty()) return@update stack
             stack.toMutableList().apply {
@@ -453,17 +453,21 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
         this.playbackHistoryRepository = repo
         viewModelScope.launch {
             repo.getHistoryFlow().collect { history ->
-                val historyUris = history.flatMap { item ->
+                // 按 parentPath 分组，每组只保留最新一条
+                val latestHistory = history
+                    .filter { it.parentPath != null }
+                    .groupBy { it.parentPath!! }
+                    .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
+                    .values.toList()
+                val historyUris = latestHistory.flatMap { item ->
                     val uri = item.uriString
                     val parts = mutableListOf(uri)
-                    // 从 HTTP(S) URL 中提取路径部分，用于 WebDAV / OpenList 足迹匹配
                     if (uri.startsWith("http://") || uri.startsWith("https://")) {
                         try {
                             val parsed = Uri.parse(uri)
                             val urlPath = parsed.path
                             if (!urlPath.isNullOrEmpty()) {
                                 parts.add(urlPath)
-                                // OpenList 播放 URL 带有 /d 前缀，剥离后与 item.path 匹配
                                 if (urlPath.startsWith("/d/")) {
                                     parts.add(urlPath.removePrefix("/d"))
                                 }
@@ -472,7 +476,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                     }
                     parts
                 }.toSet()
-                Log.d("BaseCloudVM", "[Footprint] provider=$providerLabel historySize=${history.size} playedUriSetSize=${historyUris.size}")
+                Log.d("BaseCloudVM", "[Footprint] provider=$providerLabel latestPerDirSize=${latestHistory.size} playedUriSetSize=${historyUris.size}")
                 val sample = historyUris.take(5).joinToString("|")
                 Log.d("BaseCloudVM", "[Footprint] sample uris: $sample")
                 updateState(CommonStateUpdate(playedUriSet = historyUris))

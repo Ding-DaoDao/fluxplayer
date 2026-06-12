@@ -119,11 +119,31 @@ fun OpenListSettingsScreen(
 
             // 错误提示
             uiState.error?.let { error ->
-                Text(
-                    text = error,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = NextIcons.Priority,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = error,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
             }
         }
     }
@@ -200,13 +220,39 @@ internal fun ServiceControlCard(
 
 @Composable
 internal fun StatusRow(state: OpenListServerState) {
-    val (label, color) = when (state) {
-        is OpenListServerState.Stopped -> "已停止" to MaterialTheme.colorScheme.outline
-        is OpenListServerState.Starting -> "启动中" to MaterialTheme.colorScheme.tertiary
-        is OpenListServerState.Running -> "运行中 (http://127.0.0.1:${state.port})" to MaterialTheme.colorScheme.primary
-        is OpenListServerState.Error -> "错误: ${state.message}" to MaterialTheme.colorScheme.error
+    when (state) {
+        is OpenListServerState.Error -> {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = NextIcons.Priority,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = state.message,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        else -> {
+            val (label, color) = when (state) {
+                is OpenListServerState.Stopped -> "已停止" to MaterialTheme.colorScheme.outline
+                is OpenListServerState.Starting -> "启动中" to MaterialTheme.colorScheme.tertiary
+                is OpenListServerState.Running -> "运行中 (http://127.0.0.1:${state.port})" to MaterialTheme.colorScheme.primary
+                else -> return
+            }
+            Text(label, color = color, style = MaterialTheme.typography.bodyMedium)
+        }
     }
-    Text(label, color = color, style = MaterialTheme.typography.bodyMedium)
 }
 
 @Composable

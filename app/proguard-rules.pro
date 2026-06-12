@@ -25,3 +25,37 @@
 -assumenosideeffects class android.util.Log {
     public static boolean isLoggable(java.lang.String, int);
 }
+
+# ===== 保留 Kotlin 元数据（sealed class、data class、协程都需要） =====
+-keepattributes *Annotation*, InnerClasses, Signature, EnclosingMethod, Exceptions
+-keep class kotlin.Metadata { *; }
+
+# ===== 保留 Kotlin Result 类（runCatching 依赖） =====
+-keep class kotlin.Result { *; }
+-keep class kotlin.Result$Failure { *; }
+
+# ===== 保留 Kotlin 协程 =====
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
+-keepclassmembernames class kotlinx.** {
+    volatile <fields>;
+}
+
+# ===== 保留整个 OpenList 核心模块 =====
+-keep class com.fluxplayer.app.core.data.openlist.** { *; }
+
+# ===== 保留 videopicker 核心状态类 =====
+-keep class com.fluxplayer.app.feature.videopicker.CommonStateSnapshot { *; }
+-keep class com.fluxplayer.app.feature.videopicker.CommonStateUpdate { *; }
+-keep class com.fluxplayer.app.feature.videopicker.DirectoryStackEntry { *; }
+-keep class com.fluxplayer.app.feature.videopicker.BaseCloudBrowserViewModel { *; }
+
+# ===== 保留所有 Hilt 生成的 ViewModel 及其 Sealed State =====
+-keep class com.fluxplayer.app.feature.videopicker.openlist.** { *; }
+-keep class com.fluxplayer.app.feature.videopicker.settings.** { *; }
+
+# ===== OkHttp / Okio（R8 激进优化可能破坏） =====
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-keep class okhttp3.** { *; }
+-keep interface okhttp3.** { *; }

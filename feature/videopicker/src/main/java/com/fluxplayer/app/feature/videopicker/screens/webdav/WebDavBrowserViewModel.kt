@@ -109,17 +109,21 @@ class WebDavBrowserViewModel @Inject constructor(
                 val basePath = server?.let {
                     Uri.parse(it.normalizedUrl).path?.trimEnd('/')
                 }
-                val historyUris = history.flatMap { item ->
+                // 按 parentPath 分组，每组只保留最新一条
+                val latestHistory = history
+                    .filter { it.parentPath != null }
+                    .groupBy { it.parentPath!! }
+                    .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
+                    .values.toList()
+                val historyUris = latestHistory.flatMap { item ->
                     val uri = item.uriString
                     val parts = mutableListOf(uri)
-                    // 从 WebDAV HTTP(S) URL 中提取路径部分，用于足迹匹配
                     if (uri.startsWith("http://") || uri.startsWith("https://")) {
                         try {
                             val parsed = Uri.parse(uri)
                             val urlPath = parsed.path
                             if (!urlPath.isNullOrEmpty()) {
                                 parts.add(urlPath)
-                                // 剥离服务器 basePath（如 /webdav），使路径与 item.path 一致
                                 if (basePath != null && !basePath.isNullOrEmpty() && urlPath.startsWith(basePath)) {
                                     val relative = urlPath.removePrefix(basePath)
                                     if (relative.isNotEmpty()) {
@@ -131,7 +135,7 @@ class WebDavBrowserViewModel @Inject constructor(
                     }
                     parts
                 }.toSet()
-                Log.d(TAG, "[Footprint] historySize=${history.size} playedUriSetSize=${historyUris.size}")
+                Log.d(TAG, "[Footprint] historySize=${history.size} latestPerDirSize=${latestHistory.size} playedUriSetSize=${historyUris.size}")
                 val sample = historyUris.filter { it.startsWith("/") }.take(5).joinToString("|")
                 Log.d(TAG, "[Footprint] sample paths: $sample")
                 _extraState.update { it.copy(playedUriStrings = historyUris) }

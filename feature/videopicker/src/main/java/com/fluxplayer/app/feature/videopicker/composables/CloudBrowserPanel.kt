@@ -199,19 +199,13 @@ fun <T> CloudBrowserPanel(
                                 }
                             }
                             curItems.isEmpty() && curError == null -> {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("此目录为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                                EmptyPlaceholder()
                             }
                             curError != null && curItems.isEmpty() -> {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text("加载失败", color = MaterialTheme.colorScheme.error)
-                                        Text(curError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Spacer(Modifier.height(8.dp))
-                                        OutlinedButton(onClick = onRefresh) { Text("重试") }
-                                    }
-                                }
+                                ErrorPlaceholder(
+                                    message = curError ?: "未知错误",
+                                    onRetry = onRefresh,
+                                )
                             }
                             else -> {
                                 val flatListState = rememberLazyListState()
@@ -271,19 +265,10 @@ fun <T> CloudBrowserPanel(
             }
 
             if (curError != null && curItems.isNotEmpty()) {
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(curError, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall)
-                        Spacer(Modifier.height(8.dp))
-                        TextButton(onClick = onRefresh) {
-                            Text("重试", color = MaterialTheme.colorScheme.onErrorContainer)
-                        }
-                    }
-                }
+                ErrorBanner(
+                    message = curError ?: "",
+                    onRetry = onRefresh,
+                )
             }
         }
         }
@@ -460,20 +445,13 @@ private fun DirectoryStackContent(
                     }
                 }
                 entry.items.isEmpty() && entry.error == null -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("此目录为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    EmptyPlaceholder()
                 }
                 entry.error != null && entry.items.isEmpty() -> {
-                    val errorMsg = entry.error!!
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("加载失败", color = MaterialTheme.colorScheme.error)
-                            Text(errorMsg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedButton(onClick = onRefresh) { Text("重试") }
-                        }
-                    }
+                    ErrorPlaceholder(
+                        message = entry.error!!,
+                        onRetry = onRefresh,
+                    )
                 }
                 else -> {
                     LazyColumn(
@@ -535,26 +513,22 @@ private fun ItemCard(
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isPlayed) {
+                Color(0xFFE3F2FD)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
     ) {
         Row(
-            modifier = Modifier.padding(start = if (isPlayed) 0.dp else 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (isPlayed) {
-                Box(
-                    modifier = Modifier
-                        .width(4.dp)
-                        .height(28.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(MaterialTheme.colorScheme.tertiary),
-                )
-                Spacer(Modifier.width(8.dp))
-            }
             FileTypeIcon(
                 item = item,
                 modifier = Modifier
@@ -581,6 +555,14 @@ private fun ItemCard(
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isPlayed) {
+                    Text(
+                        text = "已播放",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 if (item.isDirectory) {
                     Text(
                         text = "›",
@@ -643,5 +625,116 @@ fun formatFileSize(bytes: Long): String {
         bytes < 1024 * 1024 -> "${"%.1f".format(bytes / 1024.0)} KB"
         bytes < 1024 * 1024 * 1024 -> "${"%.1f".format(bytes / (1024.0 * 1024))} MB"
         else -> "${"%.2f".format(bytes / (1024.0 * 1024 * 1024))} GB"
+    }
+}
+
+// ====================================================================
+// 可复用错误 UI 组件
+// ====================================================================
+
+/** 全屏错误占位：图标 + 标题 + 描述 + 重试按钮 */
+@Composable
+fun ErrorPlaceholder(
+    message: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 40.dp),
+        ) {
+            Icon(
+                imageVector = NextIcons.Priority,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                modifier = Modifier.size(56.dp),
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "加载失败",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(24.dp))
+            OutlinedButton(onClick = onRetry) {
+                Text("重试")
+            }
+        }
+    }
+}
+
+/** 内联错误横幅：图标 + 消息 + 重试，用于已有部分数据时的错误提示 */
+@Composable
+fun ErrorBanner(
+    message: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = NextIcons.Priority,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onRetry) {
+                Text("重试", color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
+    }
+}
+
+/** 空目录占位：文件夹图标 + 提示文字 */
+@Composable
+fun EmptyPlaceholder(
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                imageVector = NextIcons.FolderOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.size(56.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = "此目录为空",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

@@ -1,6 +1,5 @@
 package com.fluxplayer.app.settings.screens.about
 
-import android.content.ClipData
 import android.content.Context
 import android.os.Build
 import android.widget.Toast
@@ -30,14 +29,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,40 +43,27 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fluxplayer.app.core.common.extensions.appIcon
 import com.fluxplayer.app.core.ui.R
-import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
-import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.NextTopAppBar
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
-import kotlinx.coroutines.launch
 
-private const val GITHUB_URL = "https://github.com/anilbeesetti/nextplayer"
-private const val KOFI_URL = "https://ko-fi.com/anilbeesetti"
-private const val PAYPAL_URL = "https://paypal.me/AnilBeesetti"
-private const val UPI_ID = "anilbeesetti10@oksbi"
+private const val GITHUB_URL = "https://github.com/Ding-DaoDao/fluxplayer"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AboutPreferencesScreen(
-    onLibrariesClick: () -> Unit,
     onNavigateUp: () -> Unit,
 ) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
-    val clipboard = LocalClipboard.current
-    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -111,48 +95,7 @@ fun AboutPreferencesScreen(
                         context = context,
                     )
                 },
-                onLibrariesClick = onLibrariesClick,
             )
-            ListSectionTitle(text = stringResource(id = R.string.donate))
-            Column(
-                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-            ) {
-                ClickablePreferenceItem(
-                    title = stringResource(R.string.kofi),
-                    description = stringResource(R.string.support_the_developer_on, stringResource(R.string.kofi)),
-                    icon = ImageVector.vectorResource(R.drawable.ic_kofi),
-                    onClick = {
-                        uriHandler.openUriOrShowToast(
-                            uri = KOFI_URL,
-                            context = context,
-                        )
-                    },
-                    isFirstItem = true
-                )
-                ClickablePreferenceItem(
-                    title = stringResource(R.string.paypal),
-                    description = stringResource(R.string.support_the_developer_on, stringResource(R.string.paypal)),
-                    icon = ImageVector.vectorResource(R.drawable.ic_paypal),
-                    onClick = {
-                        uriHandler.openUriOrShowToast(
-                            uri = PAYPAL_URL,
-                            context = context,
-                        )
-                    },
-                )
-                ClickablePreferenceItem(
-                    title = stringResource(R.string.upi),
-                    description = UPI_ID,
-                    icon = ImageVector.vectorResource(R.drawable.ic_upi),
-                    onClick = {
-                        scope.launch {
-                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("text", UPI_ID)))
-                            Toast.makeText(context, "copied to clipboard", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    isLastItem = true,
-                )
-            }
         }
     }
 }
@@ -161,7 +104,6 @@ fun AboutPreferencesScreen(
 fun AboutApp(
     modifier: Modifier = Modifier,
     onGithubClick: () -> Unit,
-    onLibrariesClick: () -> Unit,
 ) {
     val context = LocalContext.current
     val appVersion = remember { context.appVersion() }
@@ -249,48 +191,26 @@ fun AboutApp(
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Button(
+            onClick = onGithubClick,
+            colors = ButtonDefaults.buttonColors(
+                contentColor = MaterialTheme.colorScheme.onTertiary,
+                disabledContentColor = MaterialTheme.colorScheme.onTertiary.copy(alpha = .12f),
+                containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f),
+                disabledContainerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = .12f),
+            ),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
         ) {
-            Button(
-                onClick = onLibrariesClick,
-                colors = ButtonDefaults.buttonColors(
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = .12f),
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                    disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = .12f),
-                ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .weight(1f),
-            ) {
-                Text(text = stringResource(R.string.libraries))
-            }
-            Button(
-                onClick = onGithubClick,
-                colors = ButtonDefaults.buttonColors(
-                    contentColor = MaterialTheme.colorScheme.onTertiary,
-                    disabledContentColor = MaterialTheme.colorScheme.onTertiary.copy(alpha = .12f),
-                    containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f),
-                    disabledContainerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = .12f),
-                ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .height(52.dp),
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_github),
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = stringResource(R.string.github))
-            }
+            Icon(
+                painter = painterResource(R.drawable.ic_github),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = stringResource(R.string.github))
         }
     }
 }

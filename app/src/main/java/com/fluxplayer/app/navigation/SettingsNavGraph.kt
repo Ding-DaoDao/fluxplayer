@@ -85,7 +85,6 @@ fun NavGraphBuilder.settingsNavGraph(
         )
         backupSettingsScreen(onNavigateUp = navController::navigateUp)
         aboutPreferencesScreen(
-            onLibrariesClick = navController::navigateToLibraries,
             onNavigateUp = navController::navigateUp,
         )
         librariesScreen(onNavigateUp = navController::navigateUp)

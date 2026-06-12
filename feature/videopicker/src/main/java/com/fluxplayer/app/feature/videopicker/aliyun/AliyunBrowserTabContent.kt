@@ -256,7 +256,9 @@ fun AliyunLoginScreen(
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
-                    text = statusText.ifEmpty { "正在加载阿里云盘登录页面..." },
+                    text = statusText.ifEmpty {
+                        if (autoOpenWebView) "正在尝试自动续期..." else "正在加载阿里云盘登录页面..."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
@@ -282,18 +284,25 @@ fun AliyunLoginScreen(
                     settings.setSupportMultipleWindows(false)
                     settings.allowFileAccess = false
                     settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                    CookieManager.getInstance().removeAllCookies(null)
+                    // 自动续期模式下不清除 Cookie，保留已有登录会话
+                    if (!autoOpenWebView) {
+                        CookieManager.getInstance().removeAllCookies(null)
+                    }
 
                     webViewClient = object : WebViewClient() {
                         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                             isLoading = true
-                            statusText = "正在加载..."
+                            statusText = if (autoOpenWebView) "正在检测登录状态..." else "正在加载..."
                         }
 
                         override fun onPageFinished(view: WebView, url: String) {
                             if (loginTriggered) return
                             isLoading = false
-                            statusText = "请在页面中完成登录（扫码或账号密码）"
+                            statusText = when {
+                                autoOpenWebView && url.contains("alipan.com/drive") -> "正在获取凭证..."
+                                autoOpenWebView -> "会话已过期，请在页面中完成登录（扫码或账号密码）"
+                                else -> "请在页面中完成登录（扫码或账号密码）"
+                            }
 
                             // 参考海阔视界：仅在登录成功跳转到 alipan.com/drive 后提取 token
                             if (!url.contains("alipan.com/drive")) return
@@ -331,7 +340,13 @@ fun AliyunLoginScreen(
                             }
                         }
                     }
-                    loadUrl("https://www.alipan.com/sign/in?spm=aliyundrive.index.0.0.7db16f60GgbJVZ")
+                    // 自动续期模式：先尝试 /drive 页面（利用 WebView 已有会话自动提取 token）
+                    // 首次登录模式：直接跳到登录页
+                    if (autoOpenWebView) {
+                        loadUrl("https://www.alipan.com/drive")
+                    } else {
+                        loadUrl("https://www.alipan.com/sign/in?spm=aliyundrive.index.0.0.7db16f60GgbJVZ")
+                    }
                 }
             },
             modifier = Modifier.fillMaxSize()

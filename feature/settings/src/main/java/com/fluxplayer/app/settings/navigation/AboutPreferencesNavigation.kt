@@ -20,12 +20,10 @@ fun NavController.navigateToLibraries(navOptions: NavOptions? = navOptions { lau
 }
 
 fun NavGraphBuilder.aboutPreferencesScreen(
-    onLibrariesClick: () -> Unit,
     onNavigateUp: () -> Unit,
 ) {
     composable(route = aboutPreferencesNavigationRoute) {
         AboutPreferencesScreen(
-            onLibrariesClick = onLibrariesClick,
             onNavigateUp = onNavigateUp,
         )
     }

@@ -55,15 +55,22 @@ class AliyunApiClient(
 
         val resp = executeRequestAndGetResponse(builder.build())
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
+
+        // 优先检查 token 是否过期（HTTP 401 时 respBody 也包含 AccessTokenInvalid，
+        // 必须在 isSuccessful 判断之前捕获，否则会被通用 IllegalStateException 吞掉）
+        val code = try {
+            JSONObject(respBody).optString("code", "")
+        } catch (_: Exception) { "" }
+        if (code == "AccessTokenInvalid") {
+            throw AliyunTokenExpiredException("AccessTokenInvalid")
+        }
+
         if (!resp.isSuccessful) {
             throw IllegalStateException("HTTP ${resp.code} from $url: $respBody")
         }
+
         AliyunAuthProvider.isActive = true
-        val json = JSONObject(respBody)
-        if (json.optString("code", "") == "AccessTokenInvalid") {
-            throw AliyunTokenExpiredException("AccessTokenInvalid")
-        }
-        return json
+        return JSONObject(respBody)
     }
 
     private fun buildListBody(

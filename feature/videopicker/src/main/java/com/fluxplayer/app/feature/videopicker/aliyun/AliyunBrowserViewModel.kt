@@ -77,8 +77,12 @@ class AliyunBrowserViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             playbackHistoryRepository.getHistoryFlow().collect { history ->
-                val historyUris = history.map { it.uriString }.toSet()
-                _uiState.update { it.copy(playedUriSet = historyUris) }
+                val latestPerDir = history
+                    .filter { it.parentPath != null }
+                    .groupBy { it.parentPath!! }
+                    .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
+                    .values.map { it.uriString }.toSet()
+                _uiState.update { it.copy(playedUriSet = latestPerDir) }
             }
         }
     }
@@ -203,17 +207,42 @@ class AliyunBrowserViewModel @Inject constructor(
             apiClient.setSignature(savedSignature)
         }
 
-        // 跳过 token 验证，直接加载目录（loadDirectory 内已处理 token 失效 → triggerReLogin）
         AliyunAuthProvider.authorization = auth
         AliyunAuthProvider.isActive = true
         CloudPlayHeaders.registerSuffix(".alipan.com") { AliyunAuthProvider.getPlayHeaders() }
         CloudPlayHeaders.registerSuffix("aliyundrive.net") { AliyunAuthProvider.getPlayHeaders() }
+
         updateUiState { it.copy(isLoggedIn = true, isLoading = true) }
         syncStackTop { it.copy(isLoading = true, error = null) }
-        // 从磁盘缓存预填根目录，加速子目录导航
-        CloudDirectoryCache.get(getApplication(), "alipan", "root")?.let { directoryCache["root"] = it }
-        viewModelScope.launch { refreshDriveInfo() }
-        loadDirectory("root")
+
+        // 先验证 token 有效性，过期则通过 WebView 自动续期
+        viewModelScope.launch {
+            val verifyResult = withTimeoutOrNull(15_000L) { apiClient.verifyToken() }
+            when {
+                verifyResult == null -> {
+                    // 网络超时，保留登录状态，让用户手动重试
+                    updateUiState { it.copy(isLoading = false, error = "连接超时，请检查网络后重试") }
+                    syncStackTop { it.copy(isLoading = false, error = "连接超时，请检查网络后重试") }
+                }
+                verifyResult.isSuccess -> {
+                    // Token 有效，正常加载
+                    CloudDirectoryCache.get(getApplication(), "alipan", "root")?.let { directoryCache["root"] = it }
+                    refreshDriveInfo()
+                    loadDirectory("root")
+                }
+                verifyResult.isFailure -> {
+                    val e = verifyResult.exceptionOrNull()
+                    if (e is AliyunTokenExpiredException) {
+                        // Token 过期 → 触发 WebView 自动续期（不清除 Cookie，保留 WebView 会话）
+                        triggerReLogin()
+                    } else {
+                        val msg = e?.message ?: "未知错误"
+                        updateUiState { it.copy(isLoading = false, error = "验证失败: $msg") }
+                        syncStackTop { it.copy(isLoading = false, error = "验证失败: $msg") }
+                    }
+                }
+            }
+        }
     }
 
     // endregion
@@ -298,17 +327,13 @@ class AliyunBrowserViewModel @Inject constructor(
         prefs.edit().clear().apply()
         AliyunAuthProvider.clear()
         directoryCache.clear()
-        try {
-            val cookieManager = android.webkit.CookieManager.getInstance()
-            cookieManager.removeAllCookies(null)
-            cookieManager.flush()
-            android.webkit.WebStorage.getInstance().deleteAllData()
-        } catch (_: Exception) {}
+        // 不清理 Cookie/WebStorage！保留 WebView 中的登录会话，
+        // 以便 AliyunLoginScreen 在 autoOpenWebView 模式下自动跳转到 /drive 提取新 token
         updateUiState {
             AliyunBrowserUiState(
                 isLoggedIn = false,
                 reLoginRequired = true,
-                error = "登录已过期，请重新登录"
+                error = "登录已过期，正在尝试自动续期..."
             )
         }
     }

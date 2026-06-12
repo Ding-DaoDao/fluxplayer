@@ -16,6 +16,7 @@ data class Pan123BrowserUiState(
     val hasMore: Boolean = true,
     val currentPage: Int = 1,
     val isLoggedIn: Boolean = false,
+    val initializing: Boolean = true,
     val error: String? = null,
     val playedUriStrings: Set<String> = emptySet(),
     val scrollTargetIndex: Int = -1,

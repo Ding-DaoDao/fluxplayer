@@ -33,8 +33,14 @@ class HistoryViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             playbackHistoryRepository.getHistoryFlow().collect { historyList ->
+                // 按 parentPath 分组，每组只保留最新一条
+                val latestPerDir = historyList
+                    .filter { it.parentPath != null }
+                    .groupBy { it.parentPath!! }
+                    .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
+                    .values.sortedByDescending { it.lastPlayedTime }
                 _uiState.value = HistoryUiState(
-                    historyList = historyList,
+                    historyList = latestPerDir,
                     isLoading = false,
                 )
             }
