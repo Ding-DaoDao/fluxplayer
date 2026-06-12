@@ -9,13 +9,13 @@ plugins {
 }
 
 android {
-    namespace = "dev.anilbeesetti.nextplayer"
+    namespace = "com.fluxplayer.app"
 
     compileSdk = libs.versions.android.compileSdk.get().toInt()
     defaultConfig {
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        applicationId = "dev.anilbeesetti.fluxplayer"
+        applicationId = "com.fluxplayer.app"
         versionCode = 56
         versionName = "0.16.3"
     }

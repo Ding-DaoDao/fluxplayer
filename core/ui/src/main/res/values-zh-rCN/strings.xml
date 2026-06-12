@@ -161,6 +161,11 @@
     <string name="resolution">分辨率</string>
     <string name="long_press_gesture_desc">长按以 %.1f 倍速播放</string>
     <string name="long_press_gesture">长按手势</string>
+    <string name="dynamic_long_press_speed">动态倍速</string>
+    <string name="dynamic_long_press_speed_desc">长按倍速根据当前播放速度动态变化</string>
+    <string name="dynamic_speed_multiplier">倍率</string>
+    <string name="custom_speed_multiplier">自定义倍率</string>
+    <string name="custom_speed">自定义</string>
     <string name="require_audio_focus">获取音频焦点</string>
     <string name="fast_playback_speed">%.1f 倍速</string>
     <string name="require_audio_focus_desc">此播放器播放视频时暂停其他播放器，反之亦然</string>
@@ -304,6 +309,8 @@
     <string name="reset_volume_gesture_sensitivity">重置音量手势灵敏度</string>
     <string name="brightness_gesture_sensitivity">亮度手势灵敏度</string>
     <string name="reset_brightness_gesture_sensitivity">重置亮度手势灵敏度</string>
+    <string name="haptic_feedback_strength">震动反馈强度</string>
+    <string name="reset_haptic_feedback_strength">重置震动强度</string>
     <string name="webdav">WebDAV</string>
     <string name="webdav_description">浏览和播放来自 WebDAV 服务器的视频</string>
     <string name="add_webdav_server">添加 WebDAV 服务器</string>

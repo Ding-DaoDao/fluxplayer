@@ -9,7 +9,7 @@ plugins {
 }
 
 android {
-    namespace = "dev.anilbeesetti.nextplayer.feature.videopicker"
+    namespace = "com.fluxplayer.app.feature.videopicker"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
@@ -57,6 +57,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtimeCompose)
 
     implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
     implementation(libs.accompanist.permissions)
 
     // Hilt

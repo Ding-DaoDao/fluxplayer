@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "dev.anilbeesetti.nextplayer.core.datastore"
+    namespace = "com.fluxplayer.app.core.datastore"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
