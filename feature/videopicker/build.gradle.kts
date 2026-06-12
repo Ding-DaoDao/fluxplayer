@@ -59,6 +59,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.accompanist.permissions)
+    implementation(libs.reorderable)
 
     // Hilt
     implementation(libs.hilt.android)

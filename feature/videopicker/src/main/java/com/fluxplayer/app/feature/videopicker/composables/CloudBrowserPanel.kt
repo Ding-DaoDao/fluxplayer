@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -24,6 +25,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -104,6 +106,7 @@ fun <T> CloudBrowserPanel(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
+        var isNearBottom by remember { mutableStateOf(false) }
         Column(modifier = Modifier.fillMaxSize()) {
             if (!isConfigured) {
                 loginContent()
@@ -178,6 +181,7 @@ fun <T> CloudBrowserPanel(
                                     menuContent = menuContent,
                                     onRefresh = onRefresh,
                                     onLoadMore = onLoadMore,
+                                    onNearBottomChanged = { isNearBottom = it },
                                     playedUriSet = playedUriSet,
                                     cloudProviderKey = cloudProviderKey,
                                 )
@@ -217,6 +221,7 @@ fun <T> CloudBrowserPanel(
                                             if (lastVisible >= total - 5 && total > 0) {
                                                 onLoadMore()
                                             }
+                                            isNearBottom = total > 0 && lastVisible >= total - 3
                                         }
                                 }
                                 LazyColumn(
@@ -275,11 +280,17 @@ fun <T> CloudBrowserPanel(
 
         // 新建文件夹 FAB
         if (isConfigured && onCreateFolder != null) {
+            val fabAlpha by animateFloatAsState(
+                targetValue = if (isNearBottom) 0f else 1f,
+                animationSpec = tween(300),
+                label = "fabAlpha",
+            )
             FloatingActionButton(
                 onClick = onCreateFolder,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp),
+                    .padding(16.dp)
+                    .alpha(fabAlpha),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             ) {
@@ -419,6 +430,7 @@ private fun DirectoryStackContent(
     menuContent: @Composable ((index: Int, onDismiss: () -> Unit) -> Unit)?,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
+    onNearBottomChanged: (Boolean) -> Unit = {},
     playedUriSet: Set<String> = emptySet(),
     cloudProviderKey: String = "",
 ) {
@@ -430,6 +442,7 @@ private fun DirectoryStackContent(
                 if (lastVisible >= total - 5 && total > 0) {
                     onLoadMore()
                 }
+                onNearBottomChanged(total > 0 && lastVisible >= total - 3)
             }
     }
     PullToRefreshBox(

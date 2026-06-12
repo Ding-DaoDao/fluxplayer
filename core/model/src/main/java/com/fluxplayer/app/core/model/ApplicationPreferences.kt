@@ -35,6 +35,9 @@ data class ApplicationPreferences(
     val showVideosTab: Boolean = true,
     val showBrowseTab: Boolean = true,
     val showHistoryTab: Boolean = true,
+
+    // 浏览页 provider 排序（空列表表示使用默认顺序）
+    val providerOrder: List<String> = emptyList(),
 ) {
 
     companion object {

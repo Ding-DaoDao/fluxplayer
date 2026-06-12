@@ -21,7 +21,7 @@ data class BackupData(
     val yun139Config: Yun139BackupConfig? = null,
 ) {
     companion object {
-        const val CURRENT_VERSION = 1
+        const val CURRENT_VERSION = 2
     }
 }
 
@@ -39,6 +39,7 @@ data class AlipanBackupConfig(
     val refreshToken: String? = null,
     val deviceId: String? = null,
     val signature: String? = null,
+    val cookies: String? = null,
 )
 
 @Serializable

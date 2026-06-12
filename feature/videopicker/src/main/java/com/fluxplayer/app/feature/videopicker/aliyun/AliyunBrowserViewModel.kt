@@ -118,6 +118,14 @@ class AliyunBrowserViewModel @Inject constructor(
                         .putString("device_id", apiClient.getDeviceId())
                         .putString("signature", apiClient.getSignature())
                         .apply()
+                    // 将 WebView Cookie 持久化到 SharedPreferences，供备份系统读取
+                    try {
+                        val cookieManager = android.webkit.CookieManager.getInstance()
+                        val cookies = cookieManager.getCookie("https://www.alipan.com")
+                        if (!cookies.isNullOrBlank()) {
+                            prefs.edit().putString("cookies", cookies).apply()
+                        }
+                    } catch (_: Exception) {}
 
                     val driveOptions = if (driveInfo != null) buildDriveOptionsFromInfo(driveInfo)
                         else emptyList()
@@ -211,6 +219,19 @@ class AliyunBrowserViewModel @Inject constructor(
         AliyunAuthProvider.isActive = true
         CloudPlayHeaders.registerSuffix(".alipan.com") { AliyunAuthProvider.getPlayHeaders() }
         CloudPlayHeaders.registerSuffix("aliyundrive.net") { AliyunAuthProvider.getPlayHeaders() }
+
+        // 恢复 WebView Cookie（备份恢复时 CookieManager 可能为空，从 SharedPreferences 补回）
+        val savedCookies = prefs.getString("cookies", null)
+        if (!savedCookies.isNullOrBlank()) {
+            try {
+                val cookieManager = android.webkit.CookieManager.getInstance()
+                val existing = cookieManager.getCookie("https://www.alipan.com")
+                if (existing.isNullOrBlank()) {
+                    cookieManager.setCookie("https://www.alipan.com", savedCookies)
+                    cookieManager.flush()
+                }
+            } catch (_: Exception) {}
+        }
 
         updateUiState { it.copy(isLoggedIn = true, isLoading = true) }
         syncStackTop { it.copy(isLoading = true, error = null) }

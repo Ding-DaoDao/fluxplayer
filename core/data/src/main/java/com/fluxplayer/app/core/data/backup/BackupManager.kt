@@ -201,12 +201,19 @@ class BackupManager @Inject constructor(
         val prefs = context.getSharedPreferences(ALIPAN_PREFS, Context.MODE_PRIVATE)
         val auth = prefs.getString("authorization", null)
         if (auth.isNullOrBlank()) return null
+        // 读取 WebView Cookie（用于备份后恢复时自动续期）
+        val cookies = try {
+            android.webkit.CookieManager.getInstance().getCookie("https://www.alipan.com")
+        } catch (_: Exception) {
+            prefs.getString("cookies", null)
+        }
         return AlipanBackupConfig(
             authorization = auth,
             driveId = prefs.getString("drive_id", null),
             refreshToken = prefs.getString("refresh_token", null),
             deviceId = prefs.getString("device_id", null),
             signature = prefs.getString("signature", null),
+            cookies = cookies,
         )
     }
 
@@ -218,7 +225,16 @@ class BackupManager @Inject constructor(
             config.refreshToken?.let { putString("refresh_token", it) }
             config.deviceId?.let { putString("device_id", it) }
             config.signature?.let { putString("signature", it) }
+            config.cookies?.let { putString("cookies", it) }
         }.apply()
+        // 恢复 WebView Cookie，以便 token 过期时通过 WebView 会话自动续期获取全权限 token
+        if (!config.cookies.isNullOrBlank()) {
+            try {
+                val cookieManager = android.webkit.CookieManager.getInstance()
+                cookieManager.setCookie("https://www.alipan.com", config.cookies)
+                cookieManager.flush()
+            } catch (_: Exception) {}
+        }
         // 同步内存中的 AuthProvider
         if (!config.authorization.isNullOrBlank()) {
             AliyunAuthProvider.authorization = config.authorization ?: ""

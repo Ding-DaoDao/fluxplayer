@@ -112,6 +112,15 @@ class MediaPickerViewModel @Inject constructor(
             is MediaPickerUiEvent.RenameVideo -> renameVideo(event.uri, event.to)
             is MediaPickerUiEvent.AddToSync -> addToMediaInfoSynchronizer(event.uri)
             is MediaPickerUiEvent.UpdateMenu -> updateMenu(event.preferences)
+            is MediaPickerUiEvent.ReorderProviders -> reorderProviders(event.order)
+        }
+    }
+
+    private fun reorderProviders(order: List<String>) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences { prefs ->
+                prefs.copy(providerOrder = order)
+            }
         }
     }
 
@@ -182,4 +191,5 @@ sealed interface MediaPickerUiEvent {
     data class RenameVideo(val uri: Uri, val to: String) : MediaPickerUiEvent
     data class AddToSync(val uri: Uri) : MediaPickerUiEvent
     data class UpdateMenu(val preferences: ApplicationPreferences) : MediaPickerUiEvent
+    data class ReorderProviders(val order: List<String>) : MediaPickerUiEvent
 }

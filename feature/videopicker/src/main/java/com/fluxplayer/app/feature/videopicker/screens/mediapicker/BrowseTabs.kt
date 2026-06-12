@@ -14,20 +14,24 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.feature.videopicker.aliyun.AliyunBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.cloud189.C189BrowserTabContent
 import com.fluxplayer.app.feature.videopicker.openlist.OpenListBrowserTabContent
@@ -36,6 +40,8 @@ import com.fluxplayer.app.feature.videopicker.quark.QuarkBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.screens.webdav.WebDavBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.yun139.Yun139BrowserTabContent
 import com.fluxplayer.app.core.ui.R as UiR
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 data class BrowseProvider(
     val id: String,
@@ -44,7 +50,7 @@ data class BrowseProvider(
     val iconRes: Int,
 )
 
-internal val providers = listOf(
+private val defaultProviders = listOf(
     BrowseProvider("webdav", "WebDAV", "浏览远程服务器文件", UiR.drawable.ic_provider_webdav),
     BrowseProvider("openlist", "OpenList", "浏览本地文件服务器", UiR.drawable.ic_provider_openlist),
     BrowseProvider("alipan", "阿里云盘", "阿里云盘文件浏览", UiR.drawable.ic_provider_alipan),
@@ -55,8 +61,16 @@ internal val providers = listOf(
     BrowseProvider("uc", "UC网盘", "UC网盘文件浏览", UiR.drawable.ic_provider_uc),
 )
 
+private fun orderedProviders(providerOrder: List<String>): List<BrowseProvider> {
+    if (providerOrder.isEmpty()) return defaultProviders
+    val map = defaultProviders.associateBy { it.id }
+    val ordered = providerOrder.mapNotNull { map[it] }
+    val missing = defaultProviders.filter { it.id !in providerOrder }
+    return ordered + missing
+}
+
 /**
- * "浏览"页 — 垂直列表，每行一个平台（图标 + 名称 + 描述），点击进入对应内容
+ * "浏览"页 — 可拖拽排序的垂直列表，每行一个平台（图标 + 名称 + 描述），点击进入对应内容
  */
 @Composable
 fun BrowseTabs(
@@ -66,11 +80,12 @@ fun BrowseTabs(
     selectedProvider: String?,
     onProviderSelected: (String?) -> Unit,
     onProviderLogoutChanged: ((() -> Unit)?) -> Unit,
+    preferences: ApplicationPreferences = ApplicationPreferences(),
+    onProviderReordered: (List<String>) -> Unit = {},
     navigateToDirParam: Pair<String, String>? = null,
     onNavigateToDirConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    // 返回键：在平台选择列表时不做处理；进入云盘后在根目录时返回列表
     BackHandler(enabled = selectedProvider != null) {
         onProviderSelected(null)
     }
@@ -93,54 +108,65 @@ fun BrowseTabs(
         label = "BrowseTransition",
     ) { provider ->
         if (provider == null) {
-            // 平台选择列表
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            var items by remember { mutableStateOf(orderedProviders(preferences.providerOrder)) }
+            val hapticFeedback = LocalHapticFeedback.current
+            val lazyListState = rememberLazyListState()
+            val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+                val newList = items.toMutableList().apply { add(to.index, removeAt(from.index)) }
+                items = newList
+                onProviderReordered(newList.map { it.id })
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+            }
+
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = lazyListState,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                providers.forEach { item ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onProviderSelected(item.id) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                    ) {
-                        Row(
+                items(items = items, key = { it.id }) { item ->
+                    ReorderableItem(state = reorderableState, key = item.id) {
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                                .draggableHandle(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                         ) {
-                            Image(
-                                painter = painterResource(item.iconRes),
-                                contentDescription = item.name,
-                                modifier = Modifier.size(48.dp),
-                                contentScale = ContentScale.Fit,
-                            )
-                            Spacer(Modifier.width(14.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    text = item.name,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Medium,
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onProviderSelected(item.id) }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Image(
+                                    painter = painterResource(item.iconRes),
+                                    contentDescription = item.name,
+                                    modifier = Modifier.size(48.dp),
+                                    contentScale = ContentScale.Fit,
                                 )
-                                Text(
-                                    text = item.desc,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                Spacer(Modifier.width(14.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = item.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                    Text(
+                                        text = item.desc,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp),
                                 )
                             }
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp),
-                            )
                         }
                     }
                 }

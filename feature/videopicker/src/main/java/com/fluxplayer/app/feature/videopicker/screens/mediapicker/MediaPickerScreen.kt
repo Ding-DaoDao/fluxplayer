@@ -542,6 +542,8 @@ internal fun MediaPickerScreen(
                         selectedProvider = selectedProvider,
                         onProviderSelected = { selectedProvider = it },
                         onProviderLogoutChanged = { providerLogout = it },
+                        preferences = uiState.preferences,
+                        onProviderReordered = { onEvent(MediaPickerUiEvent.ReorderProviders(it)) },
                         navigateToDirParam = navigateToDirParam,
                         onNavigateToDirConsumed = { navigateToDirParam = null },
                         modifier = Modifier
