@@ -19,6 +19,7 @@ import com.fluxplayer.app.feature.videopicker.composables.CloudBrowserPanel as S
 import com.fluxplayer.app.feature.videopicker.composables.ContextActionMenu
 import com.fluxplayer.app.feature.videopicker.composables.DownloadNotificationBar
 import com.fluxplayer.app.feature.videopicker.composables.FolderPickerDialog
+import com.fluxplayer.app.feature.videopicker.composables.ImageViewerScreen
 import com.fluxplayer.app.feature.videopicker.composables.SortOption
 import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuContent
 
@@ -57,6 +58,7 @@ fun OpenListBrowserTabContent(
     val context = LocalContext.current
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
+    var imageViewerIndex by remember { mutableIntStateOf(-1) }
 
     val currentSortKey = remember(state.orderBy, state.orderDirection) {
         val dir = state.orderDirection.uppercase()
@@ -91,6 +93,8 @@ fun OpenListBrowserTabContent(
         onItemClick = { item ->
             if (item.isDirectory) {
                 viewModel.navigateToDir(state.items.indexOf(item))
+            } else if (item.isImage) {
+                imageViewerIndex = state.items.indexOf(item)
             } else if (item.isVideo) {
                 onCloudVideoClick(
                     item = item,
@@ -180,6 +184,18 @@ fun OpenListBrowserTabContent(
                 onOpenFile = { path -> viewModel.openDownloadedFile(path) },
                 onDismiss = { viewModel.dismissDownloadProgress() },
                 modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+            )
+        }
+
+        // 图片全屏查看器
+        if (imageViewerIndex >= 0) {
+            val allImages = state.items.filter { it.isImage }
+            val clickedItem = state.items.getOrNull(imageViewerIndex)
+            ImageViewerScreen(
+                images = allImages,
+                initialIndex = allImages.indexOf(clickedItem).coerceAtLeast(0),
+                imageResolver = { viewModel.resolveImageUrl(it) },
+                onClose = { imageViewerIndex = -1 },
             )
         }
     }

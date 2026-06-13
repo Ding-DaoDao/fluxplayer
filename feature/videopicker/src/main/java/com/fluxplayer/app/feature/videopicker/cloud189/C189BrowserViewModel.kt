@@ -647,6 +647,11 @@ class C189BrowserViewModel @Inject constructor(
         return cloudUriResolver.resolve(CloudUriScheme.buildCloudUri("cloud189", item.path))
     }
 
+    suspend fun resolveImageUrl(item: WebDavResource): Pair<String, Map<String, String>>? {
+        val url = apiClient.getDownloadUrl(item.path).getOrNull() ?: return null
+        return url to C189AuthProvider.getPlayHeaders()
+    }
+
     // endregion
 
     // region ==================== 下载 ====================

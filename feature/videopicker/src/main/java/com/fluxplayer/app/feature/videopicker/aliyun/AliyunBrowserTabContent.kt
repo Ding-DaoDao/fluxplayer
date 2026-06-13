@@ -26,6 +26,7 @@ import com.fluxplayer.app.feature.videopicker.composables.ContextActionMenu
 import com.fluxplayer.app.feature.videopicker.composables.CreateFolderDialog
 import com.fluxplayer.app.feature.videopicker.composables.DownloadNotificationBar
 import com.fluxplayer.app.feature.videopicker.composables.FolderPickerDialog
+import com.fluxplayer.app.feature.videopicker.composables.ImageViewerScreen
 import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
 import com.fluxplayer.app.feature.videopicker.composables.SortOption
 import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuContent
@@ -73,6 +74,7 @@ fun AliyunBrowserTabContent(
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var showDriveMenu by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
+    var imageViewerIndex by remember { mutableIntStateOf(-1) }
 
     val currentSortKey = remember(state.orderBy) {
         when (state.orderBy) {
@@ -98,15 +100,20 @@ fun AliyunBrowserTabContent(
         reLoginRequired = state.reLoginRequired,
         navigationStack = navigationStack,
         onItemClick = { item ->
-            if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
-            else onCloudVideoClick(
-                item = item,
-                allItems = state.items,
-                resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("alipan", it.path) },
-                onPlayVideos = onPlayVideos,
-                scope = scope,
-            )
+            if (item.isDirectory) {
+                viewModel.navigateToDir(state.items.indexOf(item))
+            } else if (item.isImage) {
+                imageViewerIndex = state.items.indexOf(item)
+            } else {
+                onCloudVideoClick(
+                    item = item,
+                    allItems = state.items,
+                    resolveUrl = { viewModel.resolveVideoUri(item) },
+                    buildPlaylistUri = { CloudUriScheme.buildCloudUri("alipan", it.path) },
+                    onPlayVideos = onPlayVideos,
+                    scope = scope,
+                )
+            }
         },
         onItemMoreClick = { index -> contextMenuIndex = index },
         expandedMenuIndex = contextMenuIndex,
@@ -250,6 +257,18 @@ fun AliyunBrowserTabContent(
                 onOpenFile = { path -> viewModel.openDownloadedFile(path) },
                 onDismiss = { viewModel.dismissDownloadProgress() },
                 modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+            )
+        }
+
+        // 图片全屏查看器
+        if (imageViewerIndex >= 0) {
+            val allImages = state.items.filter { it.isImage }
+            val clickedItem = state.items.getOrNull(imageViewerIndex)
+            ImageViewerScreen(
+                images = allImages,
+                initialIndex = allImages.indexOf(clickedItem).coerceAtLeast(0),
+                imageResolver = { viewModel.resolveImageUrl(it) },
+                onClose = { imageViewerIndex = -1 },
             )
         }
     }

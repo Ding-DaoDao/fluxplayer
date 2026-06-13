@@ -557,6 +557,11 @@ class QuarkBrowserViewModel @Inject constructor(
         return cloudUriResolver.resolve(CloudUriScheme.buildCloudUri(driveLabel, item.path))
     }
 
+    suspend fun resolveImageUrl(item: WebDavResource): Pair<String, Map<String, String>>? {
+        val url = apiClient.getDownloadUrl(item.path).getOrNull() ?: return null
+        return url to QuarkAuthProvider.getPlayHeaders()
+    }
+
     // endregion
 
     // region ==================== 下载 ====================

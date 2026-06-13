@@ -131,6 +131,19 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
     // endregion
 
+    // region ==================== 图片 URL 解析 ====================
+
+    /**
+     * 获取图片原图 URL + auth headers，供 ImageViewerScreen 使用。
+     * 内部调用子类的 [doGetDownloadInfo]。
+     */
+    suspend fun resolveImageUrl(res: WebDavResource): Pair<String, Map<String, String>>? {
+        val info = doGetDownloadInfo(res).getOrNull() ?: return null
+        return info.url to info.headers
+    }
+
+    // endregion
+
     // region ==================== 下载信息 ====================
 
     data class DownloadInfo(

@@ -625,6 +625,18 @@ class WebDavBrowserViewModel @Inject constructor(
 
     // endregion
 
+    // region ==================== 图片 URL 解析 ====================
+
+    fun resolveImageUrl(item: WebDavResource): Pair<String, Map<String, String>>? {
+        val server = _extraState.value.selectedServer ?: return null
+        val baseUrl = server.normalizedUrl.trimEnd('/')
+        val fullUrl = if (item.path.startsWith("/")) "$baseUrl${item.path}" else "$baseUrl/${item.path}"
+        val headers = mapOf("Authorization" to buildBasicAuth(server.username, server.password))
+        return fullUrl to headers
+    }
+
+    // endregion
+
     // region ==================== 下载 ====================
 
     fun downloadFile(index: Int) {

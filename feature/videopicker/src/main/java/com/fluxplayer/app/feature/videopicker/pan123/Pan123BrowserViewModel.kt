@@ -614,6 +614,14 @@ class Pan123BrowserViewModel @Inject constructor(
         return cloudUriResolver.resolve(CloudUriScheme.buildCloudUri("pan123", item.path))
     }
 
+    suspend fun resolveImageUrl(item: WebDavResource): Pair<String, Map<String, String>>? {
+        val fileItem = cachedFileItems.find { it.fileId == item.path }
+        val url = fileItem?.downloadUrl?.ifBlank { null }
+            ?: fileItem?.let { apiClient.getFileDownloadInfo(it).getOrNull()?.url }
+            ?: return null
+        return url to Pan123AuthProvider.getPlayHeaders()
+    }
+
     // endregion
 
     // region ==================== 下载 ====================

@@ -593,6 +593,11 @@ class Yun139BrowserViewModel @Inject constructor(
         return cloudUriResolver.resolve(CloudUriScheme.buildCloudUri("yun139", item.path))
     }
 
+    suspend fun resolveImageUrl(item: WebDavResource): Pair<String, Map<String, String>>? {
+        val url = apiClient.getDownloadUrl(item.path, item.name).getOrNull() ?: return null
+        return url to Yun139AuthProvider.getPlayHeaders()
+    }
+
     // endregion
 
     // region ==================== 下载 ====================
