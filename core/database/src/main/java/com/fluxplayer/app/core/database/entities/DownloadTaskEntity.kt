@@ -12,6 +12,8 @@ data class DownloadTaskEntity(
     val fileSize: Long,
     val downloadedBytes: Long = 0L,
     val status: DownloadStatus = DownloadStatus.PENDING,
+    val provider: String = "",
+    val filePath: String? = null,
     val createdAt: Long,
     val completedAt: Long? = null,
 )

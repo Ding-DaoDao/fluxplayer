@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.ApplicationPreferences
+import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.model.ThemeConfig
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +41,15 @@ class AppearancePreferencesViewModel @Inject constructor(
             is AppearancePreferencesEvent.UpdateThemeConfig -> updateThemeConfig(event.themeConfig)
             AppearancePreferencesEvent.ToggleUseDynamicColors -> toggleUseDynamicColors()
             AppearancePreferencesEvent.ToggleUseHighContrastDarkTheme -> toggleUseHighContrastDarkTheme()
+            AppearancePreferencesEvent.ToggleUseLiquidGlass -> toggleUseLiquidGlass()
+            AppearancePreferencesEvent.ToggleUseFloatingBottomBar -> toggleUseFloatingBottomBar()
+            AppearancePreferencesEvent.ToggleEnableBlur -> toggleEnableBlur()
+            AppearancePreferencesEvent.ToggleEnableProgressiveBlur -> toggleEnableProgressiveBlur()
+            is AppearancePreferencesEvent.UpdateTopBarBlurRadius -> updateTopBarBlurRadius(event.value)
+            is AppearancePreferencesEvent.UpdateTopBarBlurAlpha -> updateTopBarBlurAlpha(event.value)
+            is AppearancePreferencesEvent.UpdateBottomBarBlurRadius -> updateBottomBarBlurRadius(event.value)
+            is AppearancePreferencesEvent.UpdateBottomBarBlurAlpha -> updateBottomBarBlurAlpha(event.value)
+            is AppearancePreferencesEvent.UpdateComposeEngine -> updateComposeEngine(event.composeEngine)
         }
     }
 
@@ -82,6 +92,78 @@ class AppearancePreferencesViewModel @Inject constructor(
             }
         }
     }
+
+    private fun toggleUseLiquidGlass() {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(useLiquidGlass = !it.useLiquidGlass)
+            }
+        }
+    }
+
+    private fun toggleUseFloatingBottomBar() {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(useFloatingBottomBar = !it.useFloatingBottomBar)
+            }
+        }
+    }
+
+    private fun toggleEnableBlur() {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(enableBlur = !it.enableBlur)
+            }
+        }
+    }
+
+    private fun toggleEnableProgressiveBlur() {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(enableProgressiveBlur = !it.enableProgressiveBlur)
+            }
+        }
+    }
+
+    private fun updateTopBarBlurRadius(value: Int) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(topBarBlurRadius = value.coerceIn(0, 50))
+            }
+        }
+    }
+
+    private fun updateTopBarBlurAlpha(value: Int) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(topBarBlurAlpha = value.coerceIn(0, 100))
+            }
+        }
+    }
+
+    private fun updateBottomBarBlurRadius(value: Int) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(bottomBarBlurRadius = value.coerceIn(0, 50))
+            }
+        }
+    }
+
+    private fun updateBottomBarBlurAlpha(value: Int) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(bottomBarBlurAlpha = value.coerceIn(0, 100))
+            }
+        }
+    }
+
+    private fun updateComposeEngine(composeEngine: ComposeEngine) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(composeEngine = composeEngine)
+            }
+        }
+    }
 }
 
 @Stable
@@ -96,8 +178,18 @@ sealed interface AppearancePreferencesEvent {
     data class UpdateThemeConfig(val themeConfig: ThemeConfig) : AppearancePreferencesEvent
     data object ToggleUseDynamicColors : AppearancePreferencesEvent
     data object ToggleUseHighContrastDarkTheme : AppearancePreferencesEvent
+    data object ToggleUseLiquidGlass : AppearancePreferencesEvent
+    data object ToggleUseFloatingBottomBar : AppearancePreferencesEvent
+    data object ToggleEnableBlur : AppearancePreferencesEvent
+    data object ToggleEnableProgressiveBlur : AppearancePreferencesEvent
+    data class UpdateTopBarBlurRadius(val value: Int) : AppearancePreferencesEvent
+    data class UpdateTopBarBlurAlpha(val value: Int) : AppearancePreferencesEvent
+    data class UpdateBottomBarBlurRadius(val value: Int) : AppearancePreferencesEvent
+    data class UpdateBottomBarBlurAlpha(val value: Int) : AppearancePreferencesEvent
+    data class UpdateComposeEngine(val composeEngine: ComposeEngine) : AppearancePreferencesEvent
 }
 
 sealed interface AppearancePreferenceDialog {
     data object Theme : AppearancePreferenceDialog
+    data object ComposeEngine : AppearancePreferenceDialog
 }

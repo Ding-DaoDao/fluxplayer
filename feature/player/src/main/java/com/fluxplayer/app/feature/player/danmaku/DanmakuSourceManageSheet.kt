@@ -21,8 +21,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import com.fluxplayer.app.core.ui.components.FluxSwitch
+import com.fluxplayer.app.core.ui.components.FluxText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -81,7 +82,7 @@ fun DanmakuSourceManageSheet(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
+                FluxText(
                     text = "弹幕源管理",
                     style = MaterialTheme.typography.headlineSmall,
                     color = Color.White,
@@ -93,7 +94,7 @@ fun DanmakuSourceManageSheet(
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A0FF)),
                         shape = RoundedCornerShape(8.dp),
                     ) {
-                        Text("添加", color = Color.White)
+                        FluxText("添加", color = Color.White)
                     }
                 }
             }
@@ -154,7 +155,7 @@ private fun AddSourceForm(
             value = name,
             onValueChange = { name = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("名称", color = Color.White.copy(alpha = 0.5f)) },
+            placeholder = { FluxText("名称", color = Color.White.copy(alpha = 0.5f)) },
             textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
@@ -170,7 +171,7 @@ private fun AddSourceForm(
             value = url,
             onValueChange = { url = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("API 地址，如 https://api.dandanplay.com", color = Color.White.copy(alpha = 0.5f)) },
+            placeholder = { FluxText("API 地址，如 https://api.dandanplay.com", color = Color.White.copy(alpha = 0.5f)) },
             textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
@@ -195,7 +196,7 @@ private fun AddSourceForm(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A0FF)),
                 shape = RoundedCornerShape(8.dp),
             ) {
-                Text("确认添加", color = Color.White)
+                FluxText("确认添加", color = Color.White)
             }
         }
     }
@@ -228,7 +229,7 @@ private fun SourceItem(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Switch(
+            FluxSwitch(
                 checked = source.enabled,
                 onCheckedChange = { onToggleEnabled() },
             )
@@ -249,6 +250,6 @@ private fun SourceItem(
 @Composable
 private fun TextButton(text: String, onClick: () -> Unit) {
     androidx.compose.material3.TextButton(onClick = onClick) {
-        Text(text, color = Color(0xFF00A0FF))
+        FluxText(text, color = Color(0xFF00A0FF))
     }
 }

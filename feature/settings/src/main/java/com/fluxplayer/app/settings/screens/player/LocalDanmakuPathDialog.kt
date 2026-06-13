@@ -4,7 +4,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.fluxplayer.app.core.common.uriToFilePath
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import java.io.File
 
@@ -137,38 +137,4 @@ fun LocalDanmakuPathDialog(
  * 将 OpenDocumentTree 返回的 content URI 转换为文件系统路径。
  * 处理常见的 primary storage URI 格式。
  */
-private fun uriToFilePath(uri: Uri): String? {
-    val docId = DocumentsContract.getTreeDocumentId(uri)
-    // primary storage: content://com.android.externalstorage.documents/tree/primary%3AFoo
-    // docId 格式: "primary:Foo" → /storage/emulated/0/Foo
-    if (docId.startsWith("primary:")) {
-        val relativePath = docId.removePrefix("primary:")
-        return "/storage/emulated/0/$relativePath"
-    }
-    // 尝试从 URI path 解析
-    val path = uri.path
-    if (path != null) {
-        val treeIndex = path.indexOf("/tree/")
-        if (treeIndex >= 0) {
-            val treePath = path.substring(treeIndex + "/tree/".length)
-                .replace("%2F", "/")
-                .replace("%3A", ":")
-            if (treePath.startsWith("primary:")) {
-                return "/storage/emulated/0/${treePath.removePrefix("primary:")}"
-            }
-            // 其他存储设备（如 SD 卡）
-            val segments = treePath.split(":")
-            if (segments.size == 2) {
-                val volume = segments[0]
-                val subPath = segments[1]
-                // 常见卷名到路径的映射
-                val volumePath = when {
-                    volume.matches(Regex("\\d+")) -> "/storage/$volume"
-                    else -> "/storage/$volume"
-                }
-                return "$volumePath/$subPath"
-            }
-        }
-    }
-    return null
-}
+

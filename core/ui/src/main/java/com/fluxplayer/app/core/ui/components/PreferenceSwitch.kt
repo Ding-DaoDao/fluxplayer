@@ -21,13 +21,13 @@ fun PreferenceSwitch(
         description = description,
         icon = icon,
         enabled = enabled,
-        onClick = onClick,
+        onClick = { if (enabled) onClick() },
         isFirstItem = isFirstItem,
         isLastItem = isLastItem,
         trailingContent = {
             NextSwitch(
                 checked = isChecked,
-                onCheckedChange = null,
+                onCheckedChange = { if (enabled) onClick() },
                 enabled = enabled,
             )
         },

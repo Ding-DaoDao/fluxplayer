@@ -16,14 +16,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,7 +46,7 @@ import com.fluxplayer.app.core.data.openlist.OpenListServerState
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.components.NextDialog
-import com.fluxplayer.app.core.ui.components.NextTopAppBar
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import org.json.JSONObject
 
@@ -69,21 +67,9 @@ fun OpenListSettingsScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            NextTopAppBar(
-                title = "OpenList",
-                navigationIcon = {
-                    FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = NextIcons.ArrowBack,
-                            contentDescription = "返回",
-                        )
-                    }
-                },
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    FluxSettingsScaffold(
+        title = "OpenList",
+        onNavigateUp = onNavigateUp,
     ) { padding ->
         Column(
             modifier = Modifier

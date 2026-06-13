@@ -22,7 +22,6 @@ data class Yun139BrowserUiState(
     val scrollTargetParentKey: String? = null,
     val pendingAction: String? = null,
     val moveFileId: String? = null,
-    val copyFileId: String? = null,
     val pickerFolders: List<WebDavResource> = emptyList(),
     val pickerIsLoading: Boolean = false
 )

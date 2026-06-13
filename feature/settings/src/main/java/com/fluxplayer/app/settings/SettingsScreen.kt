@@ -1,6 +1,5 @@
 package com.fluxplayer.app.settings
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -8,11 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -21,7 +16,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
-import com.fluxplayer.app.core.ui.components.NextTopAppBar
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -30,21 +25,9 @@ fun SettingsScreen(
     onNavigateUp: () -> Unit,
     onItemClick: (Setting) -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            NextTopAppBar(
-                title = stringResource(id = R.string.settings),
-                navigationIcon = {
-                    FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = NextIcons.ArrowBack,
-                            contentDescription = stringResource(id = R.string.navigate_up),
-                        )
-                    }
-                },
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    FluxSettingsScaffold(
+        title = stringResource(id = R.string.settings),
+        onNavigateUp = onNavigateUp,
     ) { innerPadding ->
         val settingRows = remember { SettingRow.entries }
         Column(
@@ -53,7 +36,6 @@ fun SettingsScreen(
                 .verticalScroll(state = rememberScrollState())
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
         ) {
             settingRows.forEachIndexed { index, row ->
                 ClickablePreferenceItem(
@@ -64,6 +46,9 @@ fun SettingsScreen(
                     isFirstItem = index == 0,
                     isLastItem = index == settingRows.lastIndex,
                 )
+                if (index < settingRows.lastIndex) {
+                    HorizontalDivider()
+                }
             }
         }
     }

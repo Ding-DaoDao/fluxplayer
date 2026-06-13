@@ -27,10 +27,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -52,7 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fluxplayer.app.core.common.extensions.appIcon
 import com.fluxplayer.app.core.ui.R
-import com.fluxplayer.app.core.ui.components.NextTopAppBar
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 private const val GITHUB_URL = "https://github.com/Ding-DaoDao/fluxplayer"
@@ -65,21 +63,9 @@ fun AboutPreferencesScreen(
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
 
-    Scaffold(
-        topBar = {
-            NextTopAppBar(
-                title = stringResource(id = R.string.about_name),
-                navigationIcon = {
-                    FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = NextIcons.ArrowBack,
-                            contentDescription = stringResource(id = R.string.navigate_up),
-                        )
-                    }
-                },
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    FluxSettingsScaffold(
+        title = stringResource(id = R.string.about_name),
+        onNavigateUp = onNavigateUp,
     ) { innerPadding ->
         Column(
             modifier = Modifier

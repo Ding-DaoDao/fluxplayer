@@ -23,7 +23,6 @@ data class CommonStateSnapshot<TBreadcrumb>(
     val scrollTargetParentKey: String? = null,
     val pendingAction: String? = null,
     val moveFileId: String? = null,
-    val copyFileId: String? = null,
     val pickerFolders: List<WebDavResource> = emptyList(),
     val pickerIsLoading: Boolean = false,
     val playedUriSet: Set<String> = emptySet(),

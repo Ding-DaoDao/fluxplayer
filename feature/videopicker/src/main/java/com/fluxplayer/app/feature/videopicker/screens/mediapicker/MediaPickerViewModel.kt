@@ -10,6 +10,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.common.extensions.prettyName
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.data.repository.WebDavRepository
 import com.fluxplayer.app.core.domain.GetSortedMediaUseCase
 import com.fluxplayer.app.core.media.services.MediaService
 import com.fluxplayer.app.core.media.sync.MediaInfoSynchronizer
@@ -17,11 +18,15 @@ import com.fluxplayer.app.core.media.sync.MediaSynchronizer
 import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.Folder
 import com.fluxplayer.app.core.ui.base.DataState
+import com.fluxplayer.app.core.model.WebDavServer
 import com.fluxplayer.app.feature.videopicker.navigation.FolderArgs
 import java.io.File
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -34,6 +39,7 @@ class MediaPickerViewModel @Inject constructor(
     private val playbackHistoryRepository: PlaybackHistoryRepository,
     private val mediaInfoSynchronizer: MediaInfoSynchronizer,
     private val mediaSynchronizer: MediaSynchronizer,
+    webDavRepository: WebDavRepository,
 ) : ViewModel() {
 
     private val folderArgs = FolderArgs(savedStateHandle)
@@ -47,6 +53,10 @@ class MediaPickerViewModel @Inject constructor(
         ),
     )
     val uiState = uiStateInternal.asStateFlow()
+
+    /** 所有已激活的 WebDAV 服务器，供浏览页动态展示列表 */
+    val activeWebDavServers: StateFlow<List<WebDavServer>> = webDavRepository.activeServers
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         viewModelScope.launch {

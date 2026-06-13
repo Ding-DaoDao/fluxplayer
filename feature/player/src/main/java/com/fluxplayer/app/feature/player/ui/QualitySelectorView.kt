@@ -13,7 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import com.fluxplayer.app.core.ui.components.FluxText
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,14 +42,14 @@ fun BoxScope.QualitySelectorView(
             shape = RoundedCornerShape(12.dp),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(
+                FluxText(
                     text = "清晰度",
                     modifier = Modifier.padding(bottom = 8.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
                 )
                 if (qualities.isEmpty()) {
-                    Text(
+                    FluxText(
                         text = "当前视频无可用清晰度信息",
                         color = Color.White.copy(alpha = 0.6f),
                         style = MaterialTheme.typography.bodyMedium,

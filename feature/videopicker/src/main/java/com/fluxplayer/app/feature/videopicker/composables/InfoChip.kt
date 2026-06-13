@@ -4,9 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.fluxplayer.app.core.ui.components.FluxText
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -21,7 +21,7 @@ fun InfoChip(
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
     shape: Shape = MaterialTheme.shapes.extraSmall.copy(CornerSize(2.dp)),
 ) {
-    Text(
+    FluxText(
         text = text,
         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Normal),
         color = contentColor,

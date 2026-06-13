@@ -36,7 +36,7 @@ import java.util.Locale
  * - [defaultOrderBy] / [defaultOrderDirection]
  * - [breadcrumbLabel] / [breadcrumbFileId] / [makeBreadcrumb]
  * - [doListFiles] / [doCreateFolder] / [doDeleteResource] / [doRenameResource]
- * - [doMoveResource] / [doCopyResource] / [doGetDownloadInfo]
+ * - [doMoveResource] / [doGetDownloadInfo]
  */
 abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
     application: Application
@@ -118,13 +118,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
         targetFolderId: String
     ): Result<Unit>
 
-    /**
-     * 复制资源
-     */
-    protected abstract suspend fun doCopyResource(
-        copyFileId: String,
-        targetFolderId: String
-    ): Result<Unit>
+
 
     /**
      * 获取下载信息（URL、headers、文件名）
@@ -178,7 +172,8 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
         val fileName: String = "",
         val progress: Float = 0f,
         val downloadedBytes: Long = 0,
-        val totalBytes: Long = 0
+        val totalBytes: Long = 0,
+        val completedFilePath: String? = null
     )
 
     /** 暴露给 UI 层的 StateFlow（延迟初始化，等 abstract val 赋值后再创建） */
@@ -256,7 +251,6 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                 scrollTargetParentKey = update.scrollTargetParentKey ?: current.scrollTargetParentKey,
                 pendingAction = update.pendingAction ?: current.pendingAction,
                 moveFileId = update.moveFileId ?: current.moveFileId,
-                copyFileId = update.copyFileId ?: current.copyFileId,
                 pickerFolders = update.pickerFolders ?: current.pickerFolders,
                 pickerIsLoading = update.pickerIsLoading ?: current.pickerIsLoading,
                 playedUriSet = update.playedUriSet ?: current.playedUriSet
@@ -663,14 +657,25 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
     // region ==================== 下载 ====================
 
+    /**
+     * 子类可重写以注入 CloudDownloadRepository
+     */
+    protected open var cloudDownloadRepository: com.fluxplayer.app.core.data.repository.CloudDownloadRepository? = null
+
     fun downloadFile(index: Int) {
         val res = readState().items.getOrNull(index) ?: return
+        val repo = cloudDownloadRepository
+        if (repo == null) {
+            // 回退：无 repo 时使用旧逻辑
+            downloadFileLegacy(index)
+            return
+        }
+
         Log.d("BaseCloudVM", "downloadFile: index=$index, name=${res.name}, path=${res.path}")
 
         downloadJob?.cancel()
         downloadJob = viewModelScope.launch {
             try {
-                // 获取下载信息
                 val infoResult = doGetDownloadInfo(res)
                 if (infoResult.isFailure) {
                     val e = infoResult.exceptionOrNull()!!
@@ -685,14 +690,8 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                 }
 
                 val info = infoResult.getOrThrow()
-                Log.d(
-                    "BaseCloudVM",
-                    "获取下载链接成功: url=${info.url.take(200)}, fileName=${info.fileName}, headers=${
-                        info.headers.map { "${it.key}: ${it.value.take(30)}" }
-                    }"
-                )
+                Log.d("BaseCloudVM", "获取下载链接成功: url=${info.url.take(200)}, fileName=${info.fileName}")
 
-                // 初始化进度
                 _downloadProgress.value = DownloadProgressData(
                     fileName = info.fileName,
                     progress = 0f,
@@ -700,7 +699,99 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                     totalBytes = 0L
                 )
 
-                // 使用系统 DownloadManager 下载
+                // 收集下载事件
+                val eventJob = launch {
+                    repo.downloadEvents.collect { event ->
+                        when (event) {
+                            is com.fluxplayer.app.core.data.repository.CloudDownloadRepository.DownloadEvent.Progress -> {
+                                if (event.fileName == info.fileName) {
+                                    _downloadProgress.value = DownloadProgressData(
+                                        fileName = event.fileName,
+                                        progress = event.progress,
+                                        downloadedBytes = event.downloadedBytes,
+                                        totalBytes = event.totalBytes
+                                    )
+                                }
+                            }
+
+                            is com.fluxplayer.app.core.data.repository.CloudDownloadRepository.DownloadEvent.Completed -> {
+                                if (event.fileName == info.fileName) {
+                                    _downloadProgress.value = DownloadProgressData(
+                                        fileName = event.fileName,
+                                        progress = 1f,
+                                        completedFilePath = event.filePath
+                                    )
+                                    Toast.makeText(
+                                        getApplication(),
+                                        "下载完成: ${event.fileName}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+
+                            is com.fluxplayer.app.core.data.repository.CloudDownloadRepository.DownloadEvent.Failed -> {
+                                if (event.fileName == info.fileName) {
+                                    _downloadProgress.value = null
+                                    if (event.error != "下载已取消") {
+                                        Toast.makeText(
+                                            getApplication(),
+                                            "下载失败: ${event.error}",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                repo.download(
+                    url = info.url,
+                    fileName = info.fileName,
+                    headers = info.headers,
+                    provider = providerLabel
+                )
+
+                eventJob.cancel()
+
+            } catch (e: Exception) {
+                Log.e("BaseCloudVM", "下载异常", e)
+                Toast.makeText(getApplication(), "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                _downloadProgress.value = null
+            }
+        }
+    }
+
+    /**
+     * 旧版下载逻辑（无 CloudDownloadRepository 时回退）
+     */
+    private fun downloadFileLegacy(index: Int) {
+        val res = readState().items.getOrNull(index) ?: return
+        Log.d("BaseCloudVM", "downloadFileLegacy: index=$index, name=${res.name}")
+
+        downloadJob?.cancel()
+        downloadJob = viewModelScope.launch {
+            try {
+                val infoResult = doGetDownloadInfo(res)
+                if (infoResult.isFailure) {
+                    val e = infoResult.exceptionOrNull()!!
+                    Log.e("BaseCloudVM", "获取下载链接失败", e)
+                    _downloadProgress.value = null
+                    Toast.makeText(
+                        getApplication(),
+                        "获取下载链接失败: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@launch
+                }
+                val info = infoResult.getOrThrow()
+                _downloadProgress.value = DownloadProgressData(
+                    fileName = info.fileName,
+                    progress = 0f,
+                    downloadedBytes = 0L,
+                    totalBytes = 0L
+                )
+
                 val dm = getApplication<Application>()
                     .getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
                 val request = android.app.DownloadManager.Request(android.net.Uri.parse(info.url)).apply {
@@ -711,15 +802,8 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                     info.headers.forEach { (key, value) -> addRequestHeader(key, value) }
                 }
                 dm.enqueue(request)
-
-                Toast.makeText(
-                    getApplication(),
-                    "开始下载: ${info.fileName}",
-                    Toast.LENGTH_SHORT
-                ).show()
-
+                Toast.makeText(getApplication(), "开始下载: ${info.fileName}", Toast.LENGTH_SHORT).show()
                 _downloadProgress.value = null
-
             } catch (e: Exception) {
                 Log.e("BaseCloudVM", "下载异常", e)
                 Toast.makeText(getApplication(), "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -730,6 +814,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
     fun dismissDownloadProgress() {
         _downloadProgress.value = null
+        cloudDownloadRepository?.cancel()
     }
 
     fun openDownloadedFile(filePath: String) {
@@ -740,17 +825,22 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
             return
         }
         try {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                file
-            )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, PickerUtils.getMimeType(filePath))
+            val uri = try {
+                FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+            } catch (e: IllegalArgumentException) {
+                Uri.fromFile(file)
+            }
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                putExtra(Intent.EXTRA_STREAM, uri)
+                type = PickerUtils.getMimeType(filePath)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(intent)
+            context.startActivity(Intent.createChooser(intent, "分享文件").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: Exception) {
             Log.e("BaseCloudVM", "打开文件失败", e)
             Toast.makeText(context, "无法打开文件: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -771,22 +861,11 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
         )
     }
 
-    fun startCopy(index: Int) {
-        val item = readState().items.getOrNull(index) ?: return
-        updateState(
-            CommonStateUpdate(
-                pendingAction = "copy",
-                copyFileId = item.path
-            )
-        )
-    }
-
     fun dismissPicker() {
         updateState(
             CommonStateUpdate(
                 pendingAction = null,
                 moveFileId = null,
-                copyFileId = null,
                 pickerFolders = emptyList(),
                 pickerIsLoading = false
             )
@@ -811,7 +890,6 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                 onSuccess = { files ->
                     val operatingPath = when (state.pendingAction) {
                         "move" -> state.moveFileId
-                        "copy" -> state.copyFileId
                         else -> null
                     }
                     val folders = files
@@ -864,11 +942,12 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
     fun moveTo(targetFolderId: String) {
         val fileId = readState().moveFileId ?: return
+        val actualTargetId = targetFolderId.ifEmpty { rootFileId }
 
         viewModelScope.launch {
             updateState(CommonStateUpdate(isLoading = true))
 
-            val result = doMoveResource(fileId, targetFolderId)
+            val result = doMoveResource(fileId, actualTargetId)
             result.fold(
                 onSuccess = {
                     Toast.makeText(getApplication(), "移动成功", Toast.LENGTH_SHORT).show()
@@ -877,27 +956,6 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                 },
                 onFailure = { e ->
                     Toast.makeText(getApplication(), "移动失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                    updateState(CommonStateUpdate(isLoading = false))
-                }
-            )
-        }
-    }
-
-    fun copyTo(targetFolderId: String) {
-        val copyId = readState().copyFileId ?: return
-
-        viewModelScope.launch {
-            updateState(CommonStateUpdate(isLoading = true))
-
-            val result = doCopyResource(copyId, targetFolderId)
-            result.fold(
-                onSuccess = {
-                    Toast.makeText(getApplication(), "复制成功", Toast.LENGTH_SHORT).show()
-                    dismissPicker()
-                    refresh()
-                },
-                onFailure = { e ->
-                    Toast.makeText(getApplication(), "复制失败: ${e.message}", Toast.LENGTH_SHORT).show()
                     updateState(CommonStateUpdate(isLoading = false))
                 }
             )

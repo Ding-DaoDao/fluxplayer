@@ -13,6 +13,7 @@ import com.fluxplayer.app.core.data.openlist.OpenListTokenProvider
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.feature.videopicker.BaseCloudBrowserViewModel
 import com.fluxplayer.app.feature.videopicker.CommonStateUpdate
 import kotlinx.coroutines.delay
@@ -26,6 +27,7 @@ class OpenListBrowserViewModel @Inject constructor(
     application: Application,
     playbackHistoryRepository: PlaybackHistoryRepository,
     private val preferencesRepository: PreferencesRepository,
+    cloudDownloadRepository: CloudDownloadRepository,
 ) : BaseCloudBrowserViewModel<OpenListBreadcrumb>(application) {
 
     companion object {
@@ -62,6 +64,7 @@ class OpenListBrowserViewModel @Inject constructor(
     // region ==================== 初始化 ====================
 
     init {
+        this.cloudDownloadRepository = cloudDownloadRepository
         initCommonState(
             loadDirectory = { path -> loadDirectoryInternal(path) },
             prefsRepo = { preferencesRepository },
@@ -155,24 +158,30 @@ class OpenListBrowserViewModel @Inject constructor(
     }
 
     override suspend fun doMoveResource(fileId: String, targetFolderId: String): Result<Unit> {
-        return Result.failure(UnsupportedOperationException("OpenList 暂不支持移动"))
-    }
-
-    override suspend fun doCopyResource(copyFileId: String, targetFolderId: String): Result<Unit> {
-        return Result.failure(UnsupportedOperationException("OpenList 暂不支持复制"))
+        val client = apiClient
+            ?: return Result.failure(IllegalStateException("API Client 未初始化"))
+        val srcDir = fileId.substringBeforeLast("/").ifEmpty { "/" }
+        val name = fileId.substringAfterLast("/")
+        return client.moveFiles(srcDir = srcDir, dstDir = targetFolderId, names = listOf(name)).map {}
     }
 
     override suspend fun doGetDownloadInfo(res: WebDavResource): Result<DownloadInfo> {
         // OpenList 文件可以直接通过 HTTP 下载
         val baseUrl = "http://127.0.0.1:5244"
-        val relativePath = if (res.path.startsWith(baseUrl)) {
-            res.path.removePrefix(baseUrl)
-        } else {
-            res.path
+        val rawPath = when {
+            res.path.startsWith(baseUrl) -> res.path.removePrefix(baseUrl)
+            else -> res.path
+        }
+        // 防止重复拼接 /d/ 前缀
+        val downloadPath = when {
+            rawPath.startsWith("/d/") -> rawPath
+            rawPath.startsWith("d/") -> "/$rawPath"
+            rawPath.startsWith("/") -> "/d$rawPath"
+            else -> "/d/$rawPath"
         }
         return Result.success(
             DownloadInfo(
-                url = "$baseUrl/d$relativePath",
+                url = "$baseUrl$downloadPath",
                 fileName = res.name,
                 headers = apiClient?.getAdminToken()?.let { mapOf("Authorization" to "Bearer $it") }
                     ?: emptyMap()

@@ -1,6 +1,6 @@
 package com.fluxplayer.app.settings.screens.player
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,11 +11,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,7 +42,7 @@ import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.components.NextDialogWithDoneAndCancelButtons
-import com.fluxplayer.app.core.ui.components.NextTopAppBar
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.model.DanmakuSource
 import com.fluxplayer.app.settings.screens.player.DanmakuSourceManagerDialog
 import com.fluxplayer.app.core.ui.components.PreferenceSlider
@@ -79,21 +76,9 @@ private fun PlayerPreferencesContent(
     onEvent: (PlayerPreferencesUiEvent) -> Unit,
     onNavigateUp: () -> Unit = {},
 ) {
-    Scaffold(
-        topBar = {
-            NextTopAppBar(
-                title = stringResource(id = R.string.player_name),
-                navigationIcon = {
-                    FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = NextIcons.ArrowBack,
-                            contentDescription = stringResource(id = R.string.navigate_up),
-                        )
-                    }
-                },
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    FluxSettingsScaffold(
+        title = stringResource(id = R.string.player_name),
+        onNavigateUp = onNavigateUp,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -103,9 +88,7 @@ private fun PlayerPreferencesContent(
                 .padding(horizontal = 16.dp),
         ) {
             ListSectionTitle(text = stringResource(id = R.string.interface_name))
-            Column(
-                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-            ) {
+            Column {
                 PreferenceSwitch(
                     title = stringResource(id = R.string.material_you_controls),
                     description = stringResource(id = R.string.material_you_controls_description),
@@ -114,6 +97,7 @@ private fun PlayerPreferencesContent(
                     onClick = { onEvent(PlayerPreferencesUiEvent.ToggleUseMaterialYouControls) },
                     isFirstItem = true
                 )
+                HorizontalDivider()
                 PreferenceSlider(
                     title = stringResource(R.string.controller_timeout),
                     description = stringResource(R.string.seconds, uiState.preferences.controllerAutoHideTimeout),
@@ -134,9 +118,7 @@ private fun PlayerPreferencesContent(
             }
 
             ListSectionTitle(text = stringResource(id = R.string.playback))
-            Column(
-                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-            ) {
+            Column {
                 ClickablePreferenceItem(
                     title = stringResource(id = R.string.resume),
                     description = stringResource(id = R.string.resume_description),
@@ -144,6 +126,7 @@ private fun PlayerPreferencesContent(
                     onClick = { onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.ResumeDialog)) },
                     isFirstItem = true,
                 )
+                HorizontalDivider()
                 PreferenceSlider(
                     title = stringResource(id = R.string.default_playback_speed),
                     description = uiState.preferences.defaultPlaybackSpeed.toString(),
@@ -160,6 +143,28 @@ private fun PlayerPreferencesContent(
                         }
                     },
                 )
+                HorizontalDivider()
+                PreferenceSlider(
+                    title = stringResource(R.string.long_press_gesture),
+                    description = stringResource(R.string.long_press_gesture_desc, uiState.preferences.longPressControlsSpeed),
+                    icon = NextIcons.Speed,
+                    enabled = !uiState.preferences.useDynamicLongPressSpeed,
+                    value = uiState.preferences.longPressControlsSpeed,
+                    valueRange = 1.5f..4.0f,
+                    onValueChange = { onEvent(PlayerPreferencesUiEvent.UpdateLongPressControlsSpeed(it)) },
+                    trailingContent = {
+                        FilledIconButton(
+                            enabled = !uiState.preferences.useDynamicLongPressSpeed,
+                            onClick = { onEvent(PlayerPreferencesUiEvent.UpdateLongPressControlsSpeed(2.0f)) },
+                        ) {
+                            Icon(
+                                imageVector = NextIcons.History,
+                                contentDescription = stringResource(id = R.string.reset_long_press_speed),
+                            )
+                        }
+                    },
+                )
+                HorizontalDivider()
                 PreferenceSwitchWithDivider(
                     title = stringResource(id = R.string.dynamic_long_press_speed),
                     description = stringResource(id = R.string.dynamic_long_press_speed_desc),
@@ -170,6 +175,7 @@ private fun PlayerPreferencesContent(
                         onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.DynamicLongPressMultiplierDialog))
                     },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.autoplay_settings),
                     description = stringResource(
@@ -180,6 +186,7 @@ private fun PlayerPreferencesContent(
                     onClick = { onEvent(PlayerPreferencesUiEvent.ToggleAutoplay) },
                 )
                 if (LocalContext.current.isPipFeatureSupported) {
+                    HorizontalDivider()
                     PreferenceSwitch(
                         title = stringResource(id = R.string.pip_settings),
                         description = stringResource(
@@ -190,6 +197,7 @@ private fun PlayerPreferencesContent(
                         onClick = { onEvent(PlayerPreferencesUiEvent.ToggleAutoPip) },
                     )
                 }
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.background_play),
                     description = stringResource(
@@ -199,6 +207,7 @@ private fun PlayerPreferencesContent(
                     isChecked = uiState.preferences.autoBackgroundPlay,
                     onClick = { onEvent(PlayerPreferencesUiEvent.ToggleAutoBackgroundPlay) },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.remember_brightness_level),
                     description = stringResource(
@@ -208,6 +217,7 @@ private fun PlayerPreferencesContent(
                     isChecked = uiState.preferences.rememberPlayerBrightness,
                     onClick = { onEvent(PlayerPreferencesUiEvent.ToggleRememberBrightnessLevel) },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.remember_selections),
                     description = stringResource(id = R.string.remember_selections_description),
@@ -215,6 +225,7 @@ private fun PlayerPreferencesContent(
                     isChecked = uiState.preferences.rememberSelections,
                     onClick = { onEvent(PlayerPreferencesUiEvent.ToggleRememberSelections) },
                 )
+                HorizontalDivider()
                 ClickablePreferenceItem(
                     title = stringResource(id = R.string.player_screen_orientation),
                     description = uiState.preferences.playerScreenOrientation.name(),
@@ -223,6 +234,7 @@ private fun PlayerPreferencesContent(
                         onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.PlayerScreenOrientationDialog))
                     },
                 )
+                HorizontalDivider()
                 ClickablePreferenceItem(
                     title = "弹幕源管理",
                     description = "${DanmakuSource.filterValid(uiState.preferences.danmakuSources).size} 个弹幕源",
@@ -231,6 +243,7 @@ private fun PlayerPreferencesContent(
                         onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.DanmakuSourceManagerDialog))
                     },
                 )
+                HorizontalDivider()
                 ClickablePreferenceItem(
                     title = "本地弹幕目录",
                     description = uiState.preferences.localDanmakuPath,
@@ -243,9 +256,7 @@ private fun PlayerPreferencesContent(
             }
 
             ListSectionTitle(text = stringResource(id = R.string.playback_cache))
-            Column(
-                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-            ) {
+            Column {
                 PreferenceSwitch(
                     title = stringResource(id = R.string.playback_cache),
                     description = stringResource(id = R.string.playback_cache_description),
@@ -255,6 +266,7 @@ private fun PlayerPreferencesContent(
                     isFirstItem = true,
                 )
                 if (uiState.preferences.playbackCacheEnabled) {
+                    HorizontalDivider()
                     ClickablePreferenceItem(
                         title = stringResource(id = R.string.cache_size),
                         description = uiState.preferences.playbackCacheMaxSize.name(),
@@ -263,6 +275,7 @@ private fun PlayerPreferencesContent(
                             onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.CacheMaxSizeDialog))
                         },
                     )
+                    HorizontalDivider()
                     ClickablePreferenceItem(
                         title = stringResource(id = R.string.clear_cache),
                         description = stringResource(id = R.string.clear_cache_description, formatBytes(uiState.cacheSizeBytes)),

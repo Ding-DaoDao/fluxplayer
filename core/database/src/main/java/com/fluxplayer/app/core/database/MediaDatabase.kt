@@ -5,11 +5,13 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.fluxplayer.app.core.database.dao.DirectoryDao
+import com.fluxplayer.app.core.database.dao.DownloadTaskDao
 import com.fluxplayer.app.core.database.dao.MediumDao
 import com.fluxplayer.app.core.database.dao.MediumStateDao
 import com.fluxplayer.app.core.database.dao.PlaybackHistoryDao
 import com.fluxplayer.app.core.database.entities.AudioStreamInfoEntity
 import com.fluxplayer.app.core.database.entities.DirectoryEntity
+import com.fluxplayer.app.core.database.entities.DownloadTaskEntity
 import com.fluxplayer.app.core.database.entities.MediumEntity
 import com.fluxplayer.app.core.database.entities.MediumStateEntity
 import com.fluxplayer.app.core.database.entities.PlaybackHistoryEntity
@@ -25,8 +27,9 @@ import com.fluxplayer.app.core.database.entities.VideoStreamInfoEntity
         VideoStreamInfoEntity::class,
         AudioStreamInfoEntity::class,
         SubtitleStreamInfoEntity::class,
+        DownloadTaskEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class MediaDatabase : RoomDatabase() {
@@ -38,6 +41,8 @@ abstract class MediaDatabase : RoomDatabase() {
     abstract fun directoryDao(): DirectoryDao
 
     abstract fun playbackHistoryDao(): PlaybackHistoryDao
+
+    abstract fun downloadTaskDao(): DownloadTaskDao
 
     companion object {
         const val DATABASE_NAME = "media_db"
@@ -221,6 +226,27 @@ abstract class MediaDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "ALTER TABLE `playback_history` ADD COLUMN `parent_path` TEXT DEFAULT NULL",
+                )
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `download_tasks` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `fileName` TEXT NOT NULL,
+                        `url` TEXT NOT NULL,
+                        `fileSize` INTEGER NOT NULL,
+                        `downloadedBytes` INTEGER NOT NULL DEFAULT 0,
+                        `status` TEXT NOT NULL DEFAULT 'PENDING',
+                        `provider` TEXT NOT NULL DEFAULT '',
+                        `filePath` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        `completedAt` INTEGER
+                    )
+                    """,
                 )
             }
         }

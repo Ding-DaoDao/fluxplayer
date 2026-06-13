@@ -2,25 +2,33 @@ package com.fluxplayer.app.feature.videopicker.cloud189
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.util.Log
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.common.CloudPlaylistCache
 import com.fluxplayer.app.core.common.CloudUriScheme
+import com.fluxplayer.app.core.common.PickerUtils
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
+import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.cloud189.C189ApiClient
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189FileItem
+import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.feature.videopicker.CloudDirectoryCache
 import com.fluxplayer.app.feature.videopicker.DirectoryStackEntry
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 data class C189Breadcrumb(val label: String, val fileId: String)
@@ -31,6 +39,7 @@ class C189BrowserViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
     private val cloudUriResolver: CloudUriResolver,
     private val playbackHistoryRepository: PlaybackHistoryRepository,
+    private val cloudDownloadRepository: CloudDownloadRepository,
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
@@ -54,6 +63,18 @@ class C189BrowserViewModel @Inject constructor(
     private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
+    private var downloadJob: Job? = null
+
+    data class DownloadProgressData(
+        val fileName: String = "",
+        val progress: Float = 0f,
+        val downloadedBytes: Long = 0,
+        val totalBytes: Long = 0,
+        val completedFilePath: String? = null
+    )
+
+    private val _downloadProgress = MutableStateFlow<DownloadProgressData?>(null)
+    val downloadProgress: StateFlow<DownloadProgressData?> = _downloadProgress.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -180,6 +201,65 @@ class C189BrowserViewModel @Inject constructor(
 
     // endregion
 
+    // region ==================== 登录 — sendSmsCode (发送短信验证码) ====================
+
+    fun sendSmsCode(phone: String) {
+        android.util.Log.d(TAG, "sendSmsCode called phone=${phone.take(3)}****")
+        updateUiState { it.copy(smsSending = true, smsSentMessage = null, error = null) }
+        viewModelScope.launch {
+            val result = apiClient.sendSmsCode(phone)
+            result.fold(
+                onSuccess = {
+                    updateUiState {
+                        it.copy(
+                            smsSending = false, smsCodeSent = true,
+                            smsSentMessage = "验证码已发送至 $phone"
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    updateUiState {
+                        it.copy(
+                            smsSending = false, smsCodeSent = false,
+                            error = "发送失败: ${e.message}"
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    // endregion
+
+    // region ==================== 登录 — loginBySms (短信验证码登录) ====================
+
+    fun loginBySms(phone: String, smsCode: String) {
+        android.util.Log.d(TAG, "loginBySms called phone=${phone.take(3)}****")
+        updateUiState { it.copy(loginLoading = true, error = null) }
+        viewModelScope.launch {
+            val result = apiClient.loginBySms(phone, smsCode)
+            result.fold(
+                onSuccess = {
+                    android.util.Log.d(TAG, "loginBySms SUCCESS, saving tokens")
+                    saveTokens()
+                    updateUiState {
+                        it.copy(isLoggedIn = true, loginLoading = false, smsCodeSent = false)
+                    }
+                    loadDirectory("-11")
+                },
+                onFailure = { e ->
+                    val msg = e.message ?: "短信登录失败"
+                    android.util.Log.e(TAG, "loginBySms FAILED: $msg", e)
+                    updateUiState {
+                        it.copy(loginLoading = false, error = msg)
+                    }
+                }
+            )
+        }
+    }
+
+    // endregion
+
     // region ==================== 登录 — loginWithCookies (Cookie登录备用) ====================
 
     fun loginWithCookies(cookies: String) {
@@ -205,6 +285,18 @@ class C189BrowserViewModel @Inject constructor(
 
     fun logout() {
         C189AuthProvider.clear()
+
+        // 清除 OkHttp GlobalCookieJar 中旧账号的 Cookie
+        GlobalCookieJar.clearHost("cloud.189.cn")
+        GlobalCookieJar.clearHost("api.cloud.189.cn")
+        GlobalCookieJar.clearHost("m.cloud.189.cn")
+        GlobalCookieJar.clearHost("open.e.189.cn")
+
+        // 重置 ApiClient 自身字段
+        apiClient.accessToken = ""
+        apiClient.sessionKey = ""
+        apiClient.sessionSecret = ""
+
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         directoryCache.clear()
@@ -482,14 +574,9 @@ class C189BrowserViewModel @Inject constructor(
         updateUiState { it.copy(pendingAction = "move", moveFileId = item.path) }
     }
 
-    fun startCopy(index: Int) {
-        val item = _uiState.value.items.getOrNull(index) ?: return
-        updateUiState { it.copy(pendingAction = "copy", copyFileId = item.path) }
-    }
-
     fun dismissPicker() {
         updateUiState {
-            it.copy(pendingAction = null, moveFileId = null, copyFileId = null,
+            it.copy(pendingAction = null, moveFileId = null,
                 pickerFolders = emptyList(), pickerIsLoading = false)
         }
     }
@@ -535,9 +622,10 @@ class C189BrowserViewModel @Inject constructor(
 
     fun moveTo(targetFolderId: String) {
         val fileId = _uiState.value.moveFileId ?: return
+        val actualTargetId = targetFolderId.ifEmpty { "-11" }
         viewModelScope.launch {
             updateUiState { it.copy(isLoading = true) }
-            val result = apiClient.moveFiles(listOf(fileId), targetFolderId)
+            val result = apiClient.moveFiles(listOf(fileId), actualTargetId)
             result.fold(
                 onSuccess = {
                     Toast.makeText(getApplication(), "移动成功", Toast.LENGTH_SHORT).show()
@@ -548,15 +636,6 @@ class C189BrowserViewModel @Inject constructor(
                     updateUiState { it.copy(isLoading = false) }
                 }
             )
-        }
-    }
-
-    fun copyTo(targetFolderId: String) {
-        val copyId = _uiState.value.copyFileId ?: return
-        viewModelScope.launch {
-            updateUiState { it.copy(isLoading = true) }
-            Toast.makeText(getApplication(), "天翼云暂不支持复制", Toast.LENGTH_SHORT).show()
-            updateUiState { it.copy(isLoading = false) }
         }
     }
 
@@ -574,20 +653,55 @@ class C189BrowserViewModel @Inject constructor(
 
     fun downloadFile(index: Int) {
         val res = _uiState.value.items.getOrNull(index) ?: return
-        viewModelScope.launch {
+
+        downloadJob?.cancel()
+        downloadJob = viewModelScope.launch {
             try {
                 val urlResult = apiClient.getDownloadUrl(res.path)
                 urlResult.fold(
                     onSuccess = { url ->
-                        val dm = getApplication<Application>()
-                            .getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-                        val request = android.app.DownloadManager.Request(android.net.Uri.parse(url)).apply {
-                            setTitle(res.name)
-                            setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                            setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, res.name)
+                        _downloadProgress.value = DownloadProgressData(fileName = res.name, progress = 0f)
+
+                        val eventJob = launch {
+                            cloudDownloadRepository.downloadEvents.collect { event ->
+                                when (event) {
+                                    is CloudDownloadRepository.DownloadEvent.Progress -> {
+                                        if (event.fileName == res.name) {
+                                            _downloadProgress.value = DownloadProgressData(
+                                                fileName = event.fileName, progress = event.progress,
+                                                downloadedBytes = event.downloadedBytes, totalBytes = event.totalBytes
+                                            )
+                                        }
+                                    }
+                                    is CloudDownloadRepository.DownloadEvent.Completed -> {
+                                        if (event.fileName == res.name) {
+                                            _downloadProgress.value = DownloadProgressData(
+                                                fileName = event.fileName,
+                                                progress = 1f,
+                                                completedFilePath = event.filePath
+                                            )
+                                            Toast.makeText(getApplication(), "下载完成: ${event.fileName}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                    is CloudDownloadRepository.DownloadEvent.Failed -> {
+                                        if (event.fileName == res.name) {
+                                            _downloadProgress.value = null
+                                            if (event.error != "下载已取消") {
+                                                Toast.makeText(getApplication(), "下载失败: ${event.error}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        dm.enqueue(request)
-                        Toast.makeText(getApplication(), "开始下载: ${res.name}", Toast.LENGTH_SHORT).show()
+
+                        cloudDownloadRepository.download(
+                            url = url,
+                            fileName = res.name,
+                            headers = C189AuthProvider.getPlayHeaders(),
+                            provider = "cloud189"
+                        )
+                        eventJob.cancel()
                     },
                     onFailure = { e ->
                         Toast.makeText(getApplication(), "获取下载链接失败: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -595,7 +709,35 @@ class C189BrowserViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 Toast.makeText(getApplication(), "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                _downloadProgress.value = null
             }
+        }
+    }
+
+    fun dismissDownloadProgress() {
+        _downloadProgress.value = null
+        cloudDownloadRepository.cancel()
+    }
+
+    fun openDownloadedFile(filePath: String) {
+        val context = getApplication<Application>()
+        val file = File(filePath)
+        if (!file.exists()) {
+            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                putExtra(Intent.EXTRA_STREAM, uri)
+                type = PickerUtils.getMimeType(filePath)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(Intent.createChooser(intent, "分享文件").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Log.e("C189VM", "分享文件失败", e)
+            Toast.makeText(context, "无法打开文件: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 

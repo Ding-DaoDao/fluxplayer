@@ -17,13 +17,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import com.fluxplayer.app.core.ui.components.FluxIcon
+import com.fluxplayer.app.core.ui.components.FluxIconButton
+import com.fluxplayer.app.core.ui.components.FluxText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -106,7 +107,7 @@ fun BoxScope.DanmakuSettingsSheet(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
+                    FluxText(
                         text = setting.name,
                         style = MaterialTheme.typography.titleSmall,
                     )
@@ -176,11 +177,11 @@ private fun DisplayModeSliderRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
+            FluxText(
                 text = "显示区域",
                 style = MaterialTheme.typography.titleSmall,
             )
-            Text(
+            FluxText(
                 text = label,
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFF4CAF50),
@@ -218,11 +219,11 @@ private fun SpeedSliderRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
+            FluxText(
                 text = "弹幕速度",
                 style = MaterialTheme.typography.titleSmall,
             )
-            Text(
+            FluxText(
                 text = "×${"%.2f".format(sliderValue).trimEnd('0').trimEnd('.')}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFF4CAF50),
@@ -255,7 +256,7 @@ private fun BlockKeywordSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
+        FluxText(
             text = "屏蔽关键词",
             style = MaterialTheme.typography.titleSmall,
         )
@@ -270,7 +271,7 @@ private fun BlockKeywordSection(
                 value = newKeyword,
                 onValueChange = { newKeyword = it },
                 placeholder = {
-                    Text(
+                    FluxText(
                         text = "输入要屏蔽的关键词",
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -278,7 +279,7 @@ private fun BlockKeywordSection(
                 modifier = Modifier.weight(1f),
                 singleLine = true,
             )
-            IconButton(
+            FluxIconButton(
                 onClick = {
                     val trimmed = newKeyword.trim()
                     if (trimmed.isNotEmpty() && trimmed !in keywords) {
@@ -288,7 +289,7 @@ private fun BlockKeywordSection(
                 },
                 enabled = newKeyword.trim().isNotEmpty(),
             ) {
-                Icon(
+                FluxIcon(
                     imageVector = Icons.Filled.Add,
                     contentDescription = "添加关键词",
                     tint = Color(0xFF4CAF50),
@@ -309,13 +310,13 @@ private fun BlockKeywordSection(
                             .clickable { onKeywordsChange(keywords - keyword) }
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                     ) {
-                        Text(
+                        FluxText(
                             text = keyword,
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White,
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
+                        FluxIcon(
                             imageVector = Icons.Filled.Close,
                             contentDescription = "移除 $keyword",
                             tint = Color.White.copy(alpha = 0.6f),

@@ -28,6 +28,8 @@ object Yun139AuthProvider {
 
     fun clear() {
         authorization = ""
+        phoneNumber = ""
+        userDomainId = ""
         isActive = false
     }
 
@@ -41,6 +43,19 @@ object Yun139AuthProvider {
                 "x-yun-svc-type" to "1",
                 "x-yun-module-type" to "100",
                 "x-yun-app-channel" to "10000023"
+            )
+        } else emptyMap()
+    }
+
+    fun getDownloadHeaders(): Map<String, String> {
+        return if (isActive) {
+            mapOf(
+                "x-NetType" to "1",
+                "x-DeviceInfo" to deviceInfo,
+                "x-SvcType" to "1",
+                "x-huawei-channelSrc" to "10000023",
+                "x-MM-Source" to "0000",
+                "User-Agent" to "okhttp/4.12.0"
             )
         } else emptyMap()
     }

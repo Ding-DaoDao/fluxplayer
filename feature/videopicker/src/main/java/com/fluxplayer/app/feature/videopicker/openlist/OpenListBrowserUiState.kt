@@ -17,7 +17,6 @@ data class OpenListBrowserUiState(
     val scrollTargetParentKey: String? = null,
     val pendingAction: String? = null,
     val moveFileIndex: Int = -1,
-    val copyFileIndex: Int = -1,
     val pickerFolders: List<WebDavResource> = emptyList(),
     val pickerIsLoading: Boolean = false,
     val pickerCurrentPath: String = "/",

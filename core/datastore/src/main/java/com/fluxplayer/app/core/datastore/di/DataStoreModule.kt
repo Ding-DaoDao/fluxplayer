@@ -13,10 +13,12 @@ import com.fluxplayer.app.core.common.Dispatcher
 import com.fluxplayer.app.core.common.NextDispatchers
 import com.fluxplayer.app.core.common.di.ApplicationScope
 import com.fluxplayer.app.core.datastore.serializer.ApplicationPreferencesSerializer
+import com.fluxplayer.app.core.datastore.serializer.BackupWebDavSerializer
 import com.fluxplayer.app.core.datastore.serializer.PlayerPreferencesSerializer
 import com.fluxplayer.app.core.datastore.serializer.SearchHistorySerializer
 import com.fluxplayer.app.core.datastore.serializer.WebDavServersSerializer
 import com.fluxplayer.app.core.model.ApplicationPreferences
+import com.fluxplayer.app.core.model.BackupWebDavConfig
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.model.SearchHistory
 import com.fluxplayer.app.core.model.WebDavServers
@@ -28,6 +30,7 @@ private const val APP_PREFERENCES_DATASTORE_FILE = "app_preferences.json"
 private const val PLAYER_PREFERENCES_DATASTORE_FILE = "player_preferences.json"
 private const val SEARCH_HISTORY_DATASTORE_FILE = "search_history.json"
 private const val WEBDAV_SERVERS_DATASTORE_FILE = "webdav_servers.json"
+private const val BACKUP_WEBDAV_DATASTORE_FILE = "backup_webdav.json"
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -86,6 +89,20 @@ object DataStoreModule {
             serializer = WebDavServersSerializer,
             scope = CoroutineScope(scope.coroutineContext + ioDispatcher),
             produceFile = { applicationContext.dataStoreFile(WEBDAV_SERVERS_DATASTORE_FILE) },
+        )
+    }
+
+    @Provides
+    @Singleton
+    fun provideBackupWebDavDataStore(
+        @ApplicationContext applicationContext: Context,
+        @Dispatcher(NextDispatchers.IO) ioDispatcher: CoroutineDispatcher,
+        @ApplicationScope scope: CoroutineScope,
+    ): DataStore<BackupWebDavConfig> {
+        return DataStoreFactory.create(
+            serializer = BackupWebDavSerializer,
+            scope = CoroutineScope(scope.coroutineContext + ioDispatcher),
+            produceFile = { applicationContext.dataStoreFile(BACKUP_WEBDAV_DATASTORE_FILE) },
         )
     }
 }

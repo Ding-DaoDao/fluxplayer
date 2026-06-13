@@ -6,6 +6,8 @@ object C189AuthProvider {
     @Volatile var sessionSecret: String = ""
     @Volatile var refreshToken: String = ""
     @Volatile var expiresIn: Long = 0
+    @Volatile var familySessionKey: String = ""
+    @Volatile var familySessionSecret: String = ""
     @Volatile var isActive: Boolean = false
     @Volatile var userAgent: String = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36"
 
@@ -24,11 +26,18 @@ object C189AuthProvider {
         isActive = true
     }
 
+    fun setFamilyTokens(sessionKey: String, sessionSecret: String) {
+        this.familySessionKey = sessionKey
+        this.familySessionSecret = sessionSecret
+    }
+
     fun clear() {
         accessToken = ""
         sessionKey = ""
         sessionSecret = ""
         refreshToken = ""
+        familySessionKey = ""
+        familySessionSecret = ""
         expiresIn = 0
         isActive = false
     }

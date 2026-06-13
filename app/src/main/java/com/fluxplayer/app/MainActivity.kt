@@ -36,14 +36,17 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import dagger.hilt.android.AndroidEntryPoint
 import com.fluxplayer.app.core.common.storagePermission
+import com.fluxplayer.app.core.data.backup.AutoBackupHelper
 import com.fluxplayer.app.core.media.services.MediaService
 import com.fluxplayer.app.core.media.sync.MediaSynchronizer
+import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.model.ThemeConfig
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
 import com.fluxplayer.app.navigation.MediaRootRoute
 import com.fluxplayer.app.navigation.mediaNavGraph
 import com.fluxplayer.app.navigation.settingsNavGraph
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
@@ -54,6 +57,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var mediaService: MediaService
+
+    @Inject
+    lateinit var autoBackupHelper: AutoBackupHelper
 
     private val viewModel: MainViewModel by viewModels()
 
@@ -101,6 +107,7 @@ class MainActivity : ComponentActivity() {
                 darkTheme = shouldUseDarkTheme,
                 highContrastDarkTheme = shouldUseHighContrastDarkTheme(uiState = uiState),
                 dynamicColor = shouldUseDynamicTheming(uiState = uiState),
+                composeEngine = shouldUseComposeEngine(uiState = uiState),
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -167,6 +174,13 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onStop() {
+        super.onStop()
+        lifecycleScope.launch(Dispatchers.IO) {
+            autoBackupHelper.performAutoBackup()
+        }
+    }
 }
 
 /**
@@ -202,4 +216,12 @@ fun shouldUseDynamicTheming(
 ): Boolean = when (uiState) {
     MainActivityUiState.Loading -> false
     is MainActivityUiState.Success -> uiState.preferences.useDynamicColors
+}
+
+@Composable
+fun shouldUseComposeEngine(
+    uiState: MainActivityUiState,
+): ComposeEngine = when (uiState) {
+    MainActivityUiState.Loading -> ComposeEngine.MATERIAL
+    is MainActivityUiState.Success -> uiState.preferences.composeEngine
 }

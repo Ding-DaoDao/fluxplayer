@@ -48,4 +48,16 @@ object GlobalCookieJar : CookieJar {
                 .build()
         )
     }
+
+    /** 清除指定 host 的 Cookie */
+    fun clearHost(host: String) {
+        store.remove(host)
+    }
+
+    /** 清除所有 Cookie（包括 quark/uc 专用 cookie） */
+    fun clearAll() {
+        store.clear()
+        quarkCookie = ""
+        ucCookie = ""
+    }
 }

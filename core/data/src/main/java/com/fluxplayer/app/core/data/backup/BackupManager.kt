@@ -11,13 +11,16 @@ import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import com.fluxplayer.app.core.datastore.datasource.WebDavServersDataSource
 import com.fluxplayer.app.core.model.AlipanBackupConfig
 import com.fluxplayer.app.core.model.BackupData
+import com.fluxplayer.app.core.model.BackupWebDavConfig
 import com.fluxplayer.app.core.model.Cloud189BackupConfig
 import com.fluxplayer.app.core.model.OpenListBackupConfig
 import com.fluxplayer.app.core.model.Pan123BackupConfig
 import com.fluxplayer.app.core.model.QuarkBackupConfig
+import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.model.Yun139BackupConfig
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.zip.ZipEntry
@@ -61,43 +64,50 @@ class BackupManager @Inject constructor(
         )
     }
 
-    /** 从备份数据包恢复 */
-    suspend fun restoreFromBackup(backup: BackupData) {
+    /** 从备份数据包恢复，ignoreList 中的配置项将被跳过 */
+    suspend fun restoreFromBackup(backup: BackupData, ignoreList: Set<String> = emptySet()) {
         // 1. 恢复设置
-        preferencesRepository.updateApplicationPreferences { backup.appPreferences }
-        preferencesRepository.updatePlayerPreferences { backup.playerPreferences }
+        if ("app_preferences" !in ignoreList) {
+            preferencesRepository.updateApplicationPreferences { backup.appPreferences }
+        }
+        if ("player_preferences" !in ignoreList) {
+            preferencesRepository.updatePlayerPreferences { backup.playerPreferences }
+        }
 
         // 2. 恢复 WebDAV 服务器
-        webDavServersDataSource.update { backup.webDavServers }
+        if ("webdav_servers" !in ignoreList) {
+            webDavServersDataSource.update { backup.webDavServers }
+        }
 
         // 3. 恢复 OpenList 配置
-        backup.openListConfig?.let { config ->
-            restoreOpenListConfig(config)
+        if ("openlist_config" !in ignoreList) {
+            backup.openListConfig?.let { config ->
+                restoreOpenListConfig(config)
+            }
         }
 
         // 4. 恢复云盘凭证
-        backup.alipanConfig?.let { restoreAlipanConfig(it) }
-        backup.cloud189Config?.let { restoreCloud189Config(it) }
-        backup.pan123Config?.let { restorePan123Config(it) }
-        backup.quarkConfig?.let { restoreQuarkConfig(it) }
-        backup.yun139Config?.let { restoreYun139Config(it) }
+        if ("cloud_credentials" !in ignoreList) {
+            backup.alipanConfig?.let { restoreAlipanConfig(it) }
+            backup.cloud189Config?.let { restoreCloud189Config(it) }
+            backup.pan123Config?.let { restorePan123Config(it) }
+            backup.quarkConfig?.let { restoreQuarkConfig(it) }
+            backup.yun139Config?.let { restoreYun139Config(it) }
+        }
     }
 
-    // ==================== ZIP 导出/导入 ====================
+    // ==================== 打包工具 ====================
 
-    /** 将备份数据 + OpenList 数据打包为 ZIP 并写入 URI */
-    suspend fun exportToUri(backup: BackupData, uri: Uri) {
+    /** 将备份数据打包为 ZIP 字节数组 */
+    private suspend fun zipBackupData(backup: BackupData): ByteArray {
         val jsonString = json.encodeToString(BackupData.serializer(), backup)
-
-        context.contentResolver.openOutputStream(uri)?.use { os ->
-            BufferedOutputStream(os).use { bos ->
+        return ByteArrayOutputStream().use { baos ->
+            BufferedOutputStream(baos).use { bos ->
                 ZipOutputStream(bos).use { zip ->
-                    // 1. 写入 backup.json
                     zip.putNextEntry(ZipEntry("backup.json"))
                     zip.write(jsonString.toByteArray(Charsets.UTF_8))
                     zip.closeEntry()
 
-                    // 2. 写入 openlist_data 目录下的文件
                     val dataDir = context.filesDir.resolve("openlist_data")
                     if (dataDir.exists()) {
                         dataDir.listFiles()?.forEach { file ->
@@ -109,6 +119,81 @@ class BackupManager @Inject constructor(
                         }
                     }
                 }
+            }
+            baos.toByteArray()
+        }
+    }
+
+    // ==================== WebDAV 云备份 ====================
+
+    /** 上传备份到 WebDAV 服务器（使用配置中的子文件夹路径） */
+    suspend fun uploadToCloud(
+        config: BackupWebDavConfig,
+    ): Result<Unit> {
+        val backup = createBackup()
+        val zipBytes = zipBackupData(backup)
+        val path = config.remoteBackupPath()
+        return webDavRepository.uploadFile(
+            baseUrl = config.url,
+            path = path,
+            authHeader = config.basicAuthHeader,
+            data = zipBytes,
+        ).also { result ->
+            // 上传成功后，如果启用 keepOnlyLatestBackup，删除旧备份
+            if (result.isSuccess && config.keepOnlyLatestBackup) {
+                val listResult = listRemoteBackupFiles(config)
+                listResult.onSuccess { files ->
+                    files.filter { it.path != path }
+                        .forEach { oldFile ->
+                            webDavRepository.delete(
+                                baseUrl = config.url,
+                                path = oldFile.path,
+                                authHeader = config.basicAuthHeader,
+                            )
+                        }
+                }
+            }
+        }
+    }
+
+    /** 从 WebDAV 服务器下载并恢复备份（指定远程路径） */
+    suspend fun downloadFromCloud(
+        config: BackupWebDavConfig,
+        path: String,
+    ): Result<BackupData> {
+        val result = webDavRepository.downloadFile(
+            baseUrl = config.url,
+            path = path,
+            authHeader = config.basicAuthHeader,
+        )
+        return result.map { zipBytes ->
+            BufferedInputStream(ByteArrayInputStream(zipBytes)).use { bis ->
+                parseFromZip(bis)
+            }
+        }
+    }
+
+    /** 列出 WebDAV 服务器上的备份文件（仅 .zip 文件） */
+    suspend fun listRemoteBackupFiles(config: BackupWebDavConfig): Result<List<WebDavResource>> {
+        val dir = config.remoteBackupDir()
+        return webDavRepository.listDirectory(
+            baseUrl = config.url,
+            path = dir,
+            authHeader = config.basicAuthHeader,
+        ).map { resources ->
+            resources.filter { !it.isDirectory && it.name.endsWith(".zip", ignoreCase = true) }
+                .sortedByDescending { it.lastModified }
+        }
+    }
+
+    // ==================== ZIP 导出/导入 ====================
+
+    /** 将备份数据 + OpenList 数据打包为 ZIP 并写入 URI */
+    suspend fun exportToUri(backup: BackupData, uri: Uri) {
+        val zipBytes = zipBackupData(backup)
+        context.contentResolver.openOutputStream(uri)?.use { os ->
+            BufferedOutputStream(os).use { bos ->
+                bos.write(zipBytes)
             }
         }
     }

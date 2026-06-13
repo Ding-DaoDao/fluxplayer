@@ -10,11 +10,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -27,9 +23,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.base.DataState
-import com.fluxplayer.app.core.ui.components.NextTopAppBar
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.components.SelectablePreference
-import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.extensions.plus
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
 
@@ -54,21 +49,9 @@ private fun FolderPreferencesContent(
     onNavigateUp: () -> Unit,
     onEvent: (FolderPreferencesUiEvent) -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            NextTopAppBar(
-                title = stringResource(id = R.string.manage_folders),
-                navigationIcon = {
-                    FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = NextIcons.ArrowBack,
-                            contentDescription = stringResource(id = R.string.navigate_up),
-                        )
-                    }
-                },
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    FluxSettingsScaffold(
+        title = stringResource(id = R.string.manage_folders),
+        onNavigateUp = onNavigateUp,
     ) { innerPadding ->
         when (uiState.foldersDataState) {
             is DataState.Loading -> {

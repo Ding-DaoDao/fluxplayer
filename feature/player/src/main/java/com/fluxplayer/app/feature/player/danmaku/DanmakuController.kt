@@ -133,12 +133,6 @@ class DanmakuController(
         danmakuView.sendDanmakuNow(danmaku)
     }
 
-    /** 更新播放速度（与视频速度联动） */
-    fun updatePlaybackSpeed(speed: Float) {
-        danmakuView.playbackSpeed = speed
-        danmakuView.reconfigure()
-    }
-
     /** 获取当前的播放时间 */
     private fun getPlayerPosition(): Long {
         return player?.currentPosition ?: 0L

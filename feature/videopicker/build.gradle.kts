@@ -60,6 +60,11 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.accompanist.permissions)
     implementation(libs.reorderable)
+    implementation(libs.haze)
+    implementation(libs.backdrop)
+    implementation(libs.miuix.ui.android) {
+        exclude(group = "top.yukonga.miuix.kmp", module = "miuix-blur-android")
+    }
 
     // Hilt
     implementation(libs.hilt.android)

@@ -1,6 +1,5 @@
 package com.fluxplayer.app.core.data.quark
 
-import android.util.Log
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import com.fluxplayer.app.core.data.GlobalCookieJar
@@ -29,14 +28,11 @@ class QuarkApiClient(
 
     fun setDriveType(type: String) {
         driveType = type
-        Log.d(TAG, "setDriveType: $type, baseUrl=$baseUrl, pr=$pr")
     }
 
     fun setCookie(cookie: String) {
-        Log.d(TAG, "setCookie: cookie长度=${cookie.length}, 前100字符=${cookie.take(100)}")
         cookieManager.add(cookie)
         val merged = cookieManager.get()
-        Log.d(TAG, "setCookie: 合并后cookie长度=${merged.length}, 包含__uid=${merged.contains("__uid=")}, 包含__pus=${merged.contains("__pus=")}")
         QuarkAuthProvider.cookie = merged
         QuarkAuthProvider.referer = homeUrl
         QuarkAuthProvider.isActive = cookie.isNotBlank()
@@ -49,19 +45,23 @@ class QuarkApiClient(
         return c.contains("__uid=") && c.contains("__pus=")
     }
 
+    /** 清除内存中的 Cookie 及 driveType，防止退出后残留旧账号数据 */
+    fun clearCookie() {
+        cookieManager.clear()
+        driveType = "quark"
+        onCookieUpdated = null
+    }
+
     private fun buildHeaders(): Map<String, String> {
-        val headers = mapOf(
+        return mapOf(
             "cookie" to getCookie(),
             "User-Agent" to QUARK_UA,
             "referer" to homeUrl
         )
-        Log.d(TAG, "buildHeaders: cookie长度=${getCookie().length}")
-        return headers
     }
 
     private fun updateCookieFromResponse(resp: okhttp3.Response) {
         val setCookie = resp.header("set-cookie") ?: return
-        Log.d(TAG, "updateCookieFromResponse: set-cookie=${setCookie.take(100)}")
         cookieManager.add(setCookie)
         val merged = cookieManager.get()
         QuarkAuthProvider.cookie = merged
@@ -69,23 +69,18 @@ class QuarkApiClient(
     }
 
     private suspend fun apiGet(url: String): JSONObject {
-        Log.d(TAG, "apiGet: $url")
         val builder = Request.Builder().url(url).get()
         buildHeaders().forEach { (k, v) -> builder.header(k, v) }
         val resp = executeRequestAndGetResponse(builder.build())
-        Log.d(TAG, "apiGet: status=${resp.code}, url=$url")
         updateCookieFromResponse(resp)
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
         if (!resp.isSuccessful) {
-            Log.e(TAG, "apiGet FAILED: HTTP ${resp.code}, body=${respBody.take(500)}")
             throw IllegalStateException("HTTP ${resp.code} from $url: ${respBody.take(200)}")
         }
-        Log.d(TAG, "apiGet SUCCESS: body前200字符=${respBody.take(200)}")
         return JSONObject(respBody)
     }
 
     private suspend fun apiPost(url: String, body: JSONObject? = null): JSONObject {
-        Log.d(TAG, "apiPost: $url, body=${body?.toString()?.take(200)}")
         val builder = Request.Builder().url(url)
         if (body != null) {
             builder.post(body.toString().toRequestBody(jsonMediaType))
@@ -94,14 +89,11 @@ class QuarkApiClient(
         }
         buildHeaders().forEach { (k, v) -> builder.header(k, v) }
         val resp = executeRequestAndGetResponse(builder.build())
-        Log.d(TAG, "apiPost: status=${resp.code}")
         updateCookieFromResponse(resp)
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
         if (!resp.isSuccessful) {
-            Log.e(TAG, "apiPost FAILED: HTTP ${resp.code}, body=${respBody.take(500)}")
             throw IllegalStateException("HTTP ${resp.code} from $url: ${respBody.take(200)}")
         }
-        Log.d(TAG, "apiPost SUCCESS: body前200字符=${respBody.take(200)}")
         return JSONObject(respBody)
     }
 
@@ -124,11 +116,9 @@ class QuarkApiClient(
             append("&__dt=1000")
             append("&_sort=file_type:asc,$orderBy")
         }
-        Log.d(TAG, "listFiles: pdirFid=$pdirFid, page=$page, driveType=$driveType, url=$url")
         val json = apiGet(url)
         val status = json.optInt("status", 0)
         val code = json.optInt("code", 0)
-        Log.d(TAG, "listFiles: status=$status, code=$code")
         // 夸克 API: status=200 且 code=0 表示成功；code!=0 或 message 非空表示错误
         if (code != 0) {
             val errMsg = json.optString("message", "").ifEmpty { "code=$code" }
@@ -136,7 +126,6 @@ class QuarkApiClient(
         }
         val data = json.optJSONObject("data") ?: json
         val list = data.optJSONArray("list") ?: JSONArray()
-        Log.d(TAG, "listFiles: 获取到${list.length()}个文件")
         (0 until list.length()).map { i ->
             val item = list.getJSONObject(i)
             QuarkFileItem(
@@ -155,7 +144,6 @@ class QuarkApiClient(
     }
 
     suspend fun getVideoPlayInfo(fid: String): Result<QuarkPlayResult> = runCatching {
-        Log.d(TAG, "getVideoPlayInfo: fid=$fid")
         val body = JSONObject().apply {
             put("fid", fid)
             put("resolutions", "normal,low,high,super,2k,4k")
@@ -171,7 +159,6 @@ class QuarkApiClient(
         val data = json.optJSONObject("data") ?: throw IllegalStateException("无视频列表")
         // 夸克 API 返回 video_list，不是 play_list
         val videoList = data.optJSONArray("video_list") ?: data.optJSONArray("play_list") ?: throw IllegalStateException("无视频列表")
-        Log.d(TAG, "getVideoPlayInfo: 原始${videoList.length()}个播放源")
 
         val urls = mutableListOf<String>()
         val names = mutableListOf<String>()
@@ -181,20 +168,17 @@ class QuarkApiClient(
             val videoInfo = v.optJSONObject("video_info")
             val url = videoInfo?.optString("url", "") ?: ""
             val resolution = v.optString("resolution", "")
-            Log.d(TAG, "getVideoPlayInfo: [$i] resolution=$resolution, accessable=$accessible, url=${url.take(80)}")
             if (!accessible) continue
             if (url.isNotBlank()) {
                 urls.add(url)
                 names.add(resolution)
             }
         }
-        Log.d(TAG, "getVideoPlayInfo: 有效${urls.size}个播放源: $names")
         if (urls.isEmpty()) throw IllegalStateException("无可用视频播放源")
         QuarkPlayResult(urls, names)
     }
 
     suspend fun getDownloadUrl(fid: String): Result<String> = runCatching {
-        Log.d(TAG, "getDownloadUrl: fid=$fid")
         val body = JSONObject().apply {
             put("fids", JSONArray().apply { put(fid) })
         }
@@ -209,7 +193,6 @@ class QuarkApiClient(
     }
 
     suspend fun createFolder(name: String, parentFid: String): Result<Boolean> = runCatching {
-        Log.d(TAG, "createFolder: name=$name, parentFid=$parentFid")
         val body = JSONObject().apply {
             put("pdir_fid", parentFid)
             put("file_name", name)

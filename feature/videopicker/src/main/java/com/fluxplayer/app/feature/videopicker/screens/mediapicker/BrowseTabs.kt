@@ -20,7 +20,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,7 +34,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.fluxplayer.app.core.ui.components.FluxIcon
 import com.fluxplayer.app.core.model.ApplicationPreferences
+import com.fluxplayer.app.core.model.WebDavServer
 import com.fluxplayer.app.feature.videopicker.aliyun.AliyunBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.cloud189.C189BrowserTabContent
 import com.fluxplayer.app.feature.videopicker.openlist.OpenListBrowserTabContent
@@ -51,7 +56,6 @@ data class BrowseProvider(
 )
 
 private val defaultProviders = listOf(
-    BrowseProvider("webdav", "WebDAV", "浏览远程服务器文件", UiR.drawable.ic_provider_webdav),
     BrowseProvider("openlist", "OpenList", "浏览本地文件服务器", UiR.drawable.ic_provider_openlist),
     BrowseProvider("alipan", "阿里云盘", "阿里云盘文件浏览", UiR.drawable.ic_provider_alipan),
     BrowseProvider("yun139", "移动云盘", "移动云盘文件浏览", UiR.drawable.ic_provider_yun139),
@@ -66,6 +70,29 @@ private fun orderedProviders(providerOrder: List<String>): List<BrowseProvider> 
     val map = defaultProviders.associateBy { it.id }
     val ordered = providerOrder.mapNotNull { map[it] }
     val missing = defaultProviders.filter { it.id !in providerOrder }
+    return ordered + missing
+}
+
+/** 将 defaultProviders（不含 webdav）与动态 WebDAV 服务器列表合并 */
+private fun buildProviderList(
+    providerOrder: List<String>,
+    webDavServers: List<WebDavServer>,
+): List<BrowseProvider> {
+    val webdavEntries = webDavServers.map { server ->
+        BrowseProvider(
+            id = "webdav:${server.id}",
+            name = server.name,
+            desc = server.url,
+            iconRes = UiR.drawable.ic_provider_webdav,
+        )
+    }
+    val allStatic = defaultProviders
+    val allEntries = webdavEntries + allStatic
+    val map = allEntries.associateBy { it.id }
+    if (providerOrder.isEmpty()) return allEntries
+    // 按 providerOrder 排序，不在 order 中的放尾部
+    val ordered = providerOrder.mapNotNull { map[it] }
+    val missing = allEntries.filter { it.id !in providerOrder.toSet() }
     return ordered + missing
 }
 
@@ -84,6 +111,7 @@ fun BrowseTabs(
     onProviderReordered: (List<String>) -> Unit = {},
     navigateToDirParam: Pair<String, String>? = null,
     onNavigateToDirConsumed: () -> Unit = {},
+    webDavServers: List<WebDavServer> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     BackHandler(enabled = selectedProvider != null) {
@@ -108,7 +136,9 @@ fun BrowseTabs(
         label = "BrowseTransition",
     ) { provider ->
         if (provider == null) {
-            var items by remember { mutableStateOf(orderedProviders(preferences.providerOrder)) }
+            var items by remember(webDavServers, preferences.providerOrder) {
+                mutableStateOf(buildProviderList(preferences.providerOrder, webDavServers))
+            }
             val hapticFeedback = LocalHapticFeedback.current
             val lazyListState = rememberLazyListState()
             val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
@@ -160,7 +190,7 @@ fun BrowseTabs(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                Icon(
+                                FluxIcon(
                                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -174,21 +204,15 @@ fun BrowseTabs(
         } else {
             // 已选中平台的内容页
             LaunchedEffect(provider) {
-                if (provider == "webdav" || provider == "openlist") {
+                if (provider == "webdav" || provider.startsWith("webdav:") || provider == "openlist") {
                     onProviderLogoutChanged(null)
                 }
             }
 
-            Column(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 when (provider) {
-                    "webdav" -> WebDavBrowserTabContent(
-                        onPlayVideo = onPlayVideo,
-                        onPlayVideos = onPlayVideos,
-                        onSettingsClick = onSettingsClick,
-                        navigateToDirParam = navigateToDirParam,
-                        onNavigateToDirConsumed = onNavigateToDirConsumed,
-                    )
                     "alipan" -> AliyunBrowserTabContent(
+                        modifier = Modifier.fillMaxSize(),
                         onPlayVideo = onPlayVideo,
                         onPlayVideos = onPlayVideos,
                         onLogoutReady = onProviderLogoutChanged,
@@ -197,6 +221,7 @@ fun BrowseTabs(
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
                     "quark" -> QuarkBrowserTabContent(
+                        modifier = Modifier.fillMaxSize(),
                         onPlayVideo = onPlayVideo,
                         onPlayVideos = onPlayVideos,
                         onLogoutReady = onProviderLogoutChanged,
@@ -205,6 +230,7 @@ fun BrowseTabs(
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
                     "uc" -> QuarkBrowserTabContent(
+                        modifier = Modifier.fillMaxSize(),
                         driveType = "uc",
                         onPlayVideo = onPlayVideo,
                         onPlayVideos = onPlayVideos,
@@ -214,6 +240,7 @@ fun BrowseTabs(
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
                     "cloud189" -> C189BrowserTabContent(
+                        modifier = Modifier.fillMaxSize(),
                         onPlayVideo = onPlayVideo,
                         onPlayVideos = onPlayVideos,
                         onLogoutReady = onProviderLogoutChanged,
@@ -222,6 +249,7 @@ fun BrowseTabs(
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
                     "pan123" -> Pan123BrowserTabContent(
+                        modifier = Modifier.fillMaxSize(),
                         onPlayVideo = onPlayVideo,
                         onPlayVideos = onPlayVideos,
                         onLogoutReady = onProviderLogoutChanged,
@@ -230,6 +258,7 @@ fun BrowseTabs(
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
                     "yun139" -> Yun139BrowserTabContent(
+                        modifier = Modifier.fillMaxSize(),
                         onPlayVideo = onPlayVideo,
                         onPlayVideos = onPlayVideos,
                         onLogoutReady = onProviderLogoutChanged,
@@ -238,13 +267,37 @@ fun BrowseTabs(
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
                     "openlist" -> OpenListBrowserTabContent(
+                        modifier = Modifier.fillMaxSize(),
                         onPlayVideo = onPlayVideo,
                         onPlayVideos = onPlayVideos,
                         onSettingsClick = onSettingsClick,
                         navigateToDirParam = navigateToDirParam,
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
-                    else -> { /* 不应该到达 */ }
+                    // 旧格式（历史跳转）—— 不带 serverId，由 ViewModel 内部自动选择第一个服务器
+                    "webdav" -> WebDavBrowserTabContent(
+                        modifier = Modifier.fillMaxSize(),
+                        onPlayVideo = onPlayVideo,
+                        onPlayVideos = onPlayVideos,
+                        onSettingsClick = onSettingsClick,
+                        navigateToDirParam = navigateToDirParam,
+                        onNavigateToDirConsumed = onNavigateToDirConsumed,
+                    )
+                    else -> {
+                        // 动态 WebDAV 实例（id 格式: webdav:{serverId}）
+                        if (provider.startsWith("webdav:")) {
+                            val serverId = provider.removePrefix("webdav:")
+                            WebDavBrowserTabContent(
+                                modifier = Modifier.fillMaxSize(),
+                                serverId = serverId,
+                                onPlayVideo = onPlayVideo,
+                                onPlayVideos = onPlayVideos,
+                                onSettingsClick = onSettingsClick,
+                                navigateToDirParam = navigateToDirParam,
+                                onNavigateToDirConsumed = onNavigateToDirConsumed,
+                            )
+                        }
+                    }
                 }
             }
         }

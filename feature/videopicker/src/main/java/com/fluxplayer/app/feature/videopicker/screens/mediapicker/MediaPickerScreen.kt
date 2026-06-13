@@ -4,25 +4,28 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.defaultMinSize
@@ -60,6 +63,7 @@ import androidx.compose.material3.ToggleFloatingActionButton
 import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -70,8 +74,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -80,7 +90,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.tooling.preview.PreviewScreenSizes
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -96,6 +105,7 @@ import com.fluxplayer.app.core.model.Folder
 import com.fluxplayer.app.core.model.MediaLayoutMode
 import com.fluxplayer.app.core.model.MediaViewMode
 import com.fluxplayer.app.core.model.Video
+import com.fluxplayer.app.core.model.WebDavServer
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.components.CancelButton
@@ -107,7 +117,17 @@ import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.extensions.copy
 import com.fluxplayer.app.core.ui.preview.DayNightPreview
 import com.fluxplayer.app.core.ui.preview.VideoPickerPreviewParameterProvider
+import com.fluxplayer.app.core.model.ComposeEngine
+import com.fluxplayer.app.core.ui.theme.FluxTheme
+import com.fluxplayer.app.core.ui.theme.LocalHazeState
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import dev.chrisbanes.haze.hazeEffect
+import com.fluxplayer.app.core.ui.theme.FluxHazeStyle
+import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
+import top.yukonga.miuix.kmp.basic.NavigationBar as MiuixNavigationBar
+import top.yukonga.miuix.kmp.basic.NavigationBarItem as MiuixNavigationBarItem
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
 import com.fluxplayer.app.feature.videopicker.composables.CenterCircularProgressBar
 import com.fluxplayer.app.feature.videopicker.openlist.OpenListBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.screens.history.HistoryTabContent
@@ -117,10 +137,25 @@ import com.fluxplayer.app.feature.videopicker.composables.MediaView
 import com.fluxplayer.app.feature.videopicker.composables.NoVideosFound
 import com.fluxplayer.app.feature.videopicker.composables.QuickSettingsDialog
 import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
 import com.fluxplayer.app.feature.videopicker.composables.TextIconToggleButton
 import com.fluxplayer.app.feature.videopicker.composables.VideoInfoDialog
 import com.fluxplayer.app.feature.videopicker.state.SelectedFolder
 import com.fluxplayer.app.feature.videopicker.state.SelectedVideo
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.InnerShadow
+import com.kyant.backdrop.shadow.Shadow
+import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.fluxplayer.app.feature.videopicker.state.rememberSelectionManager
 
 @Composable
@@ -135,10 +170,12 @@ fun MediaPickerRoute(
     onWebDavClick: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val activeWebDavServers by viewModel.activeWebDavServers.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     MediaPickerScreen(
         uiState = uiState,
+        activeWebDavServers = activeWebDavServers,
         selectedTab = selectedTab,
         onTabSelected = { selectedTab = it },
         onPlayVideos = onPlayVideos,
@@ -162,6 +199,7 @@ fun MediaPickerRoute(
 @Composable
 internal fun MediaPickerScreen(
     uiState: MediaPickerUiState,
+    activeWebDavServers: List<WebDavServer> = emptyList(),
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     onNavigateUp: () -> Unit = {},
@@ -200,109 +238,216 @@ internal fun MediaPickerScreen(
 
     val selectedItemsSize = selectionManager.selectedFolders.size + selectionManager.selectedVideos.size
     val totalItemsSize = (uiState.mediaDataState as? DataState.Success)?.value?.run { folderList.size + mediaList.size } ?: 0
+    val hazeState = remember { HazeState() }
+    val useFloatingBottomBar = uiState.preferences.useFloatingBottomBar
+    val useLiquidGlass = useFloatingBottomBar
+        && uiState.preferences.useLiquidGlass
+        && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+    val backdrop = if (useLiquidGlass) rememberLayerBackdrop() else null
 
+    CompositionLocalProvider(LocalHazeState provides hazeState) {
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
+            val isMiuix = FluxTheme.engine == ComposeEngine.MIUIX
             if (selectedProvider != null && selectedTab == 1 && !selectionManager.isInSelectionMode) {
                 // 已进入 provider → 不显示 Scaffold 顶栏，由 TabContent 内部 ProviderTopBar 接管
             } else if ((selectedTab == 1 || selectedTab == 2) && !selectionManager.isInSelectionMode) {
-                // 浏览 / 历史标签页 → 简单标题 + 设置按钮
-                NextTopAppBar(
-                    title = if (selectedTab == 1) stringResource(R.string.browse) else "历史",
-                    fontWeight = FontWeight.Bold,
-                    navigationIcon = {},
-                    actions = {
-                        IconButton(onClick = onSettingsClick) {
-                            Icon(
-                                imageVector = NextIcons.Settings,
-                                contentDescription = stringResource(id = R.string.settings),
-                            )
-                        }
-                    },
-                )
-            } else {
-                NextTopAppBar(
-                    title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
-                    fontWeight = FontWeight.Bold.takeIf { uiState.folderName == null },
-                    navigationIcon = {
-                        if (selectionManager.isInSelectionMode) {
-                            Row(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.secondaryContainer)
-                                    .clickable { selectionManager.exitSelectionMode() }
-                                    .padding(8.dp)
-                                    .padding(end = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    imageVector = NextIcons.Close,
-                                    contentDescription = stringResource(id = R.string.navigate_up),
-                                )
-                                Text(
-                                    text = stringResource(R.string.m_n_selected, selectedItemsSize, totalItemsSize),
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                            }
-                        } else if (uiState.folderName != null) {
-                            FilledTonalIconButton(onClick = onNavigateUp) {
-                                Icon(
-                                    imageVector = NextIcons.ArrowBack,
-                                    contentDescription = stringResource(id = R.string.navigate_up),
-                                )
-                            }
-                        }
-                    },
-                    actions = {
-                        if (selectionManager.isInSelectionMode) {
-                            FilledTonalIconButton(
-                                onClick = {
-                                    if (selectedItemsSize != totalItemsSize) {
-                                        (uiState.mediaDataState as? DataState.Success)?.value?.let { folder ->
-                                            folder.folderList.forEach { selectionManager.selectFolder(it) }
-                                            folder.mediaList.forEach { selectionManager.selectVideo(it) }
-                                        }
-                                    } else {
-                                        selectionManager.clearSelection()
-                                    }
-                                },
-                            ) {
-                                Icon(
-                                    imageVector = if (selectedItemsSize != totalItemsSize) {
-                                        NextIcons.SelectAll
-                                    } else {
-                                        NextIcons.DeselectAll
-                                    },
-                                    contentDescription = if (selectedItemsSize != totalItemsSize) {
-                                        stringResource(R.string.select_all)
-                                    } else {
-                                        stringResource(R.string.deselect_all)
-                                    },
-                                )
-                            }
-                        } else {
-                            IconButton(onClick = onSearchClick) {
-                                Icon(
-                                    imageVector = NextIcons.Search,
-                                    contentDescription = stringResource(id = R.string.search),
-                                )
-                            }
-                            IconButton(onClick = { showQuickSettingsDialog = true }) {
-                                Icon(
-                                    imageVector = NextIcons.DashBoard,
-                                    contentDescription = stringResource(id = R.string.menu),
-                                )
-                            }
+                if (isMiuix) {
+                    MiuixSmallTopAppBar(
+                        title = if (selectedTab == 1) stringResource(R.string.browse) else stringResource(R.string.history),
+                        actions = {
                             IconButton(onClick = onSettingsClick) {
                                 Icon(
                                     imageVector = NextIcons.Settings,
                                     contentDescription = stringResource(id = R.string.settings),
                                 )
                             }
-                        }
-                    },
-                )
+                        },
+                    )
+                } else {
+                    NextTopAppBar(
+                        title = if (selectedTab == 1) stringResource(R.string.browse) else stringResource(R.string.history),
+                        fontWeight = FontWeight.Bold,
+                        navigationIcon = {},
+                        actions = {
+                            IconButton(onClick = onSettingsClick) {
+                                Icon(
+                                    imageVector = NextIcons.Settings,
+                                    contentDescription = stringResource(id = R.string.settings),
+                                )
+                            }
+                        },
+                    )
+                }
+            } else {
+                if (isMiuix) {
+                    // 视频列表页不启用顶栏模糊，避免透出后面的内容
+                    MiuixSmallTopAppBar(
+                        title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
+                        navigationIcon = {
+                            if (selectionManager.isInSelectionMode) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(MiuixTheme.colorScheme.surfaceVariant)
+                                        .clickable { selectionManager.exitSelectionMode() }
+                                        .padding(8.dp)
+                                        .padding(end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = NextIcons.Close,
+                                        contentDescription = stringResource(id = R.string.navigate_up),
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.m_n_selected, selectedItemsSize, totalItemsSize),
+                                        style = MiuixTheme.textStyles.body1,
+                                    )
+                                }
+                            } else if (uiState.folderName != null) {
+                                FilledTonalIconButton(onClick = onNavigateUp) {
+                                    Icon(
+                                        imageVector = NextIcons.ArrowBack,
+                                        contentDescription = stringResource(id = R.string.navigate_up),
+                                    )
+                                }
+                            }
+                        },
+                        actions = {
+                            if (selectionManager.isInSelectionMode) {
+                                FilledTonalIconButton(
+                                    onClick = {
+                                        if (selectedItemsSize != totalItemsSize) {
+                                            (uiState.mediaDataState as? DataState.Success)?.value?.let { folder ->
+                                                folder.folderList.forEach { selectionManager.selectFolder(it) }
+                                                folder.mediaList.forEach { selectionManager.selectVideo(it) }
+                                            }
+                                        } else {
+                                            selectionManager.clearSelection()
+                                        }
+                                    },
+                                ) {
+                                    Icon(
+                                        imageVector = if (selectedItemsSize != totalItemsSize) {
+                                            NextIcons.SelectAll
+                                        } else {
+                                            NextIcons.DeselectAll
+                                        },
+                                        contentDescription = if (selectedItemsSize != totalItemsSize) {
+                                            stringResource(R.string.select_all)
+                                        } else {
+                                            stringResource(R.string.deselect_all)
+                                        },
+                                    )
+                                }
+                            } else {
+                                IconButton(onClick = onSearchClick) {
+                                    Icon(
+                                        imageVector = NextIcons.Search,
+                                        contentDescription = stringResource(id = R.string.search),
+                                    )
+                                }
+                                IconButton(onClick = { showQuickSettingsDialog = true }) {
+                                    Icon(
+                                        imageVector = NextIcons.DashBoard,
+                                        contentDescription = stringResource(id = R.string.menu),
+                                    )
+                                }
+                                IconButton(onClick = onSettingsClick) {
+                                    Icon(
+                                        imageVector = NextIcons.Settings,
+                                        contentDescription = stringResource(id = R.string.settings),
+                                    )
+                                }
+                            }
+                        },
+                    )
+                } else {
+                    NextTopAppBar(
+                        title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
+                        fontWeight = FontWeight.Bold.takeIf { uiState.folderName == null },
+                        navigationIcon = {
+                            if (selectionManager.isInSelectionMode) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                                        .clickable { selectionManager.exitSelectionMode() }
+                                        .padding(8.dp)
+                                        .padding(end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = NextIcons.Close,
+                                        contentDescription = stringResource(id = R.string.navigate_up),
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.m_n_selected, selectedItemsSize, totalItemsSize),
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
+                                }
+                            } else if (uiState.folderName != null) {
+                                FilledTonalIconButton(onClick = onNavigateUp) {
+                                    Icon(
+                                        imageVector = NextIcons.ArrowBack,
+                                        contentDescription = stringResource(id = R.string.navigate_up),
+                                    )
+                                }
+                            }
+                        },
+                        actions = {
+                            if (selectionManager.isInSelectionMode) {
+                                FilledTonalIconButton(
+                                    onClick = {
+                                        if (selectedItemsSize != totalItemsSize) {
+                                            (uiState.mediaDataState as? DataState.Success)?.value?.let { folder ->
+                                                folder.folderList.forEach { selectionManager.selectFolder(it) }
+                                                folder.mediaList.forEach { selectionManager.selectVideo(it) }
+                                            }
+                                        } else {
+                                            selectionManager.clearSelection()
+                                        }
+                                    },
+                                ) {
+                                    Icon(
+                                        imageVector = if (selectedItemsSize != totalItemsSize) {
+                                            NextIcons.SelectAll
+                                        } else {
+                                            NextIcons.DeselectAll
+                                        },
+                                        contentDescription = if (selectedItemsSize != totalItemsSize) {
+                                            stringResource(R.string.select_all)
+                                        } else {
+                                            stringResource(R.string.deselect_all)
+                                        },
+                                    )
+                                }
+                            } else {
+                                IconButton(onClick = onSearchClick) {
+                                    Icon(
+                                        imageVector = NextIcons.Search,
+                                        contentDescription = stringResource(id = R.string.search),
+                                    )
+                                }
+                                IconButton(onClick = { showQuickSettingsDialog = true }) {
+                                    Icon(
+                                        imageVector = NextIcons.DashBoard,
+                                        contentDescription = stringResource(id = R.string.menu),
+                                    )
+                                }
+                                IconButton(onClick = onSettingsClick) {
+                                    Icon(
+                                        imageVector = NextIcons.Settings,
+                                        contentDescription = stringResource(id = R.string.settings),
+                                    )
+                                }
+                            }
+                        },
+                    )
+                }
             }
         },
         bottomBar = {
@@ -341,7 +486,8 @@ internal fun MediaPickerScreen(
                         }
                     },
                 )
-            } else {
+            } else if (!useFloatingBottomBar) {
+                // 标准 NavigationBar
                 NavigationBar(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
@@ -376,7 +522,7 @@ internal fun MediaPickerScreen(
                                 contentDescription = null,
                             )
                         },
-                        label = { Text("历史") },
+                        label = { Text(stringResource(R.string.history)) },
                     )
                 }
             }
@@ -454,22 +600,21 @@ internal fun MediaPickerScreen(
 
             }
         },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = if (FluxTheme.engine == ComposeEngine.MIUIX) {
+            MiuixTheme.colorScheme.surface
+        } else {
+            MaterialTheme.colorScheme.surfaceContainer
+        },
     ) { scaffoldPadding ->
-        val tabAnimTween = tween<IntOffset>(280, easing = EaseOutCubic)
-        val tabAlphaTween = tween<Float>(280, easing = EaseOutCubic)
-
-        AnimatedContent(
+        val contentPadding = if (useFloatingBottomBar) {
+            PaddingValues(top = scaffoldPadding.calculateTopPadding())
+        } else {
+            scaffoldPadding
+        }
+        Crossfade(
             targetState = selectedTab,
-            transitionSpec = {
-                if (targetState > initialState) {
-                    slideInHorizontally(tabAnimTween) { it / 4 } + fadeIn(tabAlphaTween) togetherWith
-                        slideOutHorizontally(tabAnimTween) { -it / 4 } + fadeOut(tabAlphaTween)
-                } else {
-                    slideInHorizontally(tabAnimTween) { -it / 4 } + fadeIn(tabAlphaTween) togetherWith
-                        slideOutHorizontally(tabAnimTween) { it / 4 } + fadeOut(tabAlphaTween)
-                }
-            },
+            modifier = Modifier.fillMaxSize(),
+            animationSpec = tween(280, easing = EaseOutCubic),
             label = "TabTransition",
         ) { tab ->
             when (tab) {
@@ -479,7 +624,7 @@ internal fun MediaPickerScreen(
                         }
 
                         is DataState.Loading -> {
-                            CenterCircularProgressBar(modifier = Modifier.padding(scaffoldPadding))
+                            CenterCircularProgressBar(modifier = Modifier.padding(contentPadding))
                         }
 
                         is DataState.Success -> {
@@ -497,14 +642,14 @@ internal fun MediaPickerScreen(
                             PullToRefreshBox(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(top = scaffoldPadding.calculateTopPadding())
-                                    .padding(start = scaffoldPadding.calculateStartPadding(LocalLayoutDirection.current))
+                                    .padding(top = contentPadding.calculateTopPadding())
+                                    .padding(start = contentPadding.calculateStartPadding(LocalLayoutDirection.current))
                                     .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
                                     .background(MaterialTheme.colorScheme.background),
                                 isRefreshing = uiState.refreshing,
                                 onRefresh = { onEvent(MediaPickerUiEvent.Refresh) },
                             ) {
-                                val updatedScaffoldPadding = scaffoldPadding.copy(top = 0.dp, start = 0.dp)
+                                val updatedScaffoldPadding = contentPadding.copy(top = 0.dp, start = 0.dp)
                                 PermissionMissingView(
                                     isGranted = permissionState.status.isGranted,
                                     showRationale = permissionState.status.shouldShowRationale,
@@ -546,9 +691,10 @@ internal fun MediaPickerScreen(
                         onProviderReordered = { onEvent(MediaPickerUiEvent.ReorderProviders(it)) },
                         navigateToDirParam = navigateToDirParam,
                         onNavigateToDirConsumed = { navigateToDirParam = null },
+                        webDavServers = activeWebDavServers,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(scaffoldPadding),
+                            .padding(contentPadding),
                     )
                 }
 
@@ -563,9 +709,24 @@ internal fun MediaPickerScreen(
                         },
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(scaffoldPadding),
+                            .padding(contentPadding),
                     )
                 }
+            }
+        }
+    }
+
+        // Floating bar overlay
+        if (useFloatingBottomBar && !selectionManager.isInSelectionMode) {
+            Box(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            ) {
+                FloatingBottomBar(
+                    selectedTab = selectedTab,
+                    onTabSelected = onTabSelected,
+                    backdrop = backdrop,
+                    hazeState = hazeState,
+                )
             }
         }
     }
@@ -646,6 +807,7 @@ internal fun MediaPickerScreen(
             onCancel = { showDeleteVideosConfirmation = false },
         )
     }
+    } // CompositionLocalProvider
 }
 
 @Composable
@@ -1031,6 +1193,200 @@ private fun QuickCardsRow(
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun FloatingBottomBar(
+    selectedTab: Int,
+    onTabSelected: (Int) -> Unit,
+    backdrop: LayerBackdrop?,
+    hazeState: HazeState,
+) {
+    val navBarModifier = if (backdrop != null) {
+        Modifier
+    } else {
+        Modifier.hazeEffect(
+            state = hazeState,
+            style = FluxHazeStyle.bottomBarStyle(),
+        )
+    }
+    if (backdrop != null) {
+        // 液态玻璃模式：三层叠加底栏（Legado 架构）
+        val tabsCount = 3
+        val tabsBackdrop = rememberLayerBackdrop()
+        val combinedBackdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop)
+        val indicatorAnim = remember { Animatable(selectedTab.toFloat()) }
+        val pressAnim = remember { Animatable(0f) }
+
+        LaunchedEffect(selectedTab) {
+            indicatorAnim.animateTo(
+                selectedTab.toFloat(),
+                spring(dampingRatio = 0.6f, stiffness = 400f),
+            )
+        }
+
+        val selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        val unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        val tabs = listOf(
+            Triple(NextIcons.Video, stringResource(R.string.videos), 0),
+            Triple(NextIcons.Folder, stringResource(R.string.browse), 1),
+            Triple(NextIcons.History, stringResource(R.string.history), 2),
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            // Layer 1: 主容器背景（vibrancy + blur + lens + highlight + shadow）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { RoundedCornerShape(percent = 50) },
+                        effects = {
+                            vibrancy()
+                            blur(25f.dp.toPx())
+                            lens(24f.dp.toPx(), 24f.dp.toPx())
+                        },
+                        highlight = { Highlight.Ambient },
+                        shadow = { Shadow.Default },
+                    ),
+            ) {
+                tabs.forEach { _ -> Spacer(modifier = Modifier.weight(1f)) }
+            }
+
+            // Layer 2: 透明标签层（为指示器提供取色源）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .alpha(0f)
+                    .layerBackdrop(tabsBackdrop),
+            ) {
+                tabs.forEach { _ -> Spacer(modifier = Modifier.weight(1f)) }
+            }
+
+            // Layer 3: 选中指示器（combinedBackdrop + lens 色散 + shadow + innerShadow）
+            BoxWithConstraints(modifier = Modifier.matchParentSize()) {
+                val tabWidth = maxWidth / tabsCount
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            translationX = indicatorAnim.value * size.width
+                        }
+                        .width(tabWidth)
+                        .height(56.dp)
+                        .drawBackdrop(
+                            backdrop = combinedBackdrop,
+                            shape = { RoundedCornerShape(percent = 50) },
+                            effects = {
+                                lens(
+                                    10f.dp.toPx(),
+                                    14f.dp.toPx(),
+                                    depthEffect = true,
+                                    chromaticAberration = true,
+                                )
+                            },
+                            shadow = { Shadow.Default.copy(color = Color.Black.copy(alpha = 0.15f)) },
+                            innerShadow = { InnerShadow.Default },
+                        ),
+                )
+            }
+
+            // 按钮层（接收触摸事件）
+            Row(modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                tabs.forEach { (icon, label, index) ->
+                    val isSelected = selectedTab == index
+                    val interactionSource = remember { MutableInteractionSource() }
+                    val isPressed by interactionSource.collectIsPressedAsState()
+
+                    LaunchedEffect(isPressed) {
+                        if (isPressed) {
+                            pressAnim.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 300f))
+                        } else {
+                            pressAnim.animateTo(0f, spring(dampingRatio = 0.7f, stiffness = 250f))
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(56.dp)
+                            .graphicsLayer {
+                                val scale = 1f + 0.08f * pressAnim.value
+                                scaleX = scale
+                                scaleY = scale
+                            }
+                            .clickable(
+                                interactionSource = interactionSource,
+                                indication = null,
+                            ) { onTabSelected(index) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = if (isSelected) selectedContentColor else unselectedContentColor,
+                            )
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isSelected) selectedContentColor else unselectedContentColor,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // 毛玻璃模式：标准 NavigationBar
+        NavigationBar(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.8f),
+            modifier = navBarModifier,
+        ) {
+            NavigationBarItem(
+                selected = selectedTab == 0,
+                onClick = { onTabSelected(0) },
+                icon = {
+                    Icon(
+                        imageVector = NextIcons.Video,
+                        contentDescription = null,
+                    )
+                },
+                label = { Text(stringResource(R.string.videos)) },
+            )
+            NavigationBarItem(
+                selected = selectedTab == 1,
+                onClick = { onTabSelected(1) },
+                icon = {
+                    Icon(
+                        imageVector = NextIcons.Folder,
+                        contentDescription = null,
+                    )
+                },
+                label = { Text(stringResource(R.string.browse)) },
+            )
+            NavigationBarItem(
+                selected = selectedTab == 2,
+                onClick = { onTabSelected(2) },
+                icon = {
+                    Icon(
+                        imageVector = NextIcons.History,
+                        contentDescription = null,
+                    )
+                },
+                label = { Text("历史") },
+            )
         }
     }
 }

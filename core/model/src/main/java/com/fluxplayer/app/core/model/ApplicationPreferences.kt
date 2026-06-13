@@ -38,6 +38,26 @@ data class ApplicationPreferences(
 
     // 浏览页 provider 排序（空列表表示使用默认顺序）
     val providerOrder: List<String> = emptyList(),
+
+    // 悬浮底栏
+    val useFloatingBottomBar: Boolean = false,
+
+    // 液态玻璃效果（仅在悬浮底栏开启时生效）
+    val useLiquidGlass: Boolean = false,
+
+    // 模糊效果
+    val enableBlur: Boolean = true,
+    val enableProgressiveBlur: Boolean = false,
+    val topBarBlurRadius: Int = 24,
+    val topBarBlurAlpha: Int = 73,
+    val bottomBarBlurRadius: Int = 25,
+    val bottomBarBlurAlpha: Int = 73,
+
+    // 主题引擎
+    val composeEngine: ComposeEngine = ComposeEngine.MATERIAL,
+
+    // 下载存储路径
+    val downloadPath: String = "/storage/emulated/0/Download/",
 ) {
 
     companion object {

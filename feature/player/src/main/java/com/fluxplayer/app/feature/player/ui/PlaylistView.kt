@@ -18,8 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -51,6 +49,8 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.fluxplayer.app.core.common.Utils
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.FluxIcon
+import com.fluxplayer.app.core.ui.components.FluxText
 import com.fluxplayer.app.core.ui.components.NextSegmentedListItem
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.feature.player.state.rememberPlaylistState
@@ -171,7 +171,7 @@ private fun ThumbnailView(
             .aspectRatio(16f / 10f),
     ) {
         // Fallback icon
-        Icon(
+        FluxIcon(
             imageVector = NextIcons.Video,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.surfaceColorAtElevation(100.dp),
@@ -195,7 +195,7 @@ private fun ThumbnailView(
         // Duration overlay
         mediaItem.mediaMetadata.durationMs?.let { durationMs ->
             if (durationMs > 0) {
-                Text(
+                FluxText(
                     text = Utils.formatDurationMillis(durationMs),
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Normal),
                     color = Color.White,
@@ -220,7 +220,7 @@ private fun EmptyPlaylistView() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Icon(
+        FluxIcon(
             imageVector = NextIcons.Video,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),

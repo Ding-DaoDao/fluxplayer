@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -38,6 +37,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.fluxplayer.app.core.common.extensions.round
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.FluxIconButton
+import com.fluxplayer.app.core.ui.components.FluxText
 import com.fluxplayer.app.core.ui.components.NextSwitch
 import com.fluxplayer.app.feature.player.state.rememberPlaybackParametersState
 
@@ -115,7 +116,7 @@ fun BoxScope.PlaybackSpeedSelectorView(
                     },
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = { playbackParametersState.setPlaybackSpeed(1f) }) {
+                FluxIconButton(onClick = { playbackParametersState.setPlaybackSpeed(1f) }) {
                     Icon(
                         painter = painterResource(R.drawable.ic_reset),
                         contentDescription = null,
@@ -146,7 +147,7 @@ fun BoxScope.PlaybackSpeedSelectorView(
                             .weight(1f),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
+                        FluxText(
                             text = speed.toString(),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary,
@@ -168,7 +169,7 @@ fun BoxScope.PlaybackSpeedSelectorView(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(
+                FluxText(
                     text = stringResource(R.string.skip_silence),
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f),

@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -46,6 +45,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.fluxplayer.app.core.ui.components.FluxIcon
+import com.fluxplayer.app.core.ui.components.FluxText
 import com.fluxplayer.app.core.model.PlaybackHistory
 import com.fluxplayer.app.core.model.VideoSource
 import com.fluxplayer.app.core.ui.components.NextSegmentedListItem
@@ -117,27 +118,27 @@ fun HistoryTabContent(
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
+                    FluxIcon(
                         imageVector = NextIcons.History,
                         contentDescription = null,
                         modifier = Modifier.size(64.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text(
+                    FluxText(
                         text = "暂无播放记录",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(modifier = Modifier.height(24.dp))
                     TextButton(onClick = { showClearDialog = true }) {
-                        Icon(
+                        FluxIcon(
                             imageVector = NextIcons.Delete,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("清除全部")
+                        FluxText("清除全部")
                     }
                 }
             }
@@ -160,13 +161,13 @@ fun HistoryTabContent(
                 TextButton(
                     onClick = { showClearDialog = true },
                 ) {
-                    Icon(
+                    FluxIcon(
                         imageVector = NextIcons.Delete,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("清除全部")
+                    FluxText("清除全部")
                 }
             }
         }
@@ -239,17 +240,17 @@ fun HistoryTabContent(
                 supportingContent = {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
+                            FluxText(
                                 text = sourceLabel(historyItem.source),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             )
-                            Text(
+                            FluxText(
                                 text = " · ",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                             )
-                            Text(
+                            FluxText(
                                 text = formatRelativeTime(historyItem.lastPlayedTime),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
@@ -263,12 +264,12 @@ fun HistoryTabContent(
                                     // 旧格式 — 纯标签
                                     parentPath
                                 }
-                                Text(
+                                FluxText(
                                     text = " · ",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                 )
-                                Text(
+                                FluxText(
                                     text = "${displayLabel}/",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
@@ -294,19 +295,19 @@ fun HistoryTabContent(
     if (showClearDialog) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
-            title = { Text("清除全部历史") },
-            text = { Text("确定清除所有播放记录吗？此操作不可恢复。") },
+            title = { FluxText("清除全部历史") },
+            text = { FluxText("确定清除所有播放记录吗？此操作不可恢复。") },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.clearAll()
                     showClearDialog = false
                 }) {
-                    Text("清除")
+                    FluxText("清除")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) {
-                    Text("取消")
+                    FluxText("取消")
                 }
             },
         )
@@ -315,19 +316,19 @@ fun HistoryTabContent(
     itemToDelete?.let { item ->
         AlertDialog(
             onDismissRequest = { itemToDelete = null },
-            title = { Text("删除历史记录") },
-            text = { Text("确定删除「${item.title}」的播放记录吗？") },
+            title = { FluxText("删除历史记录") },
+            text = { FluxText("确定删除「${item.title}」的播放记录吗？") },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.deleteItem(item.uriString)
                     itemToDelete = null
                 }) {
-                    Text("删除")
+                    FluxText("删除")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { itemToDelete = null }) {
-                    Text("取消")
+                    FluxText("取消")
                 }
             },
         )
@@ -435,7 +436,7 @@ private fun HistoryThumbnail(
             .aspectRatio(16f / 10f),
     ) {
         // 图标常驻底层，缩略图加载成功时覆盖
-        Icon(
+        FluxIcon(
             imageVector = sourceIcon(source),
             contentDescription = source.name,
             tint = MaterialTheme.colorScheme.surfaceColorAtElevation(100.dp),

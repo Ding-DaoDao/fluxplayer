@@ -4,9 +4,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -37,7 +34,7 @@ fun PreferenceSlider(
         isLastItem = isLastItem,
         leadingContent = icon?.let {
             {
-                Icon(
+                FluxIcon(
                     imageVector = icon,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp),
@@ -47,9 +44,9 @@ fun PreferenceSlider(
         supportingContent = {
             Column {
                 description?.let {
-                    Text(text = description)
+                    FluxText(text = description)
                 }
-                Slider(
+                FluxSlider(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = enabled,
                     value = value,
@@ -60,7 +57,7 @@ fun PreferenceSlider(
             }
         },
         content = {
-            Text(text = title)
+            FluxText(text = title)
         },
         trailingContent = trailingContent,
     )

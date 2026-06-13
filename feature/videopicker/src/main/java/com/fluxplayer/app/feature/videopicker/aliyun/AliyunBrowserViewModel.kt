@@ -2,19 +2,26 @@ package com.fluxplayer.app.feature.videopicker.aliyun
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.util.Log
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.common.CloudPlayHeaders
 import com.fluxplayer.app.core.common.CloudPlaylistCache
 import com.fluxplayer.app.core.common.CloudUriScheme
+import com.fluxplayer.app.core.common.PickerUtils
+import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.aliyun.AliyunApiClient
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.aliyun.AliyunTokenExpiredException
+import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.WebDavResource
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import com.fluxplayer.app.feature.videopicker.CloudDirectoryCache
@@ -24,6 +31,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import java.io.File
 import javax.inject.Inject
 
 data class AliyunBreadcrumb(val label: String, val fileId: String)
@@ -34,6 +42,7 @@ class AliyunBrowserViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
     private val cloudUriResolver: CloudUriResolver,
     private val playbackHistoryRepository: PlaybackHistoryRepository,
+    private val cloudDownloadRepository: CloudDownloadRepository,
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
@@ -69,6 +78,18 @@ class AliyunBrowserViewModel @Inject constructor(
     private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
+    private var downloadJob: Job? = null
+
+    data class DownloadProgressData(
+        val fileName: String = "",
+        val progress: Float = 0f,
+        val downloadedBytes: Long = 0,
+        val totalBytes: Long = 0,
+        val completedFilePath: String? = null
+    )
+
+    private val _downloadProgress = MutableStateFlow<DownloadProgressData?>(null)
+    val downloadProgress: StateFlow<DownloadProgressData?> = _downloadProgress.asStateFlow()
 
     // endregion
 
@@ -272,6 +293,15 @@ class AliyunBrowserViewModel @Inject constructor(
 
     fun logout() {
         AliyunAuthProvider.clear()
+
+        // 清除 OkHttp GlobalCookieJar 中旧账号的 Cookie
+        GlobalCookieJar.clearHost("api.alipan.com")
+        GlobalCookieJar.clearHost("www.alipan.com")
+
+        // 重置 ApiClient 自身字段
+        apiClient.authorization = ""
+        apiClient.driveId = ""
+
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         directoryCache.clear()
@@ -644,15 +674,10 @@ class AliyunBrowserViewModel @Inject constructor(
         updateUiState { it.copy(pendingAction = "move", moveFileId = item.path) }
     }
 
-    fun startCopy(index: Int) {
-        val item = _uiState.value.items.getOrNull(index) ?: return
-        updateUiState { it.copy(pendingAction = "copy", copyFileId = item.path) }
-    }
-
     fun dismissPicker() {
         updateUiState {
             it.copy(
-                pendingAction = null, moveFileId = null, copyFileId = null,
+                pendingAction = null, moveFileId = null,
                 pickerFolders = emptyList(), pickerIsLoading = false
             )
         }
@@ -668,7 +693,6 @@ class AliyunBrowserViewModel @Inject constructor(
                 onSuccess = { listResult ->
                     val operatingPath = when (state.pendingAction) {
                         "move" -> state.moveFileId
-                        "copy" -> state.copyFileId
                         else -> null
                     }
                     val folders = listResult.items
@@ -704,9 +728,10 @@ class AliyunBrowserViewModel @Inject constructor(
 
     fun moveTo(targetFolderId: String) {
         val fileId = _uiState.value.moveFileId ?: return
+        val actualTargetId = targetFolderId.ifEmpty { "root" }
         viewModelScope.launch {
             updateUiState { it.copy(isLoading = true) }
-            val result = apiClient.moveFile(fileId, targetFolderId)
+            val result = apiClient.moveFile(fileId, actualTargetId)
             result.fold(
                 onSuccess = {
                     Toast.makeText(getApplication(), "移动成功", Toast.LENGTH_SHORT).show()
@@ -715,25 +740,6 @@ class AliyunBrowserViewModel @Inject constructor(
                 },
                 onFailure = { e ->
                     Toast.makeText(getApplication(), "移动失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                    updateUiState { it.copy(isLoading = false) }
-                }
-            )
-        }
-    }
-
-    fun copyTo(targetFolderId: String) {
-        val copyId = _uiState.value.copyFileId ?: return
-        viewModelScope.launch {
-            updateUiState { it.copy(isLoading = true) }
-            val result = apiClient.copyFile(copyId, targetFolderId)
-            result.fold(
-                onSuccess = {
-                    Toast.makeText(getApplication(), "复制成功", Toast.LENGTH_SHORT).show()
-                    dismissPicker()
-                    refresh()
-                },
-                onFailure = { e ->
-                    Toast.makeText(getApplication(), "复制失败: ${e.message}", Toast.LENGTH_SHORT).show()
                     updateUiState { it.copy(isLoading = false) }
                 }
             )
@@ -754,22 +760,60 @@ class AliyunBrowserViewModel @Inject constructor(
 
     fun downloadFile(index: Int) {
         val res = _uiState.value.items.getOrNull(index) ?: return
-        viewModelScope.launch {
+
+        downloadJob?.cancel()
+        downloadJob = viewModelScope.launch {
             try {
                 val urlResult = apiClient.getDownloadUrl(res.path)
                 urlResult.fold(
                     onSuccess = { url ->
-                        val dm = getApplication<Application>()
-                            .getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-                        val request = android.app.DownloadManager.Request(android.net.Uri.parse(url)).apply {
-                            setTitle(res.name)
-                            setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                            setDestinationInExternalPublicDir(
-                                android.os.Environment.DIRECTORY_DOWNLOADS, res.name
-                            )
+                        _downloadProgress.value = DownloadProgressData(
+                            fileName = res.name, progress = 0f
+                        )
+
+                        val eventJob = launch {
+                            cloudDownloadRepository.downloadEvents.collect { event ->
+                                when (event) {
+                                    is CloudDownloadRepository.DownloadEvent.Progress -> {
+                                        if (event.fileName == res.name) {
+                                            _downloadProgress.value = DownloadProgressData(
+                                                fileName = event.fileName,
+                                                progress = event.progress,
+                                                downloadedBytes = event.downloadedBytes,
+                                                totalBytes = event.totalBytes
+                                            )
+                                        }
+                                    }
+                                    is CloudDownloadRepository.DownloadEvent.Completed -> {
+                                        if (event.fileName == res.name) {
+                                            _downloadProgress.value = DownloadProgressData(
+                                                fileName = event.fileName,
+                                                progress = 1f,
+                                                completedFilePath = event.filePath
+                                            )
+                                            Toast.makeText(getApplication(), "下载完成: ${event.fileName}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                    is CloudDownloadRepository.DownloadEvent.Failed -> {
+                                        if (event.fileName == res.name) {
+                                            _downloadProgress.value = null
+                                            if (event.error != "下载已取消") {
+                                                Toast.makeText(getApplication(), "下载失败: ${event.error}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        dm.enqueue(request)
-                        Toast.makeText(getApplication(), "开始下载: ${res.name}", Toast.LENGTH_SHORT).show()
+
+                        cloudDownloadRepository.download(
+                            url = url,
+                            fileName = res.name,
+                            headers = AliyunAuthProvider.getPlayHeaders(),
+                            provider = "aliyun"
+                        )
+
+                        eventJob.cancel()
                     },
                     onFailure = { e ->
                         Toast.makeText(getApplication(), "获取下载链接失败: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -777,7 +821,37 @@ class AliyunBrowserViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 Toast.makeText(getApplication(), "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                _downloadProgress.value = null
             }
+        }
+    }
+
+    fun dismissDownloadProgress() {
+        _downloadProgress.value = null
+        cloudDownloadRepository.cancel()
+    }
+
+    fun openDownloadedFile(filePath: String) {
+        val context = getApplication<Application>()
+        val file = File(filePath)
+        if (!file.exists()) {
+            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(
+                context, "${context.packageName}.fileprovider", file
+            )
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                putExtra(Intent.EXTRA_STREAM, uri)
+                type = PickerUtils.getMimeType(filePath)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(Intent.createChooser(intent, "分享文件").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Log.e("AliyunVM", "分享文件失败", e)
+            Toast.makeText(context, "无法打开文件: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 

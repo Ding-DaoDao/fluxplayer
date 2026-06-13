@@ -43,4 +43,8 @@ interface WebDavRepository {
     suspend fun move(baseUrl: String, sourcePath: String, destinationPath: String, authHeader: String): Result<Unit>
 
     suspend fun copy(baseUrl: String, sourcePath: String, destinationPath: String, authHeader: String): Result<Unit>
+
+    suspend fun uploadFile(baseUrl: String, path: String, authHeader: String, data: ByteArray): Result<Unit>
+
+    suspend fun downloadFile(baseUrl: String, path: String, authHeader: String): Result<ByteArray>
 }

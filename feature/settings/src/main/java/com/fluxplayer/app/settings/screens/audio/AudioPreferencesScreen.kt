@@ -1,6 +1,6 @@
 package com.fluxplayer.app.settings.screens.audio
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -9,11 +9,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -26,7 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
-import com.fluxplayer.app.core.ui.components.NextTopAppBar
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.components.PreferenceSwitch
 import com.fluxplayer.app.core.ui.components.RadioTextButton
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
@@ -57,21 +52,9 @@ private fun AudioPreferencesContent(
 ) {
     val languages = remember { listOf(Pair("None", "")) + LocalesHelper.getAvailableLocales() }
 
-    Scaffold(
-        topBar = {
-            NextTopAppBar(
-                title = stringResource(id = R.string.audio),
-                navigationIcon = {
-                    FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = NextIcons.ArrowBack,
-                            contentDescription = stringResource(id = R.string.navigate_up),
-                        )
-                    }
-                },
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    FluxSettingsScaffold(
+        title = stringResource(id = R.string.audio),
+        onNavigateUp = onNavigateUp,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -81,9 +64,7 @@ private fun AudioPreferencesContent(
                 .padding(horizontal = 16.dp),
         ) {
             ListSectionTitle(text = stringResource(id = R.string.playback))
-            Column(
-                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-            ) {
+            Column {
                 ClickablePreferenceItem(
                     title = stringResource(id = R.string.preferred_audio_lang),
                     description = LocalesHelper.getLocaleDisplayLanguage(uiState.preferences.preferredAudioLanguage)
@@ -92,6 +73,7 @@ private fun AudioPreferencesContent(
                     onClick = { onEvent(AudioPreferencesUiEvent.ShowDialog(AudioPreferenceDialog.AudioLanguageDialog)) },
                     isFirstItem = true,
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(R.string.require_audio_focus),
                     description = stringResource(R.string.require_audio_focus_desc),
@@ -99,6 +81,7 @@ private fun AudioPreferencesContent(
                     isChecked = uiState.preferences.requireAudioFocus,
                     onClick = { onEvent(AudioPreferencesUiEvent.ToggleRequireAudioFocus) },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.pause_on_headset_disconnect),
                     description = stringResource(id = R.string.pause_on_headset_disconnect_desc),
@@ -106,6 +89,7 @@ private fun AudioPreferencesContent(
                     isChecked = uiState.preferences.pauseOnHeadsetDisconnect,
                     onClick = { onEvent(AudioPreferencesUiEvent.TogglePauseOnHeadsetDisconnect) },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.system_volume_panel),
                     description = stringResource(id = R.string.system_volume_panel_desc),
@@ -113,6 +97,7 @@ private fun AudioPreferencesContent(
                     isChecked = uiState.preferences.showSystemVolumePanel,
                     onClick = { onEvent(AudioPreferencesUiEvent.ToggleShowSystemVolumePanel) },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.volume_boost),
                     description = stringResource(id = R.string.volume_boost_desc),

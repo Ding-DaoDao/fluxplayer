@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -30,9 +31,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.CancelButton
+import com.fluxplayer.app.core.ui.components.DoneButton
+import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.feature.videopicker.DirectoryState
 
@@ -75,6 +81,8 @@ fun <T> CloudBrowserPanel(
     val curItems = topEntry?.items ?: items
     val curLoading = topEntry?.isLoading ?: isLoading
     val curError = topEntry?.error ?: error
+    var showExitConfirm by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
 
     SideEffect {
         if (cloudProviderKey == "webdav" || cloudProviderKey == "openlist") {
@@ -117,14 +125,25 @@ fun <T> CloudBrowserPanel(
                 onSettingsClick = onSettingsClick,
             )
 
-            // 面包屑行：路径 + 排序 + 驱动切换(阿里云盘) + 退出
+            // 面包屑行：路径 + 排序 + 驱动切换(阿里云盘) + 菜单
             BreadcrumbBar(
                 breadcrumbs = breadcrumbs,
                 breadcrumbLabel = breadcrumbLabel,
                 onNavigateToBreadcrumb = onBreadcrumbClick,
                 onSortClick = onSortClick,
                 actions = breadcrumbActions,
-                onExitClick = onExitClick,
+                showMenu = showMenu,
+                onMenuClick = if (onExitClick != null) ({ showMenu = true }) else null,
+                onMenuDismiss = { showMenu = false },
+                menuContent = {
+                    DropdownMenuItem(
+                        text = { Text("退出") },
+                        onClick = {
+                            showMenu = false
+                            showExitConfirm = true
+                        },
+                    )
+                },
                 showSortMenu = showSortMenu,
                 onSortMenuDismiss = onSortMenuDismiss,
                 sortMenuContent = sortMenuContent,
@@ -191,7 +210,7 @@ fun <T> CloudBrowserPanel(
                 }
             } else {
                 PullToRefreshBox(
-                    isRefreshing = false,
+                    isRefreshing = curLoading && curItems.isNotEmpty(),
                     onRefresh = onRefresh,
                     modifier = Modifier.weight(1f)
                 ) {
@@ -221,13 +240,16 @@ fun <T> CloudBrowserPanel(
                                             if (lastVisible >= total - 5 && total > 0) {
                                                 onLoadMore()
                                             }
-                                            isNearBottom = total > 0 && lastVisible >= total - 3
+                                            // 只有当可见项数量 < 总数量时，才认为内容溢出（需要滚动），
+                                            // 避免文件不足一屏时也触发 FAB 隐藏
+                                            val contentOverflows = visibleItems.size < total
+                                            isNearBottom = total > 0 && lastVisible >= total - 3 && contentOverflows
                                         }
                                 }
                                 LazyColumn(
                                     state = flatListState,
                                     modifier = Modifier.fillMaxSize(),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 80.dp)
                                 ) {
                                     itemsIndexed(curItems) { index, item ->
                                         val isPlayed = !item.isDirectory && (
@@ -279,24 +301,43 @@ fun <T> CloudBrowserPanel(
         }
 
         // 新建文件夹 FAB
-        if (isConfigured && onCreateFolder != null) {
-            val fabAlpha by animateFloatAsState(
-                targetValue = if (isNearBottom) 0f else 1f,
-                animationSpec = tween(300),
-                label = "fabAlpha",
-            )
+        if (isConfigured && onCreateFolder != null && !isNearBottom) {
             FloatingActionButton(
                 onClick = onCreateFolder,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-                    .alpha(fabAlpha),
+                    .padding(bottom = 88.dp, end = 16.dp),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             ) {
                 Icon(Icons.Default.Add, contentDescription = "新建文件夹")
             }
         }
+    }
+
+    // 退出确认对话框
+    if (showExitConfirm) {
+        NextDialog(
+            onDismissRequest = { showExitConfirm = false },
+            title = {
+                Text(
+                    text = stringResource(id = R.string.logout_confirmation_title),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                DoneButton(onClick = {
+                    showExitConfirm = false
+                    onExitClick?.invoke()
+                })
+            },
+            dismissButton = {
+                CancelButton(onClick = { showExitConfirm = false })
+            },
+            content = {
+                Text(text = stringResource(id = R.string.logout_confirmation_message))
+            },
+        )
     }
 }
 
@@ -308,7 +349,6 @@ private fun ProviderTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -337,7 +377,10 @@ private fun <T> BreadcrumbBar(
     onNavigateToBreadcrumb: (Int) -> Unit,
     onSortClick: (() -> Unit)? = null,
     actions: @Composable (RowScope.() -> Unit)? = null,
-    onExitClick: (() -> Unit)? = null,
+    showMenu: Boolean = false,
+    onMenuClick: (() -> Unit)? = null,
+    onMenuDismiss: () -> Unit = {},
+    menuContent: @Composable ColumnScope.() -> Unit = {},
     showSortMenu: Boolean = false,
     onSortMenuDismiss: () -> Unit = {},
     sortMenuContent: @Composable ColumnScope.() -> Unit = {},
@@ -345,7 +388,6 @@ private fun <T> BreadcrumbBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .padding(start = 8.dp, end = 4.dp, top = 2.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -402,16 +444,25 @@ private fun <T> BreadcrumbBar(
         if (actions != null) {
             actions()
         }
-        if (onExitClick != null) {
-            TextButton(
-                onClick = onExitClick,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            ) {
-                Text(
-                    text = "退出",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        if (onMenuClick != null) {
+            Box {
+                TextButton(
+                    onClick = onMenuClick,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Menu,
+                        contentDescription = "菜单",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = onMenuDismiss,
+                ) {
+                    menuContent()
+                }
             }
         }
     }
@@ -442,11 +493,12 @@ private fun DirectoryStackContent(
                 if (lastVisible >= total - 5 && total > 0) {
                     onLoadMore()
                 }
-                onNearBottomChanged(total > 0 && lastVisible >= total - 3)
+                val contentOverflows = visibleItems.size < total
+                onNearBottomChanged(total > 0 && lastVisible >= total - 3 && contentOverflows)
             }
     }
     PullToRefreshBox(
-        isRefreshing = false,
+        isRefreshing = entry.isLoading && entry.items.isNotEmpty(),
         onRefresh = onRefresh,
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -470,7 +522,7 @@ private fun DirectoryStackContent(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 80.dp),
                     ) {
                         itemsIndexed(entry.items) { index, item ->
                             val isPlayed = !item.isDirectory && (

@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +34,8 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import com.fluxplayer.app.core.common.Utils
+import com.fluxplayer.app.core.ui.components.FluxIcon
+import com.fluxplayer.app.core.ui.components.FluxText
 import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.Folder
 import com.fluxplayer.app.core.model.MediaLayoutMode
@@ -103,7 +104,7 @@ private fun FolderListItem(
         onLongClick = onLongClick,
         leadingContent = {
             Box(modifier = Modifier.padding(horizontal = 8.dp)) {
-                Icon(
+                FluxIcon(
                     imageVector = ImageVector.vectorResource(id = R.drawable.folder_thumb),
                     contentDescription = "",
                     tint = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -202,7 +203,7 @@ private fun FolderGridItem(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Box {
-                    Icon(
+                    FluxIcon(
                         imageVector = ImageVector.vectorResource(id = R.drawable.folder_thumb),
                         contentDescription = "",
                         tint = MaterialTheme.colorScheme.surfaceContainerHigh,

@@ -1,14 +1,20 @@
 package com.fluxplayer.app.core.data.pan123
 
+import android.util.Base64
 import android.util.Log
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 class Pan123ApiClient(
     client: OkHttpClient = CloudHttpClient.DEFAULT
@@ -32,6 +38,54 @@ class Pan123ApiClient(
             val raw = json.optString("message", "")
             return raw.ifBlank { "$operation 失败" }
         }
+
+        private const val AES_KEY = "pXce-DF4m7FnlftioS2nwg=="
+
+        /**
+         * 从CDN下载URL的query string中提取ref参数
+         */
+        fun parseRefFromUrl(url: String): String? {
+            return try {
+                val uri = java.net.URI(url)
+                val query = uri.query ?: return null
+                query.split("&")
+                    .map { it.split("=", limit = 2) }
+                    .associate { it[0] to (it.getOrNull(1) ?: "") }["ref"]
+            } catch (e: Exception) {
+                Log.e(TAG, "parseRefFromUrl error: ${e.message}")
+                null
+            }
+        }
+
+        /**
+         * AES/CBC/PKCS5Padding 解密ref参数
+         * 密钥: pXce-DF4m7FnlftioS2nwg==
+         * IV: 密文字节的前16字节
+         * 密文格式: URL-safe Base64（-→+，_→/）
+         */
+        fun decryptRef(encryptedStr: String): String {
+            val trimmed = encryptedStr.trim()
+            var standardBase64 = trimmed.replace('-', '+').replace('_', '/')
+            val remainder = standardBase64.length % 4
+            if (remainder > 0) {
+                standardBase64 += "=".repeat(4 - remainder)
+            }
+
+            val keyBytes = AES_KEY.toByteArray(Charsets.UTF_8)
+            val decoded = Base64.decode(standardBase64, Base64.DEFAULT)
+
+            if (decoded.size < 16) throw IllegalArgumentException("密文长度不足，至少需16字节")
+
+            val ivBytes = decoded.copyOfRange(0, 16)
+            val cipherText = decoded.copyOfRange(16, decoded.size)
+
+            val secretKeySpec = SecretKeySpec(keyBytes, "AES")
+            val ivSpec = IvParameterSpec(ivBytes)
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, secretKeySpec, ivSpec)
+            val decryptedBytes = cipher.doFinal(cipherText)
+            return String(decryptedBytes, Charsets.UTF_8)
+        }
     }
 
     // region ==================== 设备模拟 ====================
@@ -48,12 +102,11 @@ class Pan123ApiClient(
     private var config: JSONObject? = null
 
     fun setToken(token: String?) {
-        Log.d(TAG, "setToken: ${token?.take(20)}...")
         this.authToken = token
+        if (token.isNullOrBlank()) this.config = null
     }
 
     fun setTokenDirectly(token: String) {
-        Log.d(TAG, "setTokenDirectly: ${token.take(20)}...")
         this.authToken = token
     }
 
@@ -61,17 +114,13 @@ class Pan123ApiClient(
 
     suspend fun loadConfig(): Result<JSONObject> = runCatching {
         if (config != null) {
-            Log.d(TAG, "loadConfig: using cached config")
             return@runCatching config!!
         }
-        Log.d(TAG, "loadConfig: fetching from $CONFIG_URL")
         val request = Request.Builder().url(CONFIG_URL).get().build()
         val body = executeRequest(request)
-        Log.d(TAG, "loadConfig response: ${body.take(500)}")
         val json = JSONObject(body)
         val cfg = json.getJSONObject("data")
         config = cfg
-        Log.d(TAG, "loadConfig success, interfaceapi keys: ${cfg.optJSONObject("interfaceapi")?.keys()?.asSequence()?.toList()}")
         cfg
     }
 
@@ -81,7 +130,6 @@ class Pan123ApiClient(
             ?: throw IllegalStateException("No interfaceapi in config")
         val endpoint = apis.optString(key)
         if (endpoint.isBlank()) throw IllegalStateException("Endpoint '$key' not found in config")
-        Log.d(TAG, "apiEndpoint($key) = $endpoint")
         return endpoint
     }
 
@@ -124,20 +172,16 @@ class Pan123ApiClient(
         val headers = buildHeaders()
         val requestBuilder = Request.Builder().url(endpoint)
         if (body != null) {
-            val bodyStr = body.toString()
-            Log.d(TAG, "apiPost -> $endpoint body=${bodyStr.take(200)}")
-            requestBuilder.post(bodyStr.toRequestBody(jsonMediaType))
+            requestBuilder.post(body.toString().toRequestBody(jsonMediaType))
         } else {
-            Log.d(TAG, "apiPost(GET) -> $endpoint")
             requestBuilder.get()
         }
         headers.forEach { (k, v) -> requestBuilder.header(k, v) }
         val respBody = executeRequest(requestBuilder.build())
-        Log.d(TAG, "apiPost <- ${respBody.take(500)}")
         return try {
             JSONObject(respBody)
         } catch (e: Exception) {
-            Log.e(TAG, "apiPost JSON parse error: ${e.message}, body=${respBody.take(1000)}")
+            Log.e(TAG, "apiPost JSON parse error: ${e.message}")
             throw IllegalStateException("响应解析失败: ${e.message}", e)
         }
     }
@@ -146,13 +190,11 @@ class Pan123ApiClient(
         val headers = buildHeaders()
         val requestBuilder = Request.Builder().url(endpoint).get()
         headers.forEach { (k, v) -> requestBuilder.header(k, v) }
-        Log.d(TAG, "apiGet -> $endpoint")
         val respBody = executeRequest(requestBuilder.build())
-        Log.d(TAG, "apiGet <- ${respBody.take(500)}")
         return try {
             JSONObject(respBody)
         } catch (e: Exception) {
-            Log.e(TAG, "apiGet JSON parse error: ${e.message}, body=${respBody.take(1000)}")
+            Log.e(TAG, "apiGet JSON parse error: ${e.message}")
             throw IllegalStateException("响应解析失败: ${e.message}", e)
         }
     }
@@ -164,13 +206,11 @@ class Pan123ApiClient(
         val headers = buildWebHeaders()
         val requestBuilder = Request.Builder().url(endpoint).get()
         headers.forEach { (k, v) -> requestBuilder.header(k, v) }
-        Log.d(TAG, "webGet -> $endpoint")
         val respBody = executeRequest(requestBuilder.build())
-        Log.d(TAG, "webGet <- ${respBody.take(500)}")
         return try {
             JSONObject(respBody)
         } catch (e: Exception) {
-            Log.e(TAG, "webGet JSON parse error: ${e.message}, body=${respBody.take(1000)}")
+            Log.e(TAG, "webGet JSON parse error: ${e.message}")
             throw IllegalStateException("响应解析失败: ${e.message}", e)
         }
     }
@@ -183,7 +223,6 @@ class Pan123ApiClient(
      * 使用手机号+密码登录 123 云盘（Android APP API）
      */
     suspend fun login(passport: String, password: String): Result<LoginResult> = runCatching {
-        Log.d(TAG, "login: passport=$passport")
         loadConfig().getOrThrow()
         val endpoint = apiEndpoint("login")
         val body = JSONObject().apply {
@@ -191,27 +230,21 @@ class Pan123ApiClient(
             put("password", password)
             put("type", 1)
         }
-        Log.d(TAG, "login request body: $body")
         val json = apiPost(endpoint, body)
-        Log.d(TAG, "login response: $json")
 
         val message = json.optString("message", "")
-        Log.d(TAG, "login message=$message")
         if (message != "success") {
             val errMsg = json.optString("message", "登录失败")
-            Log.e(TAG, "login failed: $errMsg")
             throw IllegalStateException(errMsg)
         }
         val data = json.optJSONObject("data")
-            ?: throw IllegalStateException("登录响应无data字段: $json")
+            ?: throw IllegalStateException("登录响应无data字段")
         val token = data.optString("token", "")
         if (token.isBlank()) {
-            Log.e(TAG, "login: no token in response, data=$data")
             throw IllegalStateException("登录响应中未找到token")
         }
         val refreshTokenExpireTime = data.optLong("refresh_token_expire_time", 0)
         authToken = "Bearer $token"
-        Log.d(TAG, "login success, token=${token.take(10)}..., expireTime=$refreshTokenExpireTime")
         LoginResult(token, refreshTokenExpireTime)
     }
 
@@ -230,7 +263,6 @@ class Pan123ApiClient(
         orderDirection: String = "desc",
         searchData: String = ""
     ): Result<Pan123ListResult> = runCatching {
-        Log.d(TAG, "listFiles: parentFileId=$parentFileId, page=$page")
         val url = "$WEB_API_BASE/file/list/new" +
             "?driveId=0" +
             "&limit=100" +
@@ -252,13 +284,11 @@ class Pan123ApiClient(
         val code = json.optInt("code", -1)
         if (code != 0) {
             val msg = json.optString("message", "未知错误")
-            Log.e(TAG, "listFiles failed: code=$code, message=$msg")
             throw IllegalStateException("获取文件列表失败: $msg")
         }
 
         val data = json.optJSONObject("data")
         val infoList = data?.optJSONArray("InfoList") ?: JSONArray()
-        Log.d(TAG, "listFiles: got ${infoList.length()} items, page=$page")
 
         val items = (0 until infoList.length()).map { i ->
             val item = infoList.getJSONObject(i)
@@ -289,7 +319,6 @@ class Pan123ApiClient(
     }
 
     suspend fun getFileDownloadUrl(item: Pan123FileItem): Result<String> = runCatching {
-        Log.d(TAG, "getFileDownloadUrl: fileId=${item.fileId}")
         loadConfig().getOrThrow()
         val endpoint = apiEndpoint("fileDownloadInfo")
         val body = JSONObject().apply {
@@ -300,7 +329,6 @@ class Pan123ApiClient(
         }
         val json = apiPost(endpoint, body)
         val url = json.optJSONObject("data")?.optString("DownloadUrl", "") ?: ""
-        Log.d(TAG, "getFileDownloadUrl result: ${url.take(100)}")
         url
     }
 
@@ -309,7 +337,6 @@ class Pan123ApiClient(
      * 解析 video_play_info 数组获取不同清晰度的播放 URL
      */
     suspend fun getVideoPlayInfo(item: Pan123FileItem): Result<VideoPlayResult> = runCatching {
-        Log.d(TAG, "getVideoPlayInfo: fileId=${item.fileId}, size=${item.size}, etag=${item.etag}")
         loadConfig().getOrThrow()
 
         // 使用 buildUrl + apiGet（与反编译代码一致）
@@ -319,14 +346,11 @@ class Pan123ApiClient(
             "size" to item.size.toString()
         )
         val fullUrl = buildUrl(baseEndpoint, params)
-        Log.d(TAG, "getVideoPlayInfo URL: $fullUrl")
 
         val json = apiGet(fullUrl)
-        Log.d(TAG, "getVideoPlayInfo response: ${json.toString().take(500)}")
 
         val data = json.optJSONObject("data")
         if (data == null) {
-            Log.e(TAG, "getVideoPlayInfo: no data field")
             throw IllegalStateException("无视频信息")
         }
 
@@ -338,7 +362,6 @@ class Pan123ApiClient(
         if (videoUrl.isNotBlank()) {
             urls.add(videoUrl)
             names.add("原画")
-            Log.d(TAG, "getVideoPlayInfo: added 原画 url=${videoUrl.take(100)}")
         }
 
         // 转码清晰度列表
@@ -350,11 +373,9 @@ class Pan123ApiClient(
                 val resolution = info.optString("resolution", "转码${i + 1}")
                 urls.add(url)
                 names.add(resolution)
-                Log.d(TAG, "getVideoPlayInfo: added $resolution url=${url.take(100)}")
             }
         }
 
-        Log.d(TAG, "getVideoPlayInfo: total ${urls.size} quality options: $names")
         VideoPlayResult(urls, names)
     }
 
@@ -362,7 +383,6 @@ class Pan123ApiClient(
      * 获取文件下载信息（含 headers）— 与反编译代码一致
      */
     suspend fun getFileDownloadInfo(item: Pan123FileItem): Result<DownloadInfo> = runCatching {
-        Log.d(TAG, "getFileDownloadInfo: fileId=${item.fileId}")
         loadConfig().getOrThrow()
         val endpoint = apiEndpoint("fileDownloadInfo")
         val body = JSONObject().apply {
@@ -387,7 +407,6 @@ class Pan123ApiClient(
     }
 
     suspend fun createFolder(name: String, parentFileId: String = "0"): Result<Boolean> = runCatching {
-        Log.d(TAG, "createFolder: name=$name, parentFileId=$parentFileId")
         loadConfig().getOrThrow()
         val endpoint = "$API_BASE/file/upload_request"
         val body = JSONObject().apply {
@@ -401,12 +420,10 @@ class Pan123ApiClient(
             put("type", 1)
         }
         val json = apiPost(endpoint, body)
-        Log.d(TAG, "createFolder response: $json")
         true
     }
 
     suspend fun renameFile(fileId: String, newName: String): Result<Boolean> = runCatching {
-        Log.d(TAG, "renameFile: fileId=$fileId, newName=$newName")
         loadConfig().getOrThrow()
         val endpoint = apiEndpoint("modifyFileName")
         val body = JSONObject().apply {
@@ -415,12 +432,10 @@ class Pan123ApiClient(
             put("fileId", fileId)
         }
         val json = apiPost(endpoint, body)
-        Log.d(TAG, "renameFile response: $json")
         json.optString("message") == "ok"
     }
 
     suspend fun moveFile(fileId: String, parentFileId: String): Result<Boolean> = runCatching {
-        Log.d(TAG, "moveFile: fileId=$fileId -> parentFileId=$parentFileId")
         loadConfig().getOrThrow()
         val endpoint = "$API_BASE/file/mod_pid"
         val fileInfo = JSONObject().apply { put("FileId", fileId) }
@@ -429,7 +444,6 @@ class Pan123ApiClient(
             put("parentFileId", parentFileId)
         }
         val json = apiPost(endpoint, body)
-        Log.d(TAG, "moveFile response: $json")
         true
     }
 
@@ -437,7 +451,6 @@ class Pan123ApiClient(
         fileId: String, targetFileId: Long, etag: String,
         size: Long, s3keyFlag: String
     ): Result<Boolean> = runCatching {
-        Log.d(TAG, "copyFile: fileId=$fileId -> targetFileId=$targetFileId")
         loadConfig().getOrThrow()
         val endpoint = "$API_BASE/restful/goapi/v1/file/copy/async"
         val fileInfo = JSONObject().apply {
@@ -453,12 +466,10 @@ class Pan123ApiClient(
             put("targetFileId", targetFileId.toString())
         }
         val json = apiPost(endpoint, body)
-        Log.d(TAG, "copyFile response: $json")
         true
     }
 
     suspend fun trashFile(items: List<Pan123FileItem>): Result<Boolean> = runCatching {
-        Log.d(TAG, "trashFile: items=${items.map { it.fileId }}")
         loadConfig().getOrThrow()
         val endpoint = "$API_BASE/file/trash"
         val trashInfoList = JSONArray()
@@ -478,7 +489,6 @@ class Pan123ApiClient(
             put("operation", true)
         }
         val json = apiPost(endpoint, body)
-        Log.d(TAG, "trashFile response: $json")
         true
     }
 
@@ -487,7 +497,6 @@ class Pan123ApiClient(
     // region ==================== 用户信息 ====================
 
     suspend fun getUserInfo(): Result<Pan123UserInfo> = runCatching {
-        Log.d(TAG, "getUserInfo")
         loadConfig().getOrThrow()
         val endpoint = apiEndpoint("userInfo")
         val json = apiGet(endpoint)
@@ -501,6 +510,46 @@ class Pan123ApiClient(
             headImage = data.optString("headImage", ""),
             vipDesc = data.optString("vipDesc", ""),
             vipTimeDesc = data.optString("vipTimeDesc", "")
+        )
+    }
+
+    // endregion
+
+    // region ==================== 下载辅助 ====================
+
+    /**
+     * 通过HEAD请求跟随重定向，获取最终CDN下载URL
+     * @param intermediateUrl fileDownloadInfo返回的中转URL
+     * @return 最终CDN URL
+     */
+    suspend fun resolveFinalDownloadUrl(intermediateUrl: String): String {
+        return withContext(Dispatchers.IO) {
+            val request = Request.Builder().url(intermediateUrl).head().build()
+            val response = client.newCall(request).execute()
+            response.use { it.request.url.toString() }
+        }
+    }
+
+    /**
+     * 构建123云盘下载专用Headers
+     * 从最终CDN URL提取ref参数，AES解密得到Referer值
+     */
+    fun buildDownloadHeaders(finalUrl: String): Map<String, String> {
+        val ref = parseRefFromUrl(finalUrl)
+        val referer = if (ref != null) {
+            try {
+                decryptRef(ref)
+            } catch (e: Exception) {
+                Log.e(TAG, "decryptRef failed: ${e.message}, using fallback")
+                "https://yun.123pan.cn/"
+            }
+        } else {
+            "https://yun.123pan.cn/"
+        }
+        return mapOf(
+            "Referer" to referer,
+            "X-MF-PAN-RANGE" to "1",
+            "User-Agent" to "123pan/v3.1.3(Android 10;;Xiaomi 24031PN0DC)"
         )
     }
 

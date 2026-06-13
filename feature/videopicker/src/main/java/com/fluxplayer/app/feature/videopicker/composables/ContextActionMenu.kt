@@ -14,14 +14,12 @@ fun ContextActionMenu(
     item: WebDavResource,
     onDismiss: () -> Unit,
     onMove: () -> Unit,
-    onCopy: () -> Unit,
     onDelete: () -> Unit,
     onRename: () -> Unit,
     onDownload: () -> Unit,
 ) {
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         DropdownMenuItem(text = { Text("移动") }, onClick = { onMove(); onDismiss() })
-        DropdownMenuItem(text = { Text("复制") }, onClick = { onCopy(); onDismiss() })
         DropdownMenuItem(text = { Text("重命名") }, onClick = { onRename(); onDismiss() })
         DropdownMenuItem(text = { Text("删除") }, onClick = { onDelete(); onDismiss() })
         if (!item.isDirectory) {

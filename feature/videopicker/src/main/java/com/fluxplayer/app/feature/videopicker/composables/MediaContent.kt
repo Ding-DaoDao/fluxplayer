@@ -11,11 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +21,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.FluxCircularProgressIndicator
+import com.fluxplayer.app.core.ui.components.FluxIcon
+import com.fluxplayer.app.core.ui.components.FluxText
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 const val CIRCULAR_PROGRESS_INDICATOR_TEST_TAG = "circularProgressIndicator"
@@ -35,7 +35,7 @@ fun CenterCircularProgressBar(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CircularProgressIndicator(
+        FluxCircularProgressIndicator(
             modifier = Modifier.testTag(CIRCULAR_PROGRESS_INDICATOR_TEST_TAG),
         )
     }
@@ -63,7 +63,7 @@ fun NoVideosFound(contentPadding: PaddingValues) {
                 .padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
+            FluxIcon(
                 imageVector = NextIcons.Video,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -71,7 +71,7 @@ fun NoVideosFound(contentPadding: PaddingValues) {
             )
         }
         Spacer(modifier = Modifier.size(16.dp))
-        Text(
+        FluxText(
             text = stringResource(id = R.string.no_videos_found),
             style = MaterialTheme.typography.titleLargeEmphasized,
         )

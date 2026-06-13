@@ -2,27 +2,34 @@ package com.fluxplayer.app.feature.videopicker.quark
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.common.CloudPlayHeaders
 import com.fluxplayer.app.core.common.CloudPlaylistCache
 import com.fluxplayer.app.core.common.CloudUriScheme
+import com.fluxplayer.app.core.common.PickerUtils
+import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.quark.QuarkApiClient
 import com.fluxplayer.app.core.data.quark.QuarkAuthProvider
 import com.fluxplayer.app.core.data.quark.QuarkFileItem
+import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.feature.videopicker.CloudDirectoryCache
 import com.fluxplayer.app.feature.videopicker.DirectoryStackEntry
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 data class QuarkBreadcrumb(val label: String, val fileId: String)
@@ -33,6 +40,7 @@ class QuarkBrowserViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
     private val cloudUriResolver: CloudUriResolver,
     private val playbackHistoryRepository: PlaybackHistoryRepository,
+    private val cloudDownloadRepository: CloudDownloadRepository,
 ) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
@@ -70,6 +78,18 @@ class QuarkBrowserViewModel @Inject constructor(
     private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
+    private var downloadJob: Job? = null
+
+    data class DownloadProgressData(
+        val fileName: String = "",
+        val progress: Float = 0f,
+        val downloadedBytes: Long = 0,
+        val totalBytes: Long = 0,
+        val completedFilePath: String? = null
+    )
+
+    private val _downloadProgress = MutableStateFlow<DownloadProgressData?>(null)
+    val downloadProgress: StateFlow<DownloadProgressData?> = _downloadProgress.asStateFlow()
 
     // endregion
 
@@ -103,6 +123,7 @@ class QuarkBrowserViewModel @Inject constructor(
 
         // 注册缩略图 headers（浏览时 Coil 需要）
         QuarkAuthProvider.cookie = cookie
+        QuarkAuthProvider.referer = if (driveType == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
         QuarkAuthProvider.isActive = true
         if (driveType == "uc") {
             CloudPlayHeaders.registerSuffix(".uc.cn") { QuarkAuthProvider.getPlayHeaders() }
@@ -138,6 +159,7 @@ class QuarkBrowserViewModel @Inject constructor(
             setupCookiePersistence(prefName)
             // 注册缩略图 headers
             QuarkAuthProvider.cookie = cookie
+            QuarkAuthProvider.referer = if (type == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
             QuarkAuthProvider.isActive = true
             if (type == "uc") {
                 CloudPlayHeaders.registerSuffix(".uc.cn") { QuarkAuthProvider.getPlayHeaders() }
@@ -161,6 +183,13 @@ class QuarkBrowserViewModel @Inject constructor(
 
     fun logout() {
         QuarkAuthProvider.clear()
+        apiClient.clearCookie()
+
+        // 清除 OkHttp GlobalCookieJar 中 Quark/UC 的 Cookie
+        GlobalCookieJar.clearHost("drive.quark.cn")
+        GlobalCookieJar.clearHost("pc-api.uc.cn")
+        GlobalCookieJar.clearHost("drive.uc.cn")
+
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         val ucPrefs = getApplication<Application>().getSharedPreferences(UC_PREF_NAME, Context.MODE_PRIVATE)
@@ -501,9 +530,10 @@ class QuarkBrowserViewModel @Inject constructor(
 
     fun moveTo(targetFolderId: String) {
         val fileId = _uiState.value.moveFileId ?: return
+        val actualTargetId = targetFolderId.ifEmpty { "0" }
         viewModelScope.launch {
             updateUiState { it.copy(isLoading = true) }
-            val result = apiClient.moveFiles(listOf(fileId), targetFolderId)
+            val result = apiClient.moveFiles(listOf(fileId), actualTargetId)
             result.fold(
                 onSuccess = {
                     Toast.makeText(getApplication(), "移动成功", Toast.LENGTH_SHORT).show()
@@ -533,20 +563,56 @@ class QuarkBrowserViewModel @Inject constructor(
 
     fun downloadFile(index: Int) {
         val res = _uiState.value.items.getOrNull(index) ?: return
-        viewModelScope.launch {
+        val provider = if (_uiState.value.driveType == "uc") "uc" else "quark"
+
+        downloadJob?.cancel()
+        downloadJob = viewModelScope.launch {
             try {
                 val urlResult = apiClient.getDownloadUrl(res.path)
                 urlResult.fold(
                     onSuccess = { url ->
-                        val dm = getApplication<Application>()
-                            .getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-                        val request = android.app.DownloadManager.Request(android.net.Uri.parse(url)).apply {
-                            setTitle(res.name)
-                            setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                            setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, res.name)
+                        _downloadProgress.value = DownloadProgressData(fileName = res.name, progress = 0f)
+
+                        val eventJob = launch {
+                            cloudDownloadRepository.downloadEvents.collect { event ->
+                                when (event) {
+                                    is CloudDownloadRepository.DownloadEvent.Progress -> {
+                                        if (event.fileName == res.name) {
+                                            _downloadProgress.value = DownloadProgressData(
+                                                fileName = event.fileName, progress = event.progress,
+                                                downloadedBytes = event.downloadedBytes, totalBytes = event.totalBytes
+                                            )
+                                        }
+                                    }
+                                    is CloudDownloadRepository.DownloadEvent.Completed -> {
+                                        if (event.fileName == res.name) {
+                                            _downloadProgress.value = DownloadProgressData(
+                                                fileName = event.fileName,
+                                                progress = 1f,
+                                                completedFilePath = event.filePath
+                                            )
+                                            Toast.makeText(getApplication(), "下载完成: ${event.fileName}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                    is CloudDownloadRepository.DownloadEvent.Failed -> {
+                                        if (event.fileName == res.name) {
+                                            _downloadProgress.value = null
+                                            if (event.error != "下载已取消") {
+                                                Toast.makeText(getApplication(), "下载失败: ${event.error}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        dm.enqueue(request)
-                        Toast.makeText(getApplication(), "开始下载: ${res.name}", Toast.LENGTH_SHORT).show()
+
+                        cloudDownloadRepository.download(
+                            url = url,
+                            fileName = res.name,
+                            headers = QuarkAuthProvider.getPlayHeaders(),
+                            provider = provider
+                        )
+                        eventJob.cancel()
                     },
                     onFailure = { e ->
                         Toast.makeText(getApplication(), "获取下载链接失败: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -554,7 +620,35 @@ class QuarkBrowserViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 Toast.makeText(getApplication(), "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                _downloadProgress.value = null
             }
+        }
+    }
+
+    fun dismissDownloadProgress() {
+        _downloadProgress.value = null
+        cloudDownloadRepository.cancel()
+    }
+
+    fun openDownloadedFile(filePath: String) {
+        val context = getApplication<Application>()
+        val file = File(filePath)
+        if (!file.exists()) {
+            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                putExtra(Intent.EXTRA_STREAM, uri)
+                type = PickerUtils.getMimeType(filePath)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(Intent.createChooser(intent, "分享文件").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Log.e("QuarkVM", "分享文件失败", e)
+            Toast.makeText(context, "无法打开文件: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 

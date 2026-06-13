@@ -1,6 +1,6 @@
 package com.fluxplayer.app.settings.screens.gesture
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,11 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,7 +33,7 @@ import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.NextDialogWithDoneAndCancelButtons
-import com.fluxplayer.app.core.ui.components.NextTopAppBar
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.components.PreferenceSlider
 import com.fluxplayer.app.core.ui.components.PreferenceSwitch
 import com.fluxplayer.app.core.ui.components.PreferenceSwitchWithDivider
@@ -69,21 +65,9 @@ private fun GesturePreferencesContent(
     onEvent: (GesturePreferencesUiEvent) -> Unit,
     onNavigateUp: () -> Unit = {},
 ) {
-    Scaffold(
-        topBar = {
-            NextTopAppBar(
-                title = stringResource(id = R.string.gestures),
-                navigationIcon = {
-                    FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = NextIcons.ArrowBack,
-                            contentDescription = stringResource(id = R.string.navigate_up),
-                        )
-                    }
-                },
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    FluxSettingsScaffold(
+        title = stringResource(id = R.string.gestures),
+        onNavigateUp = onNavigateUp,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -93,9 +77,7 @@ private fun GesturePreferencesContent(
                 .padding(horizontal = 16.dp),
         ) {
             ListSectionTitle(text = stringResource(id = R.string.gestures))
-            Column(
-                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-            ) {
+            Column {
                 PreferenceSwitch(
                     title = stringResource(id = R.string.seek_gesture),
                     description = stringResource(id = R.string.seek_gesture_description),
@@ -104,6 +86,7 @@ private fun GesturePreferencesContent(
                     onClick = { onEvent(GesturePreferencesUiEvent.ToggleUseSeekControls) },
                     isFirstItem = true
                 )
+                HorizontalDivider()
                 PreferenceSlider(
                     title = stringResource(R.string.seek_gesture_sensitivity),
                     description = uiState.preferences.seekSensitivity.toString(decimalPlaces = 2),
@@ -124,6 +107,7 @@ private fun GesturePreferencesContent(
                         }
                     },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.brightness_gesture),
                     description = stringResource(id = R.string.brightness_gesture_description),
@@ -131,6 +115,7 @@ private fun GesturePreferencesContent(
                     isChecked = uiState.preferences.enableBrightnessSwipeGesture,
                     onClick = { onEvent(GesturePreferencesUiEvent.ToggleEnableBrightnessSwipeGesture) },
                 )
+                HorizontalDivider()
                 PreferenceSlider(
                     title = stringResource(R.string.brightness_gesture_sensitivity),
                     description = uiState.preferences.brightnessGestureSensitivity.toString(decimalPlaces = 2),
@@ -151,6 +136,7 @@ private fun GesturePreferencesContent(
                         }
                     },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.volume_gesture),
                     description = stringResource(id = R.string.volume_gesture_description),
@@ -158,6 +144,7 @@ private fun GesturePreferencesContent(
                     isChecked = uiState.preferences.enableVolumeSwipeGesture,
                     onClick = { onEvent(GesturePreferencesUiEvent.ToggleEnableVolumeSwipeGesture) },
                 )
+                HorizontalDivider()
                 PreferenceSlider(
                     title = stringResource(R.string.volume_gesture_sensitivity),
                     description = uiState.preferences.volumeGestureSensitivity.toString(decimalPlaces = 2),
@@ -178,6 +165,7 @@ private fun GesturePreferencesContent(
                         }
                     },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.zoom_gesture),
                     description = stringResource(id = R.string.zoom_gesture_description),
@@ -185,6 +173,7 @@ private fun GesturePreferencesContent(
                     isChecked = uiState.preferences.useZoomControls,
                     onClick = { onEvent(GesturePreferencesUiEvent.ToggleUseZoomControls) },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.pan_gesture),
                     description = stringResource(id = R.string.pan_gesture_description),
@@ -193,6 +182,7 @@ private fun GesturePreferencesContent(
                     isChecked = uiState.preferences.enablePanGesture,
                     onClick = { onEvent(GesturePreferencesUiEvent.ToggleEnablePanGesture) },
                 )
+                HorizontalDivider()
                 PreferenceSwitchWithDivider(
                     title = stringResource(id = R.string.double_tap),
                     description = stringResource(id = R.string.double_tap_description),
@@ -201,6 +191,7 @@ private fun GesturePreferencesContent(
                     onChecked = { onEvent(GesturePreferencesUiEvent.ToggleDoubleTapGesture) },
                     onClick = { onEvent(GesturePreferencesUiEvent.ShowDialog(GesturePreferenceDialog.DoubleTapDialog)) },
                 )
+                HorizontalDivider()
                 PreferenceSlider(
                     title = stringResource(R.string.seek_increment),
                     description = stringResource(R.string.seconds, uiState.preferences.seekIncrement),
@@ -217,6 +208,7 @@ private fun GesturePreferencesContent(
                         }
                     },
                 )
+                HorizontalDivider()
                 PreferenceSlider(
                     title = stringResource(R.string.haptic_feedback_strength),
                     description = uiState.preferences.hapticFeedbackStrength.toString(decimalPlaces = 2),

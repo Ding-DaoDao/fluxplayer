@@ -10,6 +10,7 @@ import com.fluxplayer.app.core.common.VideoQualityCache
 import com.fluxplayer.app.core.data.aliyun.AliyunApiClient
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189ApiClient
+import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.pan123.Pan123ApiClient
 import com.fluxplayer.app.core.data.pan123.Pan123AuthProvider
@@ -32,11 +33,34 @@ class CloudUriResolver @Inject constructor(
 
     /** 清除除指定 Provider 之外的所有云盘认证状态，防止 HLS 分片兜底注入时 Cookie/Token 串号 */
     private fun clearOtherProviders(except: String) {
-        if (except != "quark") QuarkAuthProvider.clear()
-        if (except != "alipan") AliyunAuthProvider.clear()
-        if (except != "pan123") Pan123AuthProvider.clear()
-        if (except != "cloud189") C189AuthProvider.clear()
-        if (except != "yun139") Yun139AuthProvider.clear()
+        if (except != "quark") {
+            QuarkAuthProvider.clear()
+            GlobalCookieJar.clearHost("drive.quark.cn")
+            GlobalCookieJar.clearHost("pc-api.uc.cn")
+            GlobalCookieJar.clearHost("drive.uc.cn")
+        }
+        if (except != "alipan") {
+            AliyunAuthProvider.clear()
+            GlobalCookieJar.clearHost("api.alipan.com")
+            GlobalCookieJar.clearHost("www.alipan.com")
+        }
+        if (except != "pan123") {
+            Pan123AuthProvider.clear()
+            GlobalCookieJar.clearHost("api.123278.com")
+            GlobalCookieJar.clearHost("apigate.123795.com")
+        }
+        if (except != "cloud189") {
+            C189AuthProvider.clear()
+            GlobalCookieJar.clearHost("cloud.189.cn")
+            GlobalCookieJar.clearHost("api.cloud.189.cn")
+            GlobalCookieJar.clearHost("m.cloud.189.cn")
+            GlobalCookieJar.clearHost("open.e.189.cn")
+        }
+        if (except != "yun139") {
+            Yun139AuthProvider.clear()
+            GlobalCookieJar.clearHost("yun.139.com")
+            GlobalCookieJar.clearHost("api.139.com")
+        }
     }
 
     suspend fun resolve(uri: Uri): Uri? {

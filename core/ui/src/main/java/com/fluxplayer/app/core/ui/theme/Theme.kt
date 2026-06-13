@@ -3,13 +3,18 @@ package com.fluxplayer.app.core.ui.theme
 import android.os.Build
 import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
+import com.fluxplayer.app.core.model.ComposeEngine
 
 private val lightScheme = lightColorScheme(
     primary = primaryLight,
@@ -244,48 +249,87 @@ fun NextPlayerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     highContrastDarkTheme: Boolean = false,
     dynamicColor: Boolean = true,
+    composeEngine: ComposeEngine = ComposeEngine.MATERIAL,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
-        dynamicColor && supportsDynamicTheming() -> {
-            val context = LocalContext.current
-            when {
-                darkTheme && highContrastDarkTheme -> dynamicDarkColorScheme(context).copy(
-                    background = backgroundPureBlack,
-                    surface = surfacePureBlack,
-                    surfaceDim = surfaceDimPureBlack,
-                    surfaceBright = surfaceBrightPureBlack,
-                    surfaceContainerLowest = surfaceContainerLowestPureBlack,
-                    surfaceContainerLow = surfaceContainerLowPureBlack,
-                    surfaceContainer = surfaceContainerPureBlack,
-                    surfaceContainerHigh = surfaceContainerHighPureBlack,
-                    surfaceContainerHighest = surfaceContainerHighestPureBlack,
-                )
-                darkTheme -> dynamicDarkColorScheme(context)
-                else -> dynamicLightColorScheme(context)
-            }
-        }
+    val colorScheme = resolveColorScheme(darkTheme, highContrastDarkTheme, dynamicColor)
 
-        darkTheme && highContrastDarkTheme -> darkScheme.copy(
-            background = backgroundPureBlack,
-            surface = surfacePureBlack,
-            surfaceDim = surfaceDimPureBlack,
-            surfaceBright = surfaceBrightPureBlack,
-            surfaceContainerLowest = surfaceContainerLowestPureBlack,
-            surfaceContainerLow = surfaceContainerLowPureBlack,
-            surfaceContainer = surfaceContainerPureBlack,
-            surfaceContainerHigh = surfaceContainerHighPureBlack,
-            surfaceContainerHighest = surfaceContainerHighestPureBlack,
-        )
-        darkTheme -> darkScheme
-        else -> lightScheme
+    CompositionLocalProvider(LocalComposeEngine provides composeEngine) {
+        when (composeEngine) {
+            ComposeEngine.MIUIX -> MiuixThemeWrapper(
+                isDark = darkTheme,
+                dynamicColor = dynamicColor,
+                m3ColorScheme = colorScheme,
+                content = content,
+            )
+            ComposeEngine.MATERIAL -> MaterialThemeWrapper(
+                colorScheme = colorScheme,
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+private fun resolveColorScheme(
+    darkTheme: Boolean,
+    highContrastDarkTheme: Boolean,
+    dynamicColor: Boolean,
+): ColorScheme = when {
+    dynamicColor && supportsDynamicTheming() -> {
+        val context = LocalContext.current
+        when {
+            darkTheme && highContrastDarkTheme -> dynamicDarkColorScheme(context).copy(
+                background = backgroundPureBlack,
+                surface = surfacePureBlack,
+                surfaceDim = surfaceDimPureBlack,
+                surfaceBright = surfaceBrightPureBlack,
+                surfaceContainerLowest = surfaceContainerLowestPureBlack,
+                surfaceContainerLow = surfaceContainerLowPureBlack,
+                surfaceContainer = surfaceContainerPureBlack,
+                surfaceContainerHigh = surfaceContainerHighPureBlack,
+                surfaceContainerHighest = surfaceContainerHighestPureBlack,
+            )
+            darkTheme -> dynamicDarkColorScheme(context)
+            else -> dynamicLightColorScheme(context)
+        }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content,
+    darkTheme && highContrastDarkTheme -> darkScheme.copy(
+        background = backgroundPureBlack,
+        surface = surfacePureBlack,
+        surfaceDim = surfaceDimPureBlack,
+        surfaceBright = surfaceBrightPureBlack,
+        surfaceContainerLowest = surfaceContainerLowestPureBlack,
+        surfaceContainerLow = surfaceContainerLowPureBlack,
+        surfaceContainer = surfaceContainerPureBlack,
+        surfaceContainerHigh = surfaceContainerHighPureBlack,
+        surfaceContainerHighest = surfaceContainerHighestPureBlack,
     )
+    darkTheme -> darkScheme
+    else -> lightScheme
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun MaterialThemeWrapper(
+    colorScheme: ColorScheme,
+    content: @Composable () -> Unit,
+) {
+    val fluxColorScheme = colorScheme.toFluxColorScheme()
+    val fluxTypography = Typography.toFluxTypography()
+
+    CompositionLocalProvider(
+        LocalFluxColorScheme provides fluxColorScheme,
+        LocalFluxTypography provides fluxTypography,
+    ) {
+        MaterialExpressiveTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            motionScheme = MotionScheme.expressive(),
+            content = content,
+        )
+    }
 }
 
 @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.S)

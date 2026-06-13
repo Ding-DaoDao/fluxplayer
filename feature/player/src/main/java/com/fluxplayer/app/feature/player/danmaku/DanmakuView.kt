@@ -43,9 +43,6 @@ class DanmakuView @JvmOverloads constructor(
     /** 速度倍率（来自用户设置） */
     var speedMultiplier: Float = 1f
 
-    /** 播放速度倍率（与视频播放速度联动） */
-    var playbackSpeed: Float = 1.0f
-
     /** 底部安全区（px） */
     var bottomMargin: Int = 0
 
@@ -237,14 +234,14 @@ class DanmakuView @JvmOverloads constructor(
         val iter = activeDanmaku.listIterator()
         while (iter.hasNext()) {
             val ad = iter.next()
-            ad.move(deltaMs, scrollSpeedPxPerSec * playbackSpeed, viewW)
+            ad.move(deltaMs, scrollSpeedPxPerSec, viewW)
             if (ad.isOffScreen) {
                 iter.remove()
             }
         }
 
         // 2) 同步移动 trackAllocator（基于时间差的像素跟踪）
-        trackAllocator.moveTrackItems(scrollSpeedPxPerSec * playbackSpeed, deltaMs, currentTimeMs)
+        trackAllocator.moveTrackItems(scrollSpeedPxPerSec, deltaMs, currentTimeMs)
 
         // 3) 发放新弹幕
         emitNewDanmaku()
@@ -313,7 +310,7 @@ class DanmakuView @JvmOverloads constructor(
 
                 val scrollTrack = trackAllocator.allocateScrollTrack(
                     textWidth, viewW,
-                    scrollSpeedPxPerSec * playbackSpeed,
+                    scrollSpeedPxPerSec,
                     adjustedTimeMs,
                     pendingDanmaku = danmaku,
                 )
@@ -359,7 +356,7 @@ class DanmakuView @JvmOverloads constructor(
 
         while (drained < 3 && activeDanmaku.size < maxActiveDanmaku) {
             val result = trackAllocator.tryAllocatePending(
-                scrollSpeedPxPerSec * playbackSpeed,
+                scrollSpeedPxPerSec,
                 adjustedTimeMs,
                 viewW,
             ) ?: break
@@ -457,7 +454,7 @@ class DanmakuView @JvmOverloads constructor(
     fun reconfigure() {
         val viewW = max(width, 1).toFloat()
         val viewH = max(height, 1).toFloat()
-        scrollSpeedPxPerSec = (viewW / crossDurationSec) * speedMultiplier * playbackSpeed
+        scrollSpeedPxPerSec = (viewW / crossDurationSec) * speedMultiplier
         trackAllocator.bottomMargin = bottomMargin
         trackAllocator.trackSpacingPx = trackSpacingPx
         trackAllocator.reconfigure(viewW, viewH, baseFontSizePx, displayMode)

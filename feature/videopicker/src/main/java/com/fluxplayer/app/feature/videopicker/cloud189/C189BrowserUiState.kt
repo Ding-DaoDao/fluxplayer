@@ -20,9 +20,16 @@ data class C189BrowserUiState(
     val scrollTargetIndex: Int = -1,
     val scrollTargetParentKey: String? = null,
     val loginLoading: Boolean = false,
+    /** 0=密码登录, 1=短信登录 */
+    val loginTab: Int = 0,
+    /** 验证码是否已发送 */
+    val smsCodeSent: Boolean = false,
+    /** 正在发送验证码 */
+    val smsSending: Boolean = false,
+    /** 短信已发送提示文本 */
+    val smsSentMessage: String? = null,
     val pendingAction: String? = null,
     val moveFileId: String? = null,
-    val copyFileId: String? = null,
     val pickerFolders: List<WebDavResource> = emptyList(),
     val pickerIsLoading: Boolean = false,
     val playedUriSet: Set<String> = emptySet(),

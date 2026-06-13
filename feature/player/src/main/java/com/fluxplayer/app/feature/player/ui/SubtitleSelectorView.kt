@@ -20,7 +20,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
+import com.fluxplayer.app.core.ui.components.FluxText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -100,7 +100,7 @@ fun BoxScope.SubtitleSelectorView(
                     onDismiss()
                 },
             ) {
-                Text(text = stringResource(R.string.open_subtitle))
+                FluxText(text = stringResource(R.string.open_subtitle))
             }
             Spacer(modifier = Modifier.size(16.dp))
             DelayInput(
@@ -134,7 +134,7 @@ private fun DelayInput(
     NumberChooserInput(
         title = stringResource(R.string.delay),
         value = valueString,
-        suffix = { Text(text = "sec") },
+        suffix = { FluxText(text = "sec") },
         onValueChange = { newValue ->
             if (newValue.isBlank()) {
                 valueString = ""
@@ -185,7 +185,7 @@ private fun SpeedInput(
     NumberChooserInput(
         title = stringResource(R.string.speed),
         value = valueString,
-        suffix = { Text(text = "x") },
+        suffix = { FluxText(text = "x") },
         onValueChange = { newValue ->
             if (newValue.isBlank()) {
                 valueString = ""
@@ -242,7 +242,7 @@ private fun NumberChooserInput(
             )
         }
         OutlinedTextField(
-            label = { Text(text = title) },
+            label = { FluxText(text = title) },
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier.weight(1f),

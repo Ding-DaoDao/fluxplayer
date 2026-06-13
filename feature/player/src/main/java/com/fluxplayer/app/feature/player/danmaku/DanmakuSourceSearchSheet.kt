@@ -32,17 +32,18 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.fluxplayer.app.core.ui.components.FluxCircularProgressIndicator
+import com.fluxplayer.app.core.ui.components.FluxIconButton
+import com.fluxplayer.app.core.ui.components.FluxText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -188,7 +189,7 @@ fun DanmakuSearchSheet(
                             textStyle = TextStyle(color = TextPrimaryColor, fontSize = 13.sp),
                             singleLine = true,
                             trailingIcon = {
-                                IconButton(
+                                FluxIconButton(
                                     onClick = onDismiss,
                                     modifier = Modifier.size(28.dp),
                                 ) {
@@ -313,12 +314,12 @@ fun DanmakuSearchSheet(
                     }
 
                     DanmakuSearchViewMode.LOCAL_FILE -> {
-                        val startDir = File("/storage/emulated/0/Video")
+                        val browserRoot = remember { currentLocalDir.absolutePath }
                         val parent = currentLocalDir.parentFile
                         val canGoUp = parent != null
                             && parent != currentLocalDir
-                            && currentLocalDir.absolutePath != startDir.absolutePath
-                            && (parent.absolutePath + "/").startsWith(startDir.absolutePath + "/")
+                            && currentLocalDir.absolutePath != browserRoot
+                            && (parent.absolutePath + "/").startsWith(browserRoot + "/")
 
                         // 返回 + 标题
                         Row(
@@ -327,7 +328,7 @@ fun DanmakuSearchSheet(
                                 .padding(horizontal = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            IconButton(
+                            FluxIconButton(
                                 onClick = {
                                     if (canGoUp) {
                                         onLocalDirChange(parent!!)
@@ -395,7 +396,7 @@ fun DanmakuSearchSheet(
                                         }
                                     },
                                 ) {
-                                    Text("授予权限", color = AccentColor)
+                                    FluxText("授予权限", color = AccentColor)
                                 }
                             }
                         } else if (isLoadingFiles) {
@@ -405,10 +406,8 @@ fun DanmakuSearchSheet(
                                     .height(150.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                CircularProgressIndicator(
-                                    color = AccentColor,
+                                FluxCircularProgressIndicator(
                                     modifier = Modifier.size(24.dp),
-                                    strokeWidth = 2.dp,
                                 )
                             }
                         } else if (fileList.isEmpty()) {
@@ -418,7 +417,7 @@ fun DanmakuSearchSheet(
                                     .height(150.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text(
+                                FluxText(
                                     "未找到弹幕文件",
                                     color = TextSecondaryColor.copy(alpha = 0.6f),
                                 )
@@ -478,10 +477,8 @@ private fun SearchingStep() {
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(
-                color = AccentColor,
+            FluxCircularProgressIndicator(
                 modifier = Modifier.size(24.dp),
-                strokeWidth = 2.dp,
             )
             Spacer(Modifier.height(8.dp))
             Text("正在搜索…", color = TextSecondaryColor, fontSize = 12.sp)
@@ -502,7 +499,7 @@ private fun SearchResultStep(
                 .padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(28.dp)) {
+            FluxIconButton(onClick = onBack, modifier = Modifier.size(28.dp)) {
                 Icon(
                     painter = painterResource(R.drawable.ic_arrow_left),
                     contentDescription = "返回",
@@ -590,7 +587,7 @@ private fun EpisodeSelectionStep(
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(28.dp)) {
+            FluxIconButton(onClick = onBack, modifier = Modifier.size(28.dp)) {
                 Icon(
                     painter = painterResource(R.drawable.ic_arrow_left),
                     contentDescription = "返回",
@@ -712,7 +709,7 @@ private fun FileItemRow(item: FileItem, onClick: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
+        FluxText(
             text = if (item.isDirectory) "📁" else "📄",
             modifier = Modifier.size(18.dp),
             style = MaterialTheme.typography.bodySmall,

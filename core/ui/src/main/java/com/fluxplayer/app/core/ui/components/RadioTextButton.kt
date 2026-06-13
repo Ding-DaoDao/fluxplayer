@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,11 +30,11 @@ fun RadioTextButton(
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(
+        FluxRadioButton(
             selected = selected,
             onClick = null,
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text(text = text)
+        FluxText(text = text)
     }
 }

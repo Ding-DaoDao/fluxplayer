@@ -24,4 +24,6 @@ class QuarkCookieManager(initial: String = "") {
     }
 
     fun get(): String = cookies.entries.joinToString(";") { "${it.key}=${it.value}" }
+
+    fun clear() { cookies.clear() }
 }

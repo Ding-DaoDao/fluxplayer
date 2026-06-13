@@ -1,14 +1,9 @@
 package com.fluxplayer.app.core.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,7 +39,7 @@ fun PreferenceItem(
         isLastItem = isLastItem,
         leadingContent = icon?.let {
             {
-                Icon(
+                FluxIcon(
                     imageVector = icon,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp),
@@ -53,11 +48,11 @@ fun PreferenceItem(
         },
         supportingContent = description?.let {
             {
-                Text(text = description)
+                FluxText(text = description)
             }
         },
         content = {
-            Text(text = title)
+            FluxText(text = title)
         },
         trailingContent = trailingContent,
     )
@@ -82,9 +77,8 @@ fun SelectablePreference(
         isFirstItem = isFirstItem,
         isLastItem = isLastItem,
         content = {
-            Text(
+            FluxText(
                 text = title,
-                maxLines = 1,
                 style = MaterialTheme.typography.titleMedium.copy(
                     textDecoration = if (selected) TextDecoration.LineThrough else TextDecoration.None,
                 ),
@@ -92,9 +86,8 @@ fun SelectablePreference(
         },
         supportingContent = {
             description?.let {
-                Text(
+                FluxText(
                     text = it,
-                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         textDecoration = if (selected) TextDecoration.LineThrough else TextDecoration.None,
                     ),
@@ -102,7 +95,7 @@ fun SelectablePreference(
             }
         },
         trailingContent = {
-            Checkbox(
+            FluxCheckbox(
                 modifier = Modifier.semantics { contentDescription = title },
                 checked = selected,
                 onCheckedChange = null,
@@ -130,21 +123,19 @@ fun SingleSelectablePreference(
         isFirstItem = isFirstItem,
         isLastItem = isLastItem,
         content = {
-            Text(
+            FluxText(
                 text = title,
-                maxLines = 1,
             )
         },
         supportingContent = {
             description?.let {
-                Text(
+                FluxText(
                     text = it,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         },
         leadingContent = {
-            RadioButton(
+            FluxRadioButton(
                 selected = selected,
                 onClick = null,
             )

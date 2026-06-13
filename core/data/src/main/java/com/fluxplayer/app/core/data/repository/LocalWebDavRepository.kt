@@ -82,4 +82,12 @@ class LocalWebDavRepository @Inject constructor(
     override suspend fun copy(baseUrl: String, sourcePath: String, destinationPath: String, authHeader: String): Result<Unit> {
         return webDavClient.copy(baseUrl, sourcePath, destinationPath, authHeader)
     }
+
+    override suspend fun uploadFile(baseUrl: String, path: String, authHeader: String, data: ByteArray): Result<Unit> {
+        return webDavClient.put(baseUrl, path, data, authHeader, "application/zip")
+    }
+
+    override suspend fun downloadFile(baseUrl: String, path: String, authHeader: String): Result<ByteArray> {
+        return webDavClient.get(baseUrl, path, authHeader)
+    }
 }

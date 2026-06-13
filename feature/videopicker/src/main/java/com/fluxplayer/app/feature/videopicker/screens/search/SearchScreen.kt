@@ -29,8 +29,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -64,6 +62,9 @@ import com.fluxplayer.app.core.model.Folder
 import com.fluxplayer.app.core.model.MediaLayoutMode
 import com.fluxplayer.app.core.model.Video
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.FluxIcon
+import com.fluxplayer.app.core.ui.components.FluxIconButton
+import com.fluxplayer.app.core.ui.components.FluxText
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.NextSegmentedListItem
 import com.fluxplayer.app.core.ui.components.NextTopAppBar
@@ -130,8 +131,8 @@ internal fun SearchScreen(
                         textStyle = MaterialTheme.typography.bodyLarge,
                         trailingIcon = {
                             if (uiState.query.isNotEmpty()) {
-                                IconButton(onClick = { onEvent(SearchUiEvent.OnQueryChange("")) }) {
-                                    Icon(
+                                FluxIconButton(onClick = { onEvent(SearchUiEvent.OnQueryChange("")) }) {
+                                    FluxIcon(
                                         imageVector = NextIcons.Close,
                                         contentDescription = stringResource(R.string.clear_history),
                                     )
@@ -162,7 +163,7 @@ internal fun SearchScreen(
                 },
                 navigationIcon = {
                     FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
+                        FluxIcon(
                             imageVector = NextIcons.ArrowBack,
                             contentDescription = stringResource(id = R.string.navigate_up),
                         )
@@ -250,7 +251,7 @@ private fun SuggestionsContent(
                         contentPadding = PaddingValues(top = 12.dp, bottom = 8.dp),
                     )
                     TextButton(onClick = onClearHistory) {
-                        Text(text = stringResource(R.string.clear_history))
+                        FluxText(text = stringResource(R.string.clear_history))
                     }
                 }
             }
@@ -306,17 +307,16 @@ private fun SuggestionsContent(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Icon(
+                        FluxIcon(
                             imageVector = NextIcons.Search,
                             contentDescription = null,
                             modifier = Modifier.size(48.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Text(
+                        FluxText(
                             text = stringResource(R.string.search_videos_and_folders),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
                         )
                     }
                 }
@@ -337,18 +337,18 @@ private fun SearchHistoryItem(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         onClick = onClick,
         leadingContent = {
-            Icon(
+            FluxIcon(
                 imageVector = NextIcons.History,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
         trailingContent = {
-            IconButton(
+            FluxIconButton(
                 onClick = onRemove,
                 modifier = Modifier.size(24.dp),
             ) {
-                Icon(
+                FluxIcon(
                     imageVector = NextIcons.Close,
                     contentDescription = stringResource(R.string.delete),
                     modifier = Modifier.size(18.dp),
@@ -404,13 +404,13 @@ private fun SearchResultsContent(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Icon(
+                    FluxIcon(
                         imageVector = NextIcons.Search,
                         contentDescription = null,
                         modifier = Modifier.size(48.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
+                    FluxText(
                         text = stringResource(R.string.no_results_found),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

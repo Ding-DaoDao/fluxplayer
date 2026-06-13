@@ -1,34 +1,38 @@
 package com.fluxplayer.app.settings.screens.general
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fluxplayer.app.core.common.uriToFilePath
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.NextDialog
-import com.fluxplayer.app.core.ui.components.NextTopAppBar
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 @Composable
@@ -55,21 +59,9 @@ private fun GeneralPreferencesContent(
     onNavigateUp: () -> Unit,
     onBackupClick: () -> Unit = {},
 ) {
-    Scaffold(
-        topBar = {
-            NextTopAppBar(
-                title = stringResource(id = R.string.general_name),
-                navigationIcon = {
-                    FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = NextIcons.ArrowBack,
-                            contentDescription = stringResource(id = R.string.navigate_up),
-                        )
-                    }
-                },
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    FluxSettingsScaffold(
+        title = stringResource(id = R.string.general_name),
+        onNavigateUp = onNavigateUp,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -79,9 +71,7 @@ private fun GeneralPreferencesContent(
                 .padding(horizontal = 16.dp),
         ) {
             ListSectionTitle(text = stringResource(id = R.string.user_data))
-            Column(
-                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-            ) {
+            Column {
                 ClickablePreferenceItem(
                     title = stringResource(R.string.backup_and_restore),
                     description = stringResource(R.string.backup_and_restore_description),
@@ -89,17 +79,30 @@ private fun GeneralPreferencesContent(
                     onClick = onBackupClick,
                     isFirstItem = true
                 )
+                HorizontalDivider()
                 ClickablePreferenceItem(
                     title = stringResource(R.string.delete_thumbnail_cache),
                     description = stringResource(R.string.delete_thumbnail_cache_description),
                     icon = NextIcons.DeleteSweep,
                     onClick = { onEvent(GeneralPreferencesUiEvent.ShowDialog(GeneralPreferencesDialog.ClearThumbnailCacheDialog)) },
                 )
+                HorizontalDivider()
                 ClickablePreferenceItem(
                     title = stringResource(R.string.reset_settings),
                     description = stringResource(R.string.reset_settings_description),
                     icon = NextIcons.History,
                     onClick = { onEvent(GeneralPreferencesUiEvent.ShowDialog(GeneralPreferencesDialog.ResetSettingsDialog)) },
+                )
+            }
+
+            ListSectionTitle(text = "下载")
+            Column {
+                ClickablePreferenceItem(
+                    title = "下载存储位置",
+                    description = uiState.downloadPath.ifBlank { "未设置" },
+                    icon = NextIcons.Folder,
+                    onClick = { onEvent(GeneralPreferencesUiEvent.ShowDialog(GeneralPreferencesDialog.ChangeDownloadPathDialog)) },
+                    isFirstItem = true,
                     isLastItem = true
                 )
             }
@@ -160,6 +163,58 @@ private fun GeneralPreferencesContent(
                                 text = stringResource(R.string.reset_settings_confirmation),
                                 style = MaterialTheme.typography.titleSmall,
                             )
+                        },
+                    )
+                }
+                GeneralPreferencesDialog.ChangeDownloadPathDialog -> {
+                    val directoryPickerLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.OpenDocumentTree()
+                    ) { uri ->
+                        if (uri != null) {
+                            val path = uriToFilePath(uri)
+                            if (path != null) {
+                                onEvent(GeneralPreferencesUiEvent.ChangeDownloadPath(path))
+                            }
+                        }
+                        onEvent(GeneralPreferencesUiEvent.ShowDialog(null))
+                    }
+
+                    NextDialog(
+                        onDismissRequest = { onEvent(GeneralPreferencesUiEvent.ShowDialog(null)) },
+                        title = {
+                            Text(
+                                text = "下载存储位置",
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = { directoryPickerLauncher.launch(null) },
+                            ) {
+                                Text(text = "选择目录")
+                            }
+                        },
+                        dismissButton = {
+                            CancelButton(onClick = { onEvent(GeneralPreferencesUiEvent.ShowDialog(null)) })
+                        },
+                        content = {
+                            Column {
+                                Text("当前路径：", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    uiState.downloadPath.ifBlank { "未设置" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                TextButton(
+                                    onClick = {
+                                        onEvent(GeneralPreferencesUiEvent.ResetDownloadPath)
+                                        onEvent(GeneralPreferencesUiEvent.ShowDialog(null))
+                                    }
+                                ) {
+                                    Text("恢复默认")
+                                }
+                            }
                         },
                     )
                 }

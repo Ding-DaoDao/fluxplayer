@@ -22,7 +22,6 @@ data class AliyunBrowserUiState(
     val currentDriveId: String = "",
     val pendingAction: String? = null,
     val moveFileId: String? = null,
-    val copyFileId: String? = null,
     val pickerFolders: List<WebDavResource> = emptyList(),
     val pickerIsLoading: Boolean = false,
     val playedUriSet: Set<String> = emptySet(),

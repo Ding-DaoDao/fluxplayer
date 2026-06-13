@@ -413,5 +413,74 @@ class WebDavClient(
         return "$normalizedBase$encodedPath"
     }
 
+    /**
+     * 上传文件到 WebDAV 服务器（PUT 方法）。
+     */
+    suspend fun put(
+        baseUrl: String,
+        path: String,
+        data: ByteArray,
+        authHeader: String,
+        contentType: String = "application/octet-stream",
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val normalizedBase = baseUrl.trimEnd('/')
+            val url = if (path.startsWith("/")) "$normalizedBase$path" else "$normalizedBase/$path"
+
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", authHeader)
+                .put(data.toRequestBody(contentType.toMediaType()))
+                .build()
+
+            val response = client.newCall(request).execute()
+            response.use { resp ->
+                if (resp.isSuccessful || resp.code in 200..299) {
+                    // 消费 response body 确保连接完全 flush（某些 WebDAV 实现需要）
+                    resp.body?.bytes()
+                    Log.d(TAG, "PUT success for path=$path")
+                    Result.success(Unit)
+                } else {
+                    val errBody = resp.body?.string() ?: ""
+                    Log.w(TAG, "PUT failed for path=$path: HTTP ${resp.code} body=$errBody")
+                    Result.failure(WebDavException("HTTP ${resp.code}: ${resp.message}, body=$errBody"))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "put failed for path=$path", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 从 WebDAV 服务器下载文件（GET 方法）。
+     */
+    suspend fun get(
+        baseUrl: String,
+        path: String,
+        authHeader: String,
+    ): Result<ByteArray> = withContext(Dispatchers.IO) {
+        try {
+            val normalizedBase = baseUrl.trimEnd('/')
+            val url = if (path.startsWith("/")) "$normalizedBase$path" else "$normalizedBase/$path"
+
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", authHeader)
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful) {
+                Result.success(response.body?.bytes() ?: ByteArray(0))
+            } else {
+                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "get failed for path=$path", e)
+            Result.failure(e)
+        }
+    }
+
     class WebDavException(message: String) : Exception(message)
 }

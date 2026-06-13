@@ -1,8 +1,8 @@
 package com.fluxplayer.app.settings.screens.webdav
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,14 +17,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,7 +44,7 @@ import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.DoneButton
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.NextDialog
-import com.fluxplayer.app.core.ui.components.NextTopAppBar
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 @Composable
@@ -135,21 +133,9 @@ private fun WebDavSettingsContent(
     onDeleteClick: (WebDavServer) -> Unit,
     onSetActive: (String) -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            NextTopAppBar(
-                title = "WebDAV",
-                navigationIcon = {
-                    FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = NextIcons.ArrowBack,
-                            contentDescription = "返回",
-                        )
-                    }
-                },
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    FluxSettingsScaffold(
+        title = "WebDAV",
+        onNavigateUp = onNavigateUp,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -168,9 +154,7 @@ private fun WebDavSettingsContent(
                     modifier = Modifier.padding(vertical = 16.dp),
                 )
             } else {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-                ) {
+                Column {
                     uiState.servers.forEachIndexed { index, server ->
                         ServerCard(
                             server = server,
@@ -181,6 +165,9 @@ private fun WebDavSettingsContent(
                             isFirstItem = index == 0,
                             isLastItem = index == uiState.servers.lastIndex,
                         )
+                        if (index < uiState.servers.lastIndex) {
+                            HorizontalDivider()
+                        }
                     }
                 }
             }

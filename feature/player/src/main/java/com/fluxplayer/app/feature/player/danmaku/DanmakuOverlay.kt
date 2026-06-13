@@ -12,7 +12,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import com.fluxplayer.app.core.model.DanmakuConfig
 
@@ -41,18 +40,9 @@ fun DanmakuOverlay(
     val context = LocalContext.current
     density = context.resources.displayMetrics.density
 
-    // 从 Player 获取当前播放速度
-    var playbackSpeed by remember(player) {
-        mutableFloatStateOf(player?.playbackParameters?.speed ?: 1.0f)
-    }
-
-    // DisposableEffect 1: 监听播放参数变化（播放速度）
+    // DisposableEffect: 监听播放状态变化（暂停/恢复）
     DisposableEffect(player) {
         val listener = object : Player.Listener {
-            override fun onPlaybackParametersChanged(params: PlaybackParameters) {
-                playbackSpeed = params.speed
-            }
-
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 val v = danmakuView
                 if (v != null) {
@@ -72,12 +62,9 @@ fun DanmakuOverlay(
         factory = { ctx ->
             val d = ctx.resources.displayMetrics.density
             density = d
-            val speed = playbackSpeed
-
             val view = DanmakuView(ctx).apply {
                 danmakuOpacity = config.opacity
                 speedMultiplier = config.speed
-                this.playbackSpeed = speed
                 bottomMargin = (config.bottomSafeAreaPx * d).toInt()
                 maxActiveDanmaku = config.maxDanmakuCount
                 this.displayDensity = d
@@ -123,7 +110,6 @@ fun DanmakuOverlay(
         update = { view ->
             view.danmakuOpacity = config.opacity
             view.speedMultiplier = config.speed
-            view.playbackSpeed = playbackSpeed
             view.timeOffsetMs = config.timeOffsetMs.toLong()
             view.trackSpacingPx = (config.trackSpacingDp * density).toInt()
             view.targetFps = config.targetFps

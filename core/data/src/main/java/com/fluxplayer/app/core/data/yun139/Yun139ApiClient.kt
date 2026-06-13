@@ -123,13 +123,11 @@ class Yun139ApiClient(
             .post(bodyStr.toRequestBody(jsonMediaType))
         headers.forEach { (k, v) -> builder.header(k, v) }
         val req = builder.build()
-        Log.d(TAG, "POST $url body=${bodyStr.take(200)}")
         // 整个请求 + 读取 body 都在 IO 线程完成
         val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val resp = executeRequestAndGetResponse(req)
             resp.body?.string() ?: ""
         }
-        Log.d(TAG, "response len=${text.length} body=${text.take(2000)}")
         return JSONObject(text)
     }
 
@@ -167,7 +165,6 @@ class Yun139ApiClient(
         val data = json.optJSONObject("data")
         val nextPageCursor = data?.optString("nextPageCursor", "") ?: ""
         val itemsArray = data?.optJSONArray("items") ?: JSONArray()
-        Log.d(TAG, "listFiles cursor=$pageCursor got ${itemsArray.length()} items, nextPageCursor=$nextPageCursor")
         val items = (0 until itemsArray.length()).map { i ->
             val item = itemsArray.getJSONObject(i)
             val type = item.optString("type", "")
@@ -293,7 +290,6 @@ class Yun139ApiClient(
                     "mobile:$phone:$token".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP
                 )
                 Yun139AuthProvider.authorization = newAuth
-                Log.d(TAG, "refreshToken success")
             }
         }
     }

@@ -86,6 +86,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -119,6 +121,8 @@ class PlayerService : MediaSessionService() {
 
     @Inject
     lateinit var cacheKeyRegistry: CloudAwareCacheKeyRegistry
+
+    private lateinit var mediaSourceFactory: CloudAwareMediaSourceFactory
 
     private val playerPreferences: PlayerPreferences
         get() = preferencesRepository.playerPreferences.value
@@ -613,7 +617,7 @@ class PlayerService : MediaSessionService() {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        val mediaSourceFactory = CloudAwareMediaSourceFactory(
+        mediaSourceFactory = CloudAwareMediaSourceFactory(
             authAwareFactory = AuthAwareDataSourceFactory(applicationContext),
             cloudUriResolver = cloudUriResolver,
             cacheKeyRegistry = cacheKeyRegistry,
@@ -673,6 +677,24 @@ class PlayerService : MediaSessionService() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+
+        // 监听缓存开关变化，实时更新 MediaSourceFactory
+        serviceScope.launch {
+            preferencesRepository.playerPreferences
+                .map { it.playbackCacheEnabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    if (enabled) {
+                        mediaSourceFactory.updateCacheSettings(
+                            preferencesRepository.playerPreferences.value.playbackCacheMaxSize.bytes,
+                        )
+                    } else {
+                        mediaSourceFactory.disableCache()
+                        playbackCacheManager.clearCache()
+                        cacheKeyRegistry.clear()
+                    }
+                }
+        }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -695,6 +717,7 @@ class PlayerService : MediaSessionService() {
             release()
             mediaSession = null
         }
+        playbackCacheManager.release()
         subtitleCacheDir.deleteFiles()
         serviceScope.cancel()
     }

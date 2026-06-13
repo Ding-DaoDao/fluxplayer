@@ -183,6 +183,38 @@ class OpenListApiClient(
     }
 
     // ====================================================================
+    // File Operations
+    // ====================================================================
+
+    /**
+     * 移动文件/文件夹到目标目录。
+     * @param srcDir 源目录路径
+     * @param dstDir 目标目录路径
+     * @param names 要移动的文件/文件夹名称列表
+     */
+    suspend fun moveFiles(srcDir: String, dstDir: String, names: List<String>): Result<Boolean> = runCatching {
+        val body = JSONObject().apply {
+            put("src_dir", srcDir)
+            put("dst_dir", dstDir)
+            put("names", JSONArray(names))
+        }
+        val request = Request.Builder()
+            .url("$baseUrl/api/fs/move")
+            .header("Authorization", adminToken ?: error("Not logged in"))
+            .post(body.toString().toRequestBody(MEDIA_TYPE_JSON))
+            .build()
+
+        val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+        val responseBody = response.body?.string() ?: error("Empty response")
+        val jsonObj = JSONObject(responseBody)
+        val code = jsonObj.optLong("code", -1)
+        if (code != 200L) {
+            error("Move failed: code=$code $responseBody")
+        }
+        true
+    }
+
+    // ====================================================================
     // Storage Management (需要 admin token)
     // ====================================================================
 

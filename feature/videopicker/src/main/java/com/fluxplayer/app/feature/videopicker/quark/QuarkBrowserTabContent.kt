@@ -18,10 +18,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.onCloudVideoClick
 import com.fluxplayer.app.core.model.WebDavResource
-import android.widget.Toast
 import com.fluxplayer.app.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import com.fluxplayer.app.feature.videopicker.composables.ContextActionMenu
 import com.fluxplayer.app.feature.videopicker.composables.CreateFolderDialog
+import com.fluxplayer.app.feature.videopicker.composables.DownloadNotificationBar
+import com.fluxplayer.app.feature.videopicker.composables.FolderPickerDialog
 import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
 import com.fluxplayer.app.feature.videopicker.composables.SortOption
 import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuContent
@@ -46,6 +47,7 @@ fun QuarkBrowserTabContent(
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val navigationStack by viewModel.navigationStack.collectAsStateWithLifecycle()
+    val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     // 从历史页面跳转到云盘指定目录
@@ -78,8 +80,9 @@ fun QuarkBrowserTabContent(
         }
     }
 
-    SharedCloudBrowserPanel(
-        modifier = modifier,
+    Box(modifier = modifier.fillMaxSize()) {
+        SharedCloudBrowserPanel(
+            modifier = Modifier.fillMaxSize(),
         items = state.items,
         breadcrumbs = state.breadcrumbs,
         isLoading = state.isLoading,
@@ -109,7 +112,6 @@ fun QuarkBrowserTabContent(
                     item = item,
                     onDismiss = onDismiss,
                     onMove = { onDismiss(); viewModel.startMove(index) },
-                    onCopy = { onDismiss(); Toast.makeText(viewModel.getApplication(), "暂不支持复制", Toast.LENGTH_SHORT).show() },
                     onDelete = { onDismiss(); viewModel.deleteItem(index) },
                     onRename = { renameIndex = index; onDismiss() },
                     onDownload = { onDismiss(); viewModel.downloadFile(index) },
@@ -172,6 +174,36 @@ fun QuarkBrowserTabContent(
             onDismiss = { showCreateFolderDialog = false },
             onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
         )
+    }
+
+    // 移动文件 —— 目标文件夹选择器
+    if (state.pendingAction == "move") {
+        FolderPickerDialog(
+            action = "move",
+            folders = state.pickerFolders,
+            isLoading = state.pickerIsLoading,
+            onDismiss = { viewModel.dismissPicker() },
+            onConfirm = { targetFolderId -> viewModel.moveTo(targetFolderId) },
+            onNavigateToFolder = { folderId -> viewModel.loadFoldersForPicker(folderId) },
+            onCreateFolder = { parentFolderId, name -> viewModel.createFolderInPicker(parentFolderId, name) },
+        )
+    }
+
+
+        // 下载进度
+        downloadProgress?.let { dp ->
+            DownloadNotificationBar(
+                progress = dp.progress,
+                fileName = dp.fileName,
+                completedFilePath = dp.completedFilePath,
+                downloadedBytes = dp.downloadedBytes,
+                totalBytes = dp.totalBytes,
+                onCancel = { viewModel.dismissDownloadProgress() },
+                onOpenFile = { path -> viewModel.openDownloadedFile(path) },
+                onDismiss = { viewModel.dismissDownloadProgress() },
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+            )
+        }
     }
 
 }

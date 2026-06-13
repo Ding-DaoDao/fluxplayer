@@ -9,10 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.FilledIconToggleButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,6 +18,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.fluxplayer.app.core.ui.components.FluxIcon
+import com.fluxplayer.app.core.ui.components.FluxText
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
 
 @Composable
@@ -50,9 +50,9 @@ fun TextIconToggleButton(
             onCheckedChange = onClick,
             interactionSource = interactionSource,
         ) {
-            Icon(imageVector = icon, contentDescription = text)
+            FluxIcon(imageVector = icon, contentDescription = text)
         }
-        Text(
+        FluxText(
             text = text,
             style = MaterialTheme.typography.bodySmall,
         )

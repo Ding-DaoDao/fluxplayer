@@ -5,6 +5,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import com.fluxplayer.app.core.database.dao.DirectoryDao
+import com.fluxplayer.app.core.database.dao.DownloadTaskDao
 import com.fluxplayer.app.core.database.dao.MediumDao
 import com.fluxplayer.app.core.database.dao.PlaybackHistoryDao
 
@@ -23,4 +24,7 @@ object DaoModule {
 
     @Provides
     fun providePlaybackHistoryDao(db: MediaDatabase): PlaybackHistoryDao = db.playbackHistoryDao()
+
+    @Provides
+    fun provideDownloadTaskDao(db: MediaDatabase): DownloadTaskDao = db.downloadTaskDao()
 }

@@ -1,6 +1,5 @@
 package com.fluxplayer.app.feature.videopicker.pan123
 
-import com.fluxplayer.app.core.data.pan123.Pan123FileItem
 import com.fluxplayer.app.core.data.pan123.Pan123UserInfo
 import com.fluxplayer.app.core.model.WebDavResource
 
@@ -26,7 +25,6 @@ data class Pan123BrowserUiState(
     val orderDirection: String = "asc",
     val pendingAction: String? = null,
     val moveFileId: String? = null,
-    val copyFileItem: Pan123FileItem? = null,
     val pickerFolders: List<WebDavResource> = emptyList(),
     val pickerIsLoading: Boolean = false
 )

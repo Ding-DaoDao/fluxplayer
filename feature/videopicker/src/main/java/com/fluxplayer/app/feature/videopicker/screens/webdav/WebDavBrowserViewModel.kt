@@ -1,22 +1,26 @@
 package com.fluxplayer.app.feature.videopicker.screens.webdav
 
-import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
-import android.os.Environment
+import android.util.Base64
 import android.util.Log
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.fluxplayer.app.core.common.CloudPlaylistCache
+import com.fluxplayer.app.core.common.PickerUtils
+import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.data.repository.WebDavRepository
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.model.WebDavServer
 import com.fluxplayer.app.feature.videopicker.CommonStateSnapshot
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +29,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 data class WebDavBreadcrumb(val label: String, val path: String)
@@ -53,6 +58,7 @@ class WebDavBrowserViewModel @Inject constructor(
     private val playbackHistoryRepository: PlaybackHistoryRepository,
     private val preferencesRepository: PreferencesRepository,
     private val webDavRepository: WebDavRepository,
+    private val cloudDownloadRepository: CloudDownloadRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -92,6 +98,18 @@ class WebDavBrowserViewModel @Inject constructor(
 
     /** 内存目录缓存 —— 已访问目录的列表，返回上级时直接恢复，不走网络 */
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
+
+    /** 下载进度状态 */
+    data class DownloadProgressData(
+        val fileName: String = "",
+        val progress: Float = 0f,
+        val downloadedBytes: Long = 0,
+        val totalBytes: Long = 0,
+        val completedFilePath: String? = null
+    )
+    private val _downloadProgress = MutableStateFlow<DownloadProgressData?>(null)
+    val downloadProgress: StateFlow<DownloadProgressData?> = _downloadProgress.asStateFlow()
+    private var downloadJob: Job? = null
 
     // endregion
 
@@ -498,6 +516,115 @@ class WebDavBrowserViewModel @Inject constructor(
 
     // endregion
 
+    // region ==================== 移动 ====================
+
+    fun startMove(index: Int) {
+        val current = _navigationStack.value.lastOrNull() ?: return
+        val item = current.items.getOrNull(index) ?: return
+        _stateFlow.update {
+            it.copy(
+                pendingAction = "move",
+                moveFileId = item.path,
+            )
+        }
+        loadFoldersForPicker("/")
+    }
+
+    fun dismissPicker() {
+        _stateFlow.update {
+            it.copy(
+                pendingAction = null,
+                moveFileId = null,
+                pickerFolders = emptyList(),
+                pickerIsLoading = false,
+            )
+        }
+    }
+
+    fun loadFoldersForPicker(path: String) {
+        val server = _extraState.value.selectedServer ?: return
+        _stateFlow.update { it.copy(pickerIsLoading = true) }
+
+        viewModelScope.launch {
+            val result = webDavRepository.listDirectory(
+                baseUrl = server.normalizedUrl,
+                path = path,
+                authHeader = server.basicAuthHeader,
+            )
+            result.fold(
+                onSuccess = { resources ->
+                    val sourcePath = _stateFlow.value.moveFileId
+                    val folders = resources
+                        .filter { it.isDirectory && it.path != sourcePath }
+                    _stateFlow.update {
+                        it.copy(pickerFolders = folders, pickerIsLoading = false)
+                    }
+                },
+                onFailure = { e ->
+                    _stateFlow.update {
+                        it.copy(pickerFolders = emptyList(), pickerIsLoading = false)
+                    }
+                    Toast.makeText(context, "加载文件夹失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    fun createFolderInPicker(parentPath: String, name: String) {
+        val server = _extraState.value.selectedServer ?: return
+        val newPath = parentPath.trimEnd('/') + "/" + name
+        _stateFlow.update { it.copy(pickerIsLoading = true) }
+
+        viewModelScope.launch {
+            val result = webDavRepository.createFolder(
+                baseUrl = server.normalizedUrl,
+                path = newPath,
+                authHeader = server.basicAuthHeader,
+            )
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(context, "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                    loadFoldersForPicker(parentPath)
+                },
+                onFailure = { e ->
+                    Toast.makeText(context, "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    _stateFlow.update { it.copy(pickerIsLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun moveTo(targetPath: String) {
+        val server = _extraState.value.selectedServer ?: return
+        val sourcePath = _stateFlow.value.moveFileId ?: return
+        val fileName = sourcePath.substringAfterLast("/")
+        val actualTarget = targetPath.ifEmpty { "/" }
+        val destPath = actualTarget.trimEnd('/') + "/" + fileName
+
+        viewModelScope.launch {
+            val result = webDavRepository.move(
+                baseUrl = server.normalizedUrl,
+                sourcePath = sourcePath,
+                destinationPath = destPath,
+                authHeader = server.basicAuthHeader,
+            )
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(context, "移动成功", Toast.LENGTH_SHORT).show()
+                    dismissPicker()
+                    val current = _navigationStack.value.lastOrNull() ?: return@launch
+                    directoryCache.remove(current.path)
+                    loadDirectory(current.path)
+                },
+                onFailure = { e ->
+                    Toast.makeText(context, "移动失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    // endregion
+
     // region ==================== 下载 ====================
 
     fun downloadFile(index: Int) {
@@ -506,25 +633,90 @@ class WebDavBrowserViewModel @Inject constructor(
         if (item.isDirectory || item.isVideo) return
 
         val server = _extraState.value.selectedServer ?: return
-        val baseUrl = server.normalizedUrl.trimEnd('/')
-        val fullUrl = if (item.path.startsWith("/")) "$baseUrl${item.path}" else "$baseUrl/${item.path}"
-        val originalUri = Uri.parse(fullUrl)
-        val hostPort = originalUri.host +
-            if (originalUri.port != -1) ":${originalUri.port}" else ""
-        val authUri = originalUri.buildUpon()
-            .encodedAuthority(
-                Uri.encode(server.username) + ":" +
-                    Uri.encode(server.password) + "@" + hostPort
-            )
-            .build()
 
-        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val request = DownloadManager.Request(authUri)
-            .setTitle(item.name)
-            .setDescription("正在下载...")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, item.name)
-        downloadManager.enqueue(request)
+        downloadJob?.cancel()
+        downloadJob = viewModelScope.launch {
+            try {
+                val baseUrl = server.normalizedUrl.trimEnd('/')
+                val fullUrl = if (item.path.startsWith("/")) "$baseUrl${item.path}" else "$baseUrl/${item.path}"
+
+                _downloadProgress.value = DownloadProgressData(fileName = item.name, progress = 0f)
+
+                val eventJob = launch {
+                    cloudDownloadRepository.downloadEvents.collect { event ->
+                        when (event) {
+                            is CloudDownloadRepository.DownloadEvent.Progress -> {
+                                if (event.fileName == item.name) {
+                                    _downloadProgress.value = DownloadProgressData(
+                                        fileName = event.fileName, progress = event.progress,
+                                        downloadedBytes = event.downloadedBytes, totalBytes = event.totalBytes
+                                    )
+                                }
+                            }
+                            is CloudDownloadRepository.DownloadEvent.Completed -> {
+                                if (event.fileName == item.name) {
+                                    _downloadProgress.value = DownloadProgressData(
+                                        fileName = event.fileName, progress = 1f,
+                                        completedFilePath = event.filePath
+                                    )
+                                    Toast.makeText(context, "下载完成: ${event.fileName}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            is CloudDownloadRepository.DownloadEvent.Failed -> {
+                                if (event.fileName == item.name) {
+                                    _downloadProgress.value = null
+                                    if (event.error != "下载已取消") {
+                                        Toast.makeText(context, "下载失败: ${event.error}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                cloudDownloadRepository.download(
+                    url = fullUrl,
+                    fileName = item.name,
+                    headers = mapOf("Authorization" to buildBasicAuth(server.username, server.password)),
+                    provider = "webdav"
+                )
+                eventJob.cancel()
+            } catch (e: Exception) {
+                Toast.makeText(context, "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                _downloadProgress.value = null
+            }
+        }
+    }
+
+    fun dismissDownloadProgress() {
+        _downloadProgress.value = null
+        cloudDownloadRepository.cancel()
+    }
+
+    fun openDownloadedFile(filePath: String) {
+        val file = File(filePath)
+        if (!file.exists()) {
+            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                putExtra(Intent.EXTRA_STREAM, uri)
+                type = PickerUtils.getMimeType(filePath)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(Intent.createChooser(intent, "分享文件").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Log.e("WebDavVM", "分享文件失败", e)
+            Toast.makeText(context, "无法打开文件: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun buildBasicAuth(user: String, pass: String): String {
+        val credentials = "$user:$pass"
+        return "Basic ${Base64.encodeToString(credentials.toByteArray(), Base64.NO_WRAP)}"
     }
 
     // endregion

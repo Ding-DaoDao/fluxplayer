@@ -2,7 +2,7 @@ package com.fluxplayer.app.settings.screens.subtitle
 
 import android.content.Intent
 import android.provider.Settings
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -12,11 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -34,7 +30,7 @@ import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
-import com.fluxplayer.app.core.ui.components.NextTopAppBar
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.components.PreferenceSlider
 import com.fluxplayer.app.core.ui.components.PreferenceSwitch
 import com.fluxplayer.app.core.ui.components.PreferenceSwitchWithDivider
@@ -71,21 +67,9 @@ private fun SubtitlePreferencesContent(
     val charsetResource = stringArrayResource(id = R.array.charsets_list)
     val context = LocalContext.current
 
-    Scaffold(
-        topBar = {
-            NextTopAppBar(
-                title = stringResource(id = R.string.subtitle),
-                navigationIcon = {
-                    FilledTonalIconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = NextIcons.ArrowBack,
-                            contentDescription = stringResource(id = R.string.navigate_up),
-                        )
-                    }
-                },
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    FluxSettingsScaffold(
+        title = stringResource(id = R.string.subtitle),
+        onNavigateUp = onNavigateUp,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -95,9 +79,7 @@ private fun SubtitlePreferencesContent(
                 .padding(horizontal = 16.dp),
         ) {
             ListSectionTitle(text = stringResource(id = R.string.playback))
-            Column(
-                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-            ) {
+            Column {
                 ClickablePreferenceItem(
                     title = stringResource(id = R.string.preferred_subtitle_lang),
                     description = LocalesHelper.getLocaleDisplayLanguage(uiState.preferences.preferredSubtitleLanguage)
@@ -106,6 +88,7 @@ private fun SubtitlePreferencesContent(
                     onClick = { onEvent(SubtitlePreferencesUiEvent.ShowDialog(SubtitlePreferenceDialog.SubtitleLanguageDialog)) },
                     isFirstItem = true
                 )
+                HorizontalDivider()
                 ClickablePreferenceItem(
                     title = stringResource(R.string.subtitle_text_encoding),
                     description = charsetResource.first { it.contains(uiState.preferences.subtitleTextEncoding) },
@@ -115,9 +98,7 @@ private fun SubtitlePreferencesContent(
                 )
             }
             ListSectionTitle(text = stringResource(id = R.string.appearance_name))
-            Column(
-                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
-            ) {
+            Column {
                 PreferenceSwitchWithDivider(
                     title = stringResource(R.string.system_caption_style),
                     description = stringResource(R.string.system_caption_style_desc),
@@ -127,6 +108,7 @@ private fun SubtitlePreferencesContent(
                     onClick = { context.startActivity(Intent(Settings.ACTION_CAPTIONING_SETTINGS)) },
                     isFirstItem = true,
                 )
+                HorizontalDivider()
                 ClickablePreferenceItem(
                     title = stringResource(id = R.string.subtitle_font),
                     description = uiState.preferences.subtitleFont.name(),
@@ -134,6 +116,7 @@ private fun SubtitlePreferencesContent(
                     enabled = uiState.preferences.useSystemCaptionStyle.not(),
                     onClick = { onEvent(SubtitlePreferencesUiEvent.ShowDialog(SubtitlePreferenceDialog.SubtitleFontDialog)) },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.subtitle_text_bold),
                     description = stringResource(id = R.string.subtitle_text_bold_desc),
@@ -142,6 +125,7 @@ private fun SubtitlePreferencesContent(
                     isChecked = uiState.preferences.subtitleTextBold,
                     onClick = { onEvent(SubtitlePreferencesUiEvent.ToggleSubtitleTextBold) },
                 )
+                HorizontalDivider()
                 PreferenceSlider(
                     title = stringResource(id = R.string.subtitle_text_size),
                     description = uiState.preferences.subtitleTextSize.toString(),
@@ -164,6 +148,7 @@ private fun SubtitlePreferencesContent(
                         }
                     },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(id = R.string.subtitle_background),
                     description = stringResource(id = R.string.subtitle_background_desc),
@@ -172,6 +157,7 @@ private fun SubtitlePreferencesContent(
                     isChecked = uiState.preferences.subtitleBackground,
                     onClick = { onEvent(SubtitlePreferencesUiEvent.ToggleSubtitleBackground) },
                 )
+                HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(R.string.embedded_styles),
                     description = stringResource(R.string.embedded_styles_desc),
