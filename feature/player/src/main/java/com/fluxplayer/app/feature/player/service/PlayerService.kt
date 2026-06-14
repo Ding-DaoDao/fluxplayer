@@ -146,7 +146,6 @@ class PlayerService : MediaSessionService() {
             loadArtworkForCurrentMediaItem()
             mediaItem?.mediaMetadata?.let { metadata ->
                 mediaSession?.player?.run {
-                    setPlaybackSpeed(playerPreferences.defaultPlaybackSpeed)
                     playerSpecificSubtitleDelayMilliseconds = metadata.subtitleDelayMilliseconds ?: 0L
                     playerSpecificSubtitleSpeed = metadata.subtitleSpeed ?: 1f
                 }
@@ -650,6 +649,7 @@ class PlayerService : MediaSessionService() {
                     LoopMode.ONE -> Player.REPEAT_MODE_ONE
                     LoopMode.ALL -> Player.REPEAT_MODE_ALL
                 }
+                it.setPlaybackSpeed(playerPreferences.defaultPlaybackSpeed)
             }
 
         try {
