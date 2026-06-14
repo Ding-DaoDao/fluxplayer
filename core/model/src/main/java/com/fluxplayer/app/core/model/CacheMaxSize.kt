@@ -9,7 +9,8 @@ enum class CacheMaxSize {
     GB_10,
     GB_20,
     GB_50,
-    UNLIMITED;
+    UNLIMITED,
+    ;
 
     val bytes: Long
         get() = when (this) {

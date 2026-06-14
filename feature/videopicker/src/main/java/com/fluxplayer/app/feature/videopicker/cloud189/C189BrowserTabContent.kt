@@ -5,21 +5,36 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.core.common.CloudUriScheme
+import com.fluxplayer.app.core.common.onCloudMediaClick
 import com.fluxplayer.app.core.common.onCloudVideoClick
 import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.ui.components.DoneButton
+import com.fluxplayer.app.core.ui.components.CancelButton
+import com.fluxplayer.app.core.ui.components.NextDialog
+import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import com.fluxplayer.app.feature.videopicker.composables.ContextActionMenu
 import com.fluxplayer.app.feature.videopicker.composables.CreateFolderDialog
@@ -27,8 +42,12 @@ import com.fluxplayer.app.feature.videopicker.composables.DownloadNotificationBa
 import com.fluxplayer.app.feature.videopicker.composables.FolderPickerDialog
 import com.fluxplayer.app.feature.videopicker.composables.ImageViewerScreen
 import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
+import com.fluxplayer.app.feature.videopicker.composables.SharedShareBrowseDialog
+import com.fluxplayer.app.feature.videopicker.composables.SharedShareTargetPickerDialog
 import com.fluxplayer.app.feature.videopicker.composables.SortOption
 import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuContent
+import com.fluxplayer.app.feature.videopicker.composables.buildItemSubtitle
+import com.fluxplayer.app.feature.videopicker.composables.formatFileSize
 
 /**
  * 天翼云盘浏览器 Tab 内容
@@ -36,7 +55,7 @@ import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuConten
 @Composable
 fun C189BrowserTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
-    onPlayVideos: (List<Uri>, Uri) -> Unit,
+    onPlayVideos: (List<Uri>, Uri, Boolean) -> Unit,
     onLogoutReady: (() -> Unit) -> Unit = {},
     onSettingsClick: () -> Unit = {},
     navigateToDirParam: Pair<String, String>? = null,
@@ -58,6 +77,18 @@ fun C189BrowserTabContent(
             viewModel.jumpToFolder(fileId, label)
             onNavigateToDirConsumed()
         }
+    }
+
+    // 从后台恢复或切Tab回来时，自动检测剪切板中的分享链接
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.detectClipboardShareUrl()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     BackHandler(enabled = state.breadcrumbs.size > 1 && state.isLoggedIn) {
@@ -92,6 +123,15 @@ fun C189BrowserTabContent(
         onItemClick = { item ->
             if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
             else if (item.isImage) imageViewerIndex = state.items.indexOf(item)
+            else if (item.isAudio) onCloudMediaClick(
+                item = item,
+                allItems = state.items,
+                mediaFilter = { it.isAudio },
+                resolveUrl = { viewModel.resolveVideoUri(item) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("cloud189", it.path) },
+                onPlayVideos = onPlayVideos,
+                scope = scope,
+            )
             else onCloudVideoClick(
                 item = item,
                 allItems = state.items,
@@ -141,6 +181,7 @@ fun C189BrowserTabContent(
             )
         },
         breadcrumbLabel = { it.label },
+        breadcrumbActions = null,
         loginContent = {
             C189LoginScreen(
                 uiState = state,
@@ -157,6 +198,20 @@ fun C189BrowserTabContent(
         onExitClick = { viewModel.logout() },
         playedUriSet = state.playedUriSet,
         cloudProviderKey = "cloud189",
+        providerMenuItems = { onDismiss ->
+                DropdownMenuItem(
+                    text = { Text("签到") },
+                    onClick = { onDismiss(); viewModel.manualSign() },
+                )
+                DropdownMenuItem(
+                    text = { Text("用户信息") },
+                    onClick = { onDismiss(); viewModel.showUserInfo() },
+                )
+                DropdownMenuItem(
+                    text = { Text("打开分享链接") },
+                    onClick = { onDismiss(); viewModel.showShareInput() },
+                )
+            },
     )
 
     val renameItem = state.items.getOrNull(renameIndex)
@@ -215,8 +270,122 @@ fun C189BrowserTabContent(
                 onClose = { imageViewerIndex = -1 },
             )
         }
+
+        // === 分享链接输入弹窗 ===
+        if (state.showShareInputDialog) {
+            NextDialog(
+                onDismissRequest = { viewModel.dismissShareInput() },
+                title = { Text("打开天翼云盘分享链接") },
+                content = {
+                    OutlinedTextField(
+                        value = state.shareInputText,
+                        onValueChange = { viewModel.updateShareInputText(it) },
+                        label = { Text("分享链接") },
+                        placeholder = { Text("https://cloud.189.cn/t/...") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                },
+                confirmButton = {
+                    DoneButton(
+                        onClick = {
+                            viewModel.openShareUrl(state.shareInputText)
+                        },
+                    )
+                },
+                dismissButton = {
+                    CancelButton(onClick = { viewModel.dismissShareInput() })
+                },
+            )
+        }
+
+        // === 用户信息弹窗 ===
+        if (state.showUserInfoDialog) {
+            NextDialog(
+                onDismissRequest = { viewModel.dismissUserInfo() },
+                title = { Text("账号信息") },
+                content = {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        if (state.isLoading) {
+                            Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator()
+                            }
+                        } else {
+                            if (state.userNickname.isNotEmpty()) {
+                                InfoRow("昵称", state.userNickname)
+                            }
+                            if (state.userPhone.isNotEmpty()) {
+                                InfoRow("手机", state.userPhone)
+                            }
+                            if (state.userCapacity > 0) {
+                                InfoRow("总空间", formatFileSize(state.userCapacity))
+                            }
+                            if (state.userAvailable > 0 || state.userCapacity > 0) {
+                                InfoRow("剩余空间", formatFileSize(state.userAvailable))
+                            }
+                            InfoRow(
+                                "会员",
+                                if (state.userVipExpireTime.isNotEmpty()) "到期: ${state.userVipExpireTime}" else "非会员"
+                            )
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    CancelButton(onClick = { viewModel.dismissUserInfo() })
+                },
+            )
+        }
+
+        // === 分享浏览弹窗 ===
+        if (state.showShareBrowse) {
+            SharedShareBrowseDialog(
+                title = "分享: ${state.shareName}",
+                items = state.shareItems,
+                targetBreadcrumbs = state.shareSaveTargetBreadcrumbs,
+                breadcrumbLabel = { it.label },
+                isLoading = state.shareIsLoading,
+                hasMore = state.shareHasMore,
+                canNavigateUp = state.shareBreadcrumbs.size > 1,
+                onItemClick = { item ->
+                    if (item.isDirectory) viewModel.navigateShareFolder(item)
+                },
+                onSaveSelected = { indices -> viewModel.shareSaveFiles(indices) },
+                onBack = { viewModel.exitShareBrowse() },
+                onNavigateUp = { viewModel.navigateShareUp() },
+                onChangeTarget = { viewModel.showShareTargetFolderPicker() },
+                onDismiss = { viewModel.exitShareBrowse() },
+                onTargetBreadcrumbClick = { viewModel.shareTargetBreadcrumbClick(it) },
+            )
+        }
+
+        // === 分享转存目标文件夹选择器 ===
+        if (state.showShareTargetPicker) {
+            SharedShareTargetPickerDialog(
+                folders = state.shareTargetPickerFolders,
+                isLoading = state.shareTargetPickerIsLoading,
+                path = state.shareTargetPickerPath,
+                breadcrumbLabel = { it.label },
+                onDismiss = { viewModel.dismissShareTargetPicker() },
+                onConfirmCurrent = { viewModel.selectShareTargetCurrentFolder() },
+                onNavigateToFolder = { id, label -> viewModel.navigateShareTargetFolder(id, label) },
+                onNavigateUp = { viewModel.navigateShareTargetUp() },
+                onNavigateToIndex = { viewModel.navigateShareTargetToIndex(it) },
+            )
+        }
     }
 
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
 }
 
 /**

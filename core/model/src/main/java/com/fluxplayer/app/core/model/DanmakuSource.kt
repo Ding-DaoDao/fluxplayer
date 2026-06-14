@@ -79,7 +79,6 @@ data class DanmakuSource(
             enabled = false,
         )
 
-
         /** 所有平台源列表 */
         val PLATFORM_SOURCES = listOf(BILIBILI, TENCENT, MGTV, YOUKU, QIYI)
 
@@ -94,8 +93,11 @@ data class DanmakuSource(
             return sources
                 .filter { it.id !in removedIds }
                 .map { s ->
-                    if (s.id == DANDANPLAY.id) s.copy(appId = DANDANPLAY.appId, token = DANDANPLAY.token)
-                    else s
+                    if (s.id == DANDANPLAY.id) {
+                        s.copy(appId = DANDANPLAY.appId, token = DANDANPLAY.token)
+                    } else {
+                        s
+                    }
                 }
         }
     }
@@ -105,8 +107,10 @@ data class DanmakuSource(
 enum class DanmakuSourceType {
     /** 内置预设源（弹弹 play 官方） */
     BUILT_IN,
+
     /** 用户自定义源（自建兼容 API） */
     CUSTOM,
+
     /** 平台源（B站、芒果TV等） */
     PLATFORM,
 }

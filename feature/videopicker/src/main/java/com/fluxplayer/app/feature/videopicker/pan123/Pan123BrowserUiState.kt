@@ -26,5 +26,27 @@ data class Pan123BrowserUiState(
     val pendingAction: String? = null,
     val moveFileId: String? = null,
     val pickerFolders: List<WebDavResource> = emptyList(),
-    val pickerIsLoading: Boolean = false
+    val pickerIsLoading: Boolean = false,
+    val isSearching: Boolean = false,
+    val searchQuery: String = "",
+    val showAccountDialog: Boolean = false,
+
+    // === 分享链接 ===
+    val showShareInputDialog: Boolean = false,
+    val shareInputText: String = "",
+    val showShareBrowse: Boolean = false,
+    val shareKey: String = "",
+    val sharePwd: String? = null,
+    val shareItems: List<WebDavResource> = emptyList(),
+    val shareIsLoading: Boolean = false,
+    val shareTotal: Int = 0,
+    val shareCurrentParentId: String = "0",
+    val shareBreadcrumbs: List<Pan123Breadcrumb> = emptyList(),
+    val shareSaveTargetFolderId: String = "0",
+    val shareSaveTargetLabel: String = "根目录",
+    val shareSaveTargetBreadcrumbs: List<Pan123Breadcrumb> = emptyList(),
+    val showShareTargetPicker: Boolean = false,
+    val shareTargetPickerFolders: List<WebDavResource> = emptyList(),
+    val shareTargetPickerIsLoading: Boolean = false,
+    val shareTargetPickerPath: List<Pan123Breadcrumb> = emptyList(),
 )

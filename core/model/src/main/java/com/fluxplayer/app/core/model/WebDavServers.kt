@@ -12,7 +12,7 @@ data class WebDavServers(
 
     fun updateServer(server: WebDavServer): WebDavServers {
         return copy(
-            servers = servers.map { if (it.id == server.id) server else it }
+            servers = servers.map { if (it.id == server.id) server else it },
         )
     }
 
@@ -24,7 +24,7 @@ data class WebDavServers(
         return copy(
             servers = servers.map {
                 if (it.id == id) it.copy(isActive = !it.isActive) else it
-            }
+            },
         )
     }
 

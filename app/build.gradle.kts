@@ -91,11 +91,11 @@ android {
 }
 
 // 将 openlist-binary/libopenlist.so 复制到 jniLibs 各 ABI 目录（打包进 APK）
-val openlistBinarySrc = file("${rootDir}/openlist-binary/libopenlist.so")
+val openlistBinarySrc = file("$rootDir/openlist-binary/libopenlist.so")
 if (openlistBinarySrc.exists()) {
     val abis = listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
     abis.forEach { abi ->
-        val dstDir = file("${projectDir}/src/main/jniLibs/$abi/")
+        val dstDir = file("$projectDir/src/main/jniLibs/$abi/")
         val dstFile = dstDir.resolve("libopenlist.so")
         if (!dstFile.exists() || dstFile.length() != openlistBinarySrc.length()) {
             dstDir.mkdirs()

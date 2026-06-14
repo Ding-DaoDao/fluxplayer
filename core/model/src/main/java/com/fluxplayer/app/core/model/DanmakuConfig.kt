@@ -30,9 +30,9 @@ data class DanmakuConfig(
     /** 根据 displayMode 计算显示区域比例 0.0~1.0 */
     val displayAreaRatio: Float
         get() = when {
-            displayMode <= 0 -> 0f          // 不显示
-            displayMode >= 9 -> 1f          // 满屏
-            else -> displayMode / 8f        // 1/8 ~ 8/8
+            displayMode <= 0 -> 0f // 不显示
+            displayMode >= 9 -> 1f // 满屏
+            else -> displayMode / 8f // 1/8 ~ 8/8
         }
 
     /** 速度倍率对应的档位标签 */

@@ -75,6 +75,7 @@ fun <T> CloudBrowserPanel(
     sortMenuContent: @Composable ColumnScope.() -> Unit = {},
     playedUriSet: Set<String> = emptySet(),
     cloudProviderKey: String = "",
+    providerMenuItems: @Composable ((onDismiss: () -> Unit) -> Unit) = {},
 ) {
     // 从 navigationStack 或扁平参数获取当前目录状态
     val topEntry = navigationStack.lastOrNull()
@@ -136,6 +137,8 @@ fun <T> CloudBrowserPanel(
                 onMenuClick = if (onExitClick != null) ({ showMenu = true }) else null,
                 onMenuDismiss = { showMenu = false },
                 menuContent = {
+                    providerMenuItems.invoke({ showMenu = false })
+                    HorizontalDivider()
                     DropdownMenuItem(
                         text = { Text("退出") },
                         onClick = {
@@ -658,7 +661,7 @@ private fun ItemCard(
     }
 }
 
-private fun buildItemSubtitle(item: WebDavResource): String {
+fun buildItemSubtitle(item: WebDavResource): String {
     if (item.isDirectory) {
         val isEmpty = item.fileCount == 0
         val parts = buildList {

@@ -46,7 +46,8 @@ class C189ApiClient(
     private fun hmacSha1(key: ByteArray, data: String): String {
         val mac = Mac.getInstance("HmacSHA1")
         mac.init(SecretKeySpec(key, "HmacSHA1"))
-        return Base64.encodeToString(mac.doFinal(data.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+        val hash = mac.doFinal(data.toByteArray(Charsets.UTF_8))
+        return hash.joinToString("") { "%02x".format(it) }
     }
 
     private fun md5Signature(params: Map<String, String>): String {
@@ -65,7 +66,7 @@ class C189ApiClient(
 
     /** GET — session HMAC-SHA1 签名 (api.cloud.189.cn) */
     private suspend fun signedGet(
-        path: String, queryParams: Map<String, String> = emptyMap()
+        path: String, queryParams: Map<String, String> = emptyMap(), retry: Boolean = true
     ): JSONObject {
         val sk = sessionKey.ifBlank { C189AuthProvider.sessionKey }
         val ss = sessionSecret.ifBlank { C189AuthProvider.sessionSecret }
@@ -83,25 +84,39 @@ class C189ApiClient(
         val request = Request.Builder()
             .url("$API_BASE$path$queryStr")
             .get()
-            .header("User-Agent", "Android")
+            .header("User-Agent", "okhttp/3.12.2")
             .header("accept", "application/json;charset=UTF-8")
-            .header("sign-type", "1")
-            .header("SessionKey", sk)
-            .header("Signature", sig)
-            .header("Date", date)
+            .header("sessionkey", sk)
+            .header("signature", sig)
+            .header("date", date)
             .build()
 
-        Log.d(TAG, "signedGet: sigData=$sigData, url=$API_BASE$path$queryStr")
+        Log.d(TAG, "signedGet: sigData=$sigData, sig=$sig, url=$API_BASE$path$queryStr")
 
         val resp = executeRequestAndGetResponse(request)
         val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
-        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
+        if (!resp.isSuccessful) {
+            // sessionKey 过期 → 尝试用 accessToken 重新获取 session 后重试
+            if (retry && (body.contains("InvalidSessionKey") || body.contains("SessionKeyInvalid"))
+                && accessToken.isNotBlank()) {
+                try {
+                    login4MergedClient(accessToken)
+                    sessionKey = C189AuthProvider.sessionKey
+                    sessionSecret = C189AuthProvider.sessionSecret
+                    C189AuthProvider.notifyTokensRefreshed()
+                    return signedGet(path, queryParams, false)
+                } catch (e: Exception) {
+                    Log.w(TAG, "signedGet retry failed", e)
+                }
+            }
+            throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
+        }
         return JSONObject(body)
     }
 
     /** POST — session HMAC-SHA1 签名 (api.cloud.189.cn) */
     private suspend fun signedPost(
-        path: String, formParams: Map<String, String> = emptyMap()
+        path: String, formParams: Map<String, String> = emptyMap(), retry: Boolean = true
     ): JSONObject {
         val sk = sessionKey.ifBlank { C189AuthProvider.sessionKey }
         val ss = sessionSecret.ifBlank { C189AuthProvider.sessionSecret }
@@ -119,25 +134,38 @@ class C189ApiClient(
         val request = Request.Builder()
             .url("$API_BASE$path")
             .post(formBody.toRequestBody(formUrlEncoded))
-            .header("User-Agent", "Android")
+            .header("User-Agent", "okhttp/3.12.2")
             .header("accept", "application/json;charset=UTF-8")
-            .header("sign-type", "1")
-            .header("SessionKey", sk)
-            .header("Signature", sig)
-            .header("Date", date)
+            .header("sessionkey", sk)
+            .header("signature", sig)
+            .header("date", date)
             .build()
 
-        Log.d(TAG, "signedPost: $API_BASE$path, form=$formBody")
+        Log.d(TAG, "signedPost: $API_BASE$path, sig=$sig, form=$formBody")
 
         val resp = executeRequestAndGetResponse(request)
         val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
-        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
+        if (!resp.isSuccessful) {
+            if (retry && (body.contains("InvalidSessionKey") || body.contains("SessionKeyInvalid"))
+                && accessToken.isNotBlank()) {
+                try {
+                    login4MergedClient(accessToken)
+                    sessionKey = C189AuthProvider.sessionKey
+                    sessionSecret = C189AuthProvider.sessionSecret
+                    C189AuthProvider.notifyTokensRefreshed()
+                    return signedPost(path, formParams, false)
+                } catch (e: Exception) {
+                    Log.w(TAG, "signedPost retry failed", e)
+                }
+            }
+            throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
+        }
         return JSONObject(body)
     }
 
     /** POST — accessToken + MD5 签名 → cloud.189.cn/api/open/ */
     private suspend fun openApiPost(
-        actionPath: String, formParams: Map<String, String>
+        actionPath: String, formParams: Map<String, String>, retry: Boolean = true
     ): JSONObject {
         val at = accessToken.ifBlank { C189AuthProvider.accessToken }
         if (at.isBlank()) throw IllegalStateException("未登录或 AccessToken 为空")
@@ -151,7 +179,7 @@ class C189ApiClient(
 
         val formBody = formParams.entries.joinToString("&") { "${it.key}=${it.value}" }
 
-        val builder = Request.Builder()
+        val request = Request.Builder()
             .url("$OPEN_API_BASE/$actionPath")
             .header("User-Agent", "Android")
             .header("Referer", "https://cloud.189.cn/web/main/")
@@ -161,12 +189,24 @@ class C189ApiClient(
             .header("Timestamp", ts)
             .header("Accesstoken", at)
             .post(formBody.toRequestBody(formUrlEncoded))
+            .build()
 
         Log.d(TAG, "openApiPost: $OPEN_API_BASE/$actionPath, ts=$ts")
 
-        val resp = executeRequestAndGetResponse(builder.build())
+        val resp = executeRequestAndGetResponse(request)
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response")
-        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}: ${respBody.take(200)}")
+
+        if (!resp.isSuccessful) {
+            val canRetry = respBody.contains("InvalidAccessToken") || respBody.contains("InvalidSessionKey")
+            if (retry && canRetry) {
+                if (refreshAccessToken()) {
+                    accessToken = C189AuthProvider.accessToken
+                    sessionKey = C189AuthProvider.sessionKey
+                    return openApiPost(actionPath, formParams, false)
+                }
+            }
+            throw IllegalStateException("HTTP ${resp.code}: ${respBody.take(200)}")
+        }
         return JSONObject(respBody)
     }
 
@@ -229,12 +269,11 @@ class C189ApiClient(
                 Request.Builder()
                     .url("$API_BASE$requestUri")
                     .get()
-                    .header("User-Agent", "Android")
+                    .header("User-Agent", "okhttp/3.12.2")
                     .header("accept", "application/json;charset=UTF-8")
-                    .header("sign-type", "1")
-                    .header("SessionKey", "")
-                    .header("Signature", signature)
-                    .header("Date", date)
+                    .header("sessionkey", "")
+                    .header("signature", signature)
+                    .header("date", date)
                     .header("Cookie", cookies)
                     .build()
             )
@@ -649,6 +688,17 @@ class C189ApiClient(
         return devices[(Math.random() * devices.size).toInt()]
     }
 
+    /** 尝试 URL 解码文件名（API 可能返回含百分号编码的中文）。
+     * 仅在字符串包含 %XX 模式时才解码，并保护 literal '+' 不被误转为空格。 */
+    internal fun String.tryUrlDecode(): String {
+        if (!Regex("%[0-9A-Fa-f]{2}").containsMatchIn(this)) return this
+        return try {
+            URLDecoder.decode(this.replace("+", "%2B"), "UTF-8")
+        } catch (_: Exception) {
+            this
+        }
+    }
+
     // ==================== Token 刷新 ====================
 
     suspend fun refreshAccessToken(): Boolean {
@@ -674,6 +724,7 @@ class C189ApiClient(
 
                         // 关键：用新 accessToken 刷新 sessionKey/sessionSecret
                         tryRefreshSessionViaAccessToken(newAt)
+                        C189AuthProvider.notifyTokensRefreshed()
                         Log.d(TAG, "refreshAccessToken: 通过 refreshToken 成功")
                         return true
                     }
@@ -707,6 +758,7 @@ class C189ApiClient(
                     accessToken = newAt
                     C189AuthProvider.accessToken = newAt
                     C189AuthProvider.expiresIn = System.currentTimeMillis() + 518400000
+                    C189AuthProvider.notifyTokensRefreshed()
                     Log.d(TAG, "refreshAccessToken: 通过 sessionKey 成功")
                     return true
                 }
@@ -914,19 +966,8 @@ class C189ApiClient(
     }
 
     suspend fun getDownloadUrl(fileId: String): Result<String> = runCatching {
-        // cloud.189.cn/api/open/file/getFileDownloadUrl.action — Cookie + sign-type 认证
-        val resp = executeRequestAndGetResponse(
-            Request.Builder()
-                .url("https://cloud.189.cn/api/open/file/getFileDownloadUrl.action?fileId=$fileId")
-                .get()
-                .header("User-Agent", "Android")
-                .header("accept", "application/json;charset=UTF-8")
-                .header("sign-type", "1")
-                .build()
-        )
-        val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
-        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
-        JSONObject(body).optString("fileDownloadUrl", "")
+        val json = openApiGet("file/getFileDownloadUrl.action", mapOf("fileId" to fileId))
+        json.optString("fileDownloadUrl", "")
     }
 
     suspend fun createFolder(parentFolderId: String, folderName: String): Result<Boolean> = runCatching {
@@ -952,10 +993,209 @@ class C189ApiClient(
 
     suspend fun moveFiles(fileIds: List<String>, targetFolderId: String): Result<Boolean> = runCatching {
         val fileId = fileIds.first()
-        val json = signedPost(
+        val deviceModel = randomDeviceModel()
+        val rand = System.currentTimeMillis().toString()
+        val json = signedGet(
             "/moveFile.action",
-            mapOf("fileId" to fileId, "destFileName" to "", "destParentFolderId" to targetFolderId)
+            linkedMapOf(
+                "rand" to rand,
+                "clientType" to "TELEANDROID",
+                "version" to "8.9.0",
+                "model" to deviceModel,
+                "fileId" to fileId,
+                "destFileName" to "",
+                "destParentFolderId" to targetFolderId
+            )
         )
-        json.optBoolean("success", false)
+        json.optBoolean("success", false) || json.optString("res_code", "") == "0"
     }
+
+    // ==================== 分享 ====================
+
+    data class ShareInfo(
+        val shareKey: String,
+        val sharePwd: String = "",
+    ) {
+        val normalizedUrl: String get() = "https://cloud.189.cn/t/$shareKey" +
+            (if (sharePwd.isNotEmpty()) " 访问码：$sharePwd" else "")
+    }
+
+    /** 纯客户端解析分享链接，支持 /t/ 和 ?code= 两种格式 */
+    fun parseShareUrl(rawUrl: String): ShareInfo? {
+        // 参考先 decodeURIComponent 再解析
+        val trimmed = try {
+            URLDecoder.decode(rawUrl.trim(), "UTF-8")
+        } catch (e: Exception) {
+            rawUrl.trim()
+        }
+        // 同时匹配 /t/xxx 和 ?code=xxx
+        val keyPattern = Regex("""(?:cloud\.189\.cn/t/([a-zA-Z0-9]+)|\?code=([a-zA-Z0-9]+))""", RegexOption.IGNORE_CASE)
+        val keyMatch = keyPattern.find(trimmed) ?: return null
+        val shareKey = keyMatch.groupValues[1].ifBlank { keyMatch.groupValues[2] }
+        // 提取访问码
+        val pwdPattern = Regex("""访问(?:码|密码)?[：:\\s-]*([a-zA-Z0-9]{4})(?=[^\w]|${'$'})""", RegexOption.IGNORE_CASE)
+        val pwd = pwdPattern.find(trimmed)?.groupValues?.getOrNull(1) ?: ""
+        return ShareInfo(shareKey = shareKey, sharePwd = pwd)
+    }
+
+    fun isShareUrl(url: String): Boolean =
+        Regex("""cloud\.189\.cn/(?:t/|.*\?code=)[a-zA-Z0-9]+""", RegexOption.IGNORE_CASE).containsMatchIn(url)
+
+    /** 通过分享码获取分享基本信息（无需登录，accessCode 在 listShareDir 时使用） */
+    suspend fun getShareInfoByCode(shareKey: String, sharePwd: String = ""): JSONObject {
+        // 当有访问码时，拼接到 shareCode 中（参考 csdown.js: shareKey + '（访问码：' + sharePwd + '）'）
+        val codeWithPwd = if (sharePwd.isNotEmpty()) "$shareKey（访问码：$sharePwd）" else shareKey
+        val formBody = "shareCode=${URLEncoder.encode(codeWithPwd, "UTF-8")}"
+        val resp = executeRequestAndGetResponse(
+            Request.Builder()
+                .url("$API_BASE/open/share/getShareInfoByCodeV2.action")
+                .post(formBody.toRequestBody(formUrlEncoded))
+                .header("User-Agent", "Android")
+                .header("accept", "application/json;charset=UTF-8")
+                .build()
+        )
+        val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
+        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
+        val json = JSONObject(body)
+        // 检查是否返回了具体的错误
+        if (json.has("errorCode")) {
+            val msg = json.optString("errorMsg", "未知错误")
+            throw IllegalStateException(msg)
+        }
+        return json
+    }
+
+    /** 列出分享目录下的文件（无需登录） */
+    suspend fun listShareDir(
+        shareId: String,
+        fileId: String,
+        isFolder: Boolean,
+        shareMode: Int,
+        pageNum: Int = 1,
+        pageSize: Int = 200,
+        accessCode: String = "",
+    ): C189ListResult {
+        val params = linkedMapOf(
+            "shareId" to shareId,
+            "fileId" to fileId,
+            "isFolder" to isFolder.toString(),
+            "shareMode" to shareMode.toString(),
+            "pageNum" to pageNum.toString(),
+            "pageSize" to pageSize.toString(),
+        )
+        if (accessCode.isNotEmpty()) params["accessCode"] = accessCode
+        val queryStr = params.entries.joinToString("&") {
+            "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}"
+        }
+        val resp = executeRequestAndGetResponse(
+            Request.Builder()
+                .url("$API_BASE/open/share/listShareDir.action?$queryStr")
+                .get()
+                .header("User-Agent", "Android")
+                .header("accept", "application/json;charset=UTF-8")
+                .build()
+        )
+        val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
+        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
+        val json = JSONObject(body)
+        val fileListAO = json.optJSONObject("fileListAO")
+            ?: throw IllegalStateException("响应中缺少 fileListAO")
+        val folders = fileListAO.optJSONArray("folderList") ?: JSONArray()
+        val files = fileListAO.optJSONArray("fileList") ?: JSONArray()
+        val items = mutableListOf<C189FileItem>()
+        for (i in 0 until folders.length()) {
+            val f = folders.getJSONObject(i)
+            items.add(C189FileItem(
+                id = f.optString("id", ""),
+                name = f.optString("name", "").tryUrlDecode(),
+                isDir = true,
+                size = f.optLong("size", 0),
+                lastOpTime = f.optString("lastOpTime", ""),
+                createDate = f.optString("createDate", ""),
+                fileCount = f.optInt("fileCount", 0),
+                folderSize = f.optLong("fileListSize", 0),
+                md5 = f.optString("md5", ""),
+            ))
+        }
+        for (i in 0 until files.length()) {
+            val f = files.getJSONObject(i)
+            items.add(C189FileItem(
+                id = f.optString("id", ""),
+                name = f.optString("name", "").tryUrlDecode(),
+                isDir = false,
+                size = f.optLong("size", 0),
+                lastOpTime = f.optString("lastOpTime", ""),
+                createDate = f.optString("createDate", ""),
+                mediaType = f.optInt("mediaType", -1),
+                md5 = f.optString("md5", ""),
+            ))
+        }
+        return C189ListResult(items, fileListAO.optInt("count", 0))
+    }
+
+    /** 转存分享文件到自己的网盘（需要登录 + HMAC-SHA1 签名） */
+    suspend fun shareSave(
+        fileId: String,
+        fileName: String,
+        shareId: String,
+        isFolder: Int,
+        targetFolderId: String = "-11",
+    ): Boolean {
+        val deviceModel = randomDeviceModel()
+        val rand = System.currentTimeMillis().toString()
+        val taskInfo = JSONObject().apply {
+            put("fileId", fileId)
+            put("fileName", fileName)
+            put("isFolder", isFolder)
+        }
+        val params = linkedMapOf(
+            "type" to "SHARE_SAVE",
+            "taskInfos" to "[$taskInfo]",
+            "targetFolderId" to targetFolderId,
+            "shareId" to shareId,
+        )
+        val queryParams = linkedMapOf(
+            "rand" to rand,
+            "clientType" to "TELEANDROID",
+            "version" to "8.9.0",
+            "model" to deviceModel,
+        )
+        val queryStr = queryParams.entries.joinToString("&") {
+            "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}"
+        }
+        val json = signedPost("/batch/createBatchTask.action?$queryStr", params)
+        return json.optBoolean("success", false) || json.optString("res_code", "") == "0"
+    }
+
+    // ==================== 签到 ====================
+
+    suspend fun userSign(): Result<String> = runCatching {
+        // 参考: post('/mkt/userSign.action') 无 body → GET
+        val json = signedGet("/mkt/userSign.action")
+        val result = json.optInt("result", -1)
+        // result=1 签到成功, result=-1 已签到（也是正常情况）
+        if (result != 1 && result != -1) {
+            val tip = json.optString("resultTip", "")
+            throw IllegalStateException(tip.ifBlank { "签到失败 (result=$result)" })
+        }
+        json.optString("resultTip", "签到成功")
+    }
+
+    // ==================== 用户信息 ====================
+
+    /** 带设备参数的 GET（rand/clientType/version/model） */
+    private suspend fun signedGetWithDevice(path: String): JSONObject {
+        val deviceModel = randomDeviceModel()
+        val rand = System.currentTimeMillis().toString()
+        return signedGet(path, linkedMapOf(
+            "rand" to rand,
+            "clientType" to "TELEANDROID",
+            "version" to "8.9.0",
+            "model" to deviceModel,
+        ))
+    }
+
+    suspend fun getUserInfoExt(): JSONObject = signedGetWithDevice("/getUserInfoExt.action")
+    suspend fun getUserInfo(): JSONObject = signedGetWithDevice("/getUserInfo.action")
+    suspend fun getUserPrivileges(): JSONObject = signedGetWithDevice("/getUserPrivileges.action")
 }

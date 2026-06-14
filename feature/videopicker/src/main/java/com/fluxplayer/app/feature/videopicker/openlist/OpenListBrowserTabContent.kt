@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fluxplayer.app.core.common.onCloudMediaClick
 import com.fluxplayer.app.core.common.onCloudVideoClick
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
@@ -30,7 +31,7 @@ import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuConten
 @Composable
 fun OpenListBrowserTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
-    onPlayVideos: (List<Uri>, Uri) -> Unit,
+    onPlayVideos: (List<Uri>, Uri, Boolean) -> Unit,
     onSettingsClick: () -> Unit,
     navigateToDirParam: Pair<String, String>? = null,
     onNavigateToDirConsumed: () -> Unit = {},
@@ -95,6 +96,16 @@ fun OpenListBrowserTabContent(
                 viewModel.navigateToDir(state.items.indexOf(item))
             } else if (item.isImage) {
                 imageViewerIndex = state.items.indexOf(item)
+            } else if (item.isAudio) {
+                onCloudMediaClick(
+                    item = item,
+                    allItems = state.items,
+                    mediaFilter = { it.isAudio },
+                    resolveUrl = { viewModel.getPlayUri(item) },
+                    buildPlaylistUri = { viewModel.getPlayUri(it) },
+                    onPlayVideos = onPlayVideos,
+                    scope = scope,
+                )
             } else if (item.isVideo) {
                 onCloudVideoClick(
                     item = item,

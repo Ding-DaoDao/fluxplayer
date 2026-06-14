@@ -424,16 +424,16 @@ fun MediaPlayerScreen(
 
                 // ── 弹幕叠加层 ──
                 DanmakuOverlay(
-                    player = player,
-                    danmakuList = danmakuList,
-                    config = playerPreferences.danmakuConfig,
-                    enabled = danmakuEnabled,
-                    modifier = Modifier.fillMaxSize(),
-                    onController = { ctrl ->
-                        danmakuController = ctrl
-                    },
-                    onMediaItemTransitioned = { indexStep -> viewModel.onMediaItemTransition(indexStep, context) },
-                )
+                        player = player,
+                        danmakuList = danmakuList,
+                        config = playerPreferences.danmakuConfig,
+                        enabled = danmakuEnabled,
+                        modifier = Modifier.fillMaxSize(),
+                        onController = { ctrl ->
+                            danmakuController = ctrl
+                        },
+                        onMediaItemTransitioned = { indexStep -> viewModel.onMediaItemTransition(indexStep, context) },
+                    )
 
                 AnimatedVisibility(
                     visible = controlsVisibilityState.controlsVisible && !controlsVisibilityState.controlsLocked,

@@ -95,7 +95,14 @@ data class WebDavResource(
             ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md", ".csv", ".rtf", ".epub",
         )
         val ARCHIVE_EXTENSIONS = listOf(
-            ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso",
+            ".zip",
+            ".rar",
+            ".7z",
+            ".tar",
+            ".gz",
+            ".bz2",
+            ".xz",
+            ".iso",
         )
     }
 }

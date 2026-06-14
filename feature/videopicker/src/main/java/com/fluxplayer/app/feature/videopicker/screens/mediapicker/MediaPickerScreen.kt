@@ -162,7 +162,7 @@ import com.fluxplayer.app.feature.videopicker.state.rememberSelectionManager
 fun MediaPickerRoute(
     viewModel: MediaPickerViewModel = hiltViewModel(),
     onPlayVideo: (uri: Uri, title: String?) -> Unit,
-    onPlayVideos: (uris: List<Uri>, startUri: Uri) -> Unit,
+    onPlayVideos: (uris: List<Uri>, startUri: Uri, isAudioOnly: Boolean) -> Unit,
     onFolderClick: (folderPath: String) -> Unit,
     onSettingsClick: () -> Unit,
     onSearchClick: () -> Unit,
@@ -204,7 +204,7 @@ internal fun MediaPickerScreen(
     onTabSelected: (Int) -> Unit = {},
     onNavigateUp: () -> Unit = {},
     onPlayVideo: (Uri, String?) -> Unit = { _, _ -> },
-    onPlayVideos: (List<Uri>, Uri) -> Unit = { _, _ -> },
+    onPlayVideos: (List<Uri>, Uri, Boolean) -> Unit = { _, _, _ -> },
     onFolderClick: (String) -> Unit = {},
     onSettingsClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
@@ -458,7 +458,7 @@ internal fun MediaPickerScreen(
                     showInfoAction = selectionManager.isSingleVideoSelected,
                     onPlayAction = {
                         val videoUris = selectionManager.allSelectedVideos.map { it.uriString.toUri() }
-                        onPlayVideos(videoUris, videoUris.first())
+                        onPlayVideos(videoUris, videoUris.first(), false)
                         selectionManager.clearSelection()
                     },
                     onRenameAction = {

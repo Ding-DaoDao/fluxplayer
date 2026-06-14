@@ -1,6 +1,7 @@
 package com.fluxplayer.app.feature.videopicker.pan123
 
 import android.app.Application
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -18,6 +19,7 @@ import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.pan123.Pan123ApiClient
 import com.fluxplayer.app.core.data.pan123.Pan123AuthProvider
 import com.fluxplayer.app.core.data.pan123.Pan123FileItem
+import com.fluxplayer.app.core.data.pan123.Pan123ShareFileItem
 import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
@@ -53,6 +55,7 @@ class Pan123BrowserViewModel @Inject constructor(
 
     val apiClient = Pan123ApiClient()
     private var cachedFileItems: List<Pan123FileItem> = emptyList()
+    private var cachedShareFileItems: List<Pan123ShareFileItem> = emptyList()
 
     // endregion
 
@@ -736,6 +739,397 @@ class Pan123BrowserViewModel @Inject constructor(
 
     // endregion
 
+    // region ==================== 盘内搜索 ====================
+
+    fun enterSearch() {
+        updateUiState { it.copy(isSearching = true, searchQuery = "") }
+    }
+
+    fun updateSearchQuery(query: String) {
+        updateUiState { it.copy(searchQuery = query) }
+    }
+
+    fun submitSearch(query: String) {
+        if (query.isBlank()) return
+        updateUiState { it.copy(isLoading = true, error = null) }
+        viewModelScope.launch {
+            val result = apiClient.listFiles(
+                parentFileId = "0",
+                page = 1,
+                searchData = query
+            )
+            result.fold(
+                onSuccess = { listResult ->
+                    cachedFileItems = listResult.items
+                    val resources = listResult.items.map { fileToResource(it) }
+                    updateUiState {
+                        it.copy(
+                            items = resources,
+                            isLoading = false,
+                            hasMore = listResult.items.size >= 100,
+                            currentPage = 1
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    updateUiState { it.copy(error = "搜索失败: ${e.message}", isLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun exitSearch() {
+        updateUiState { it.copy(isSearching = false, searchQuery = "") }
+        loadDirectory("0")
+    }
+
+    // endregion
+
+    // region ==================== 账号信息 ====================
+
+    fun loadUserInfo() {
+        updateUiState { it.copy(showAccountDialog = true) }
+        viewModelScope.launch {
+            val result = apiClient.getUserInfo()
+            result.fold(
+                onSuccess = { info ->
+                    updateUiState { it.copy(userInfo = info) }
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "获取账号信息失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    fun dismissAccountDialog() {
+        updateUiState { it.copy(showAccountDialog = false) }
+    }
+
+    // endregion
+
+    // region ==================== 分享链接转存 ====================
+
+    private var lastPromptedShareUrl: String = ""
+
+    fun showShareInput() {
+        updateUiState { it.copy(showShareInputDialog = true, shareInputText = "") }
+    }
+
+    fun updateShareInputText(text: String) {
+        updateUiState { it.copy(shareInputText = text) }
+    }
+
+    fun dismissShareInput() {
+        updateUiState { it.copy(showShareInputDialog = false) }
+    }
+
+    /**
+     * 打开分享链接：解析 URL → 加载顶层文件 → 显示浏览弹窗
+     */
+    fun openShareUrl(url: String) {
+        val result = apiClient.parseShareUrl(url)
+        if (result == null) {
+            Toast.makeText(getApplication(), "无效的123云盘分享链接", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val (shareKey, pwd) = result
+        updateUiState {
+            it.copy(
+                showShareInputDialog = false,
+                showShareBrowse = true,
+                shareKey = shareKey,
+                sharePwd = pwd,
+                shareCurrentParentId = "0",
+                shareBreadcrumbs = listOf(Pan123Breadcrumb("分享根目录", "0")),
+                shareItems = emptyList(),
+                shareIsLoading = true,
+                shareSaveTargetFolderId = "0",
+                shareSaveTargetLabel = "根目录",
+                shareSaveTargetBreadcrumbs = listOf(Pan123Breadcrumb("根目录", "0")),
+            )
+        }
+        viewModelScope.launch {
+            val loadResult = apiClient.listShareFiles(shareKey = shareKey, sharePwd = pwd, parentFileId = "0")
+            loadResult.fold(
+                onSuccess = { listing ->
+                    cachedShareFileItems = listing.files
+                    updateUiState {
+                        it.copy(
+                            shareItems = listing.files.map { shareItemToResource(it) },
+                            shareIsLoading = false,
+                            shareTotal = listing.total,
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "获取分享内容失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateUiState { it.copy(shareIsLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun navigateShareFolder(item: WebDavResource) {
+        val state = _uiState.value
+        val shareKey = state.shareKey
+        val newParentId = item.path
+        updateUiState {
+            it.copy(
+                shareCurrentParentId = newParentId,
+                shareBreadcrumbs = it.shareBreadcrumbs + Pan123Breadcrumb(item.name, newParentId),
+                shareItems = emptyList(),
+                shareIsLoading = true,
+            )
+        }
+        viewModelScope.launch {
+            val result = apiClient.listShareFiles(shareKey = shareKey, sharePwd = state.sharePwd, parentFileId = newParentId)
+            result.fold(
+                onSuccess = { listing ->
+                    cachedShareFileItems = listing.files
+                    updateUiState { it.copy(shareItems = listing.files.map { shareItemToResource(it) }, shareIsLoading = false) }
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "加载文件夹失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateUiState { it.copy(shareIsLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun navigateShareUp() {
+        val state = _uiState.value
+        if (state.shareBreadcrumbs.size <= 1) return
+        val newCrumbs = state.shareBreadcrumbs.dropLast(1)
+        val parentId = newCrumbs.last().fileId
+        updateUiState {
+            it.copy(
+                shareBreadcrumbs = newCrumbs,
+                shareCurrentParentId = parentId,
+                shareItems = emptyList(),
+                shareIsLoading = true,
+            )
+        }
+        viewModelScope.launch {
+            val result = apiClient.listShareFiles(shareKey = state.shareKey, sharePwd = state.sharePwd, parentFileId = parentId)
+            result.fold(
+                onSuccess = { listing ->
+                    cachedShareFileItems = listing.files
+                    updateUiState { it.copy(shareItems = listing.files.map { shareItemToResource(it) }, shareIsLoading = false) }
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "加载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateUiState { it.copy(shareIsLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun exitShareBrowse() {
+        cachedShareFileItems = emptyList()
+        updateUiState {
+            it.copy(
+                showShareBrowse = false,
+                shareKey = "",
+                sharePwd = null,
+                shareItems = emptyList(),
+                shareBreadcrumbs = emptyList(),
+                shareCurrentParentId = "0",
+                shareIsLoading = false,
+                shareSaveTargetFolderId = "0",
+                shareSaveTargetLabel = "根目录",
+                shareSaveTargetBreadcrumbs = emptyList(),
+            )
+        }
+    }
+
+    fun shareSaveFiles(selectedIndices: Set<Int>) {
+        val state = _uiState.value
+        val items = state.shareItems
+        val filesToSave = if (selectedIndices.isEmpty()) {
+            cachedShareFileItems.toList()
+        } else {
+            selectedIndices.mapNotNull { idx ->
+                cachedShareFileItems.getOrNull(idx)
+            }
+        }
+        if (filesToSave.isEmpty()) {
+            Toast.makeText(getApplication(), "没有可转存的文件", Toast.LENGTH_SHORT).show()
+            return
+        }
+        updateUiState { it.copy(shareIsLoading = true) }
+        viewModelScope.launch {
+            val result = apiClient.copySaveFiles(
+                shareKey = state.shareKey,
+                sharePwd = state.sharePwd,
+                files = filesToSave,
+                targetFolderId = state.shareSaveTargetFolderId,
+            )
+            result.fold(
+                onSuccess = {
+                    Toast.makeText(getApplication(), "转存成功（${filesToSave.size} 个文件）", Toast.LENGTH_SHORT).show()
+                    exitShareBrowse()
+                },
+                onFailure = { e ->
+                    Toast.makeText(getApplication(), "转存失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    updateUiState { it.copy(shareIsLoading = false) }
+                }
+            )
+        }
+    }
+
+    // --- 转存目标文件夹选择器 ---
+
+    fun showShareTargetFolderPicker() {
+        val currentBreadcrumbs = _uiState.value.shareSaveTargetBreadcrumbs
+        val currentFolderId = currentBreadcrumbs.lastOrNull()?.fileId ?: "0"
+        updateUiState {
+            it.copy(
+                showShareTargetPicker = true,
+                shareTargetPickerFolders = emptyList(),
+                shareTargetPickerIsLoading = true,
+                shareTargetPickerPath = currentBreadcrumbs.ifEmpty {
+                    listOf(Pan123Breadcrumb("根目录", "0"))
+                },
+            )
+        }
+        viewModelScope.launch {
+            val result = apiClient.listFiles(parentFileId = currentFolderId, page = 1)
+            result.fold(
+                onSuccess = { listResult ->
+                    val folders = listResult.items
+                        .filter { it.isDirectory }
+                        .map { fileToResource(it) }
+                    updateUiState { it.copy(shareTargetPickerFolders = folders, shareTargetPickerIsLoading = false) }
+                },
+                onFailure = {
+                    updateUiState { it.copy(shareTargetPickerIsLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun dismissShareTargetPicker() {
+        updateUiState { it.copy(showShareTargetPicker = false) }
+    }
+
+    fun navigateShareTargetFolder(folderId: String, folderLabel: String) {
+        val currentPath = _uiState.value.shareTargetPickerPath
+        Log.d("Pan123BrowserVM", "navigateShareTargetFolder: currentPath=$currentPath, adding=$folderLabel($folderId)")
+        updateUiState {
+            it.copy(
+                shareTargetPickerPath = it.shareTargetPickerPath + Pan123Breadcrumb(folderLabel, folderId),
+                shareTargetPickerFolders = emptyList(),
+                shareTargetPickerIsLoading = true,
+            )
+        }
+        viewModelScope.launch {
+            val result = apiClient.listFiles(parentFileId = folderId, page = 1)
+            result.fold(
+                onSuccess = { listResult ->
+                    val folders = listResult.items
+                        .filter { it.isDirectory }
+                        .map { fileToResource(it) }
+                    updateUiState { it.copy(shareTargetPickerFolders = folders, shareTargetPickerIsLoading = false) }
+                },
+                onFailure = {
+                    updateUiState { it.copy(shareTargetPickerIsLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun navigateShareTargetUp() {
+        val path = _uiState.value.shareTargetPickerPath
+        if (path.size <= 1) return
+        val newPath = path.dropLast(1)
+        val parentId = newPath.last().fileId
+        updateUiState { it.copy(shareTargetPickerPath = newPath, shareTargetPickerFolders = emptyList(), shareTargetPickerIsLoading = true) }
+        viewModelScope.launch {
+            val result = apiClient.listFiles(parentFileId = parentId, page = 1)
+            result.fold(
+                onSuccess = { listResult ->
+                    val folders = listResult.items.filter { it.isDirectory }.map { fileToResource(it) }
+                    updateUiState { it.copy(shareTargetPickerFolders = folders, shareTargetPickerIsLoading = false) }
+                },
+                onFailure = {
+                    updateUiState { it.copy(shareTargetPickerIsLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun navigateShareTargetToIndex(index: Int) {
+        val path = _uiState.value.shareTargetPickerPath
+        if (index < 0 || index >= path.size || index == path.lastIndex) return
+        val target = path[index]
+        val newPath = path.subList(0, index + 1)
+        updateUiState { it.copy(shareTargetPickerPath = newPath, shareTargetPickerFolders = emptyList(), shareTargetPickerIsLoading = true) }
+        viewModelScope.launch {
+            val result = apiClient.listFiles(parentFileId = target.fileId, page = 1)
+            result.fold(
+                onSuccess = { listResult ->
+                    val folders = listResult.items.filter { it.isDirectory }.map { fileToResource(it) }
+                    updateUiState { it.copy(shareTargetPickerFolders = folders, shareTargetPickerIsLoading = false) }
+                },
+                onFailure = {
+                    updateUiState { it.copy(shareTargetPickerIsLoading = false) }
+                }
+            )
+        }
+    }
+
+    fun selectShareTargetCurrentFolder() {
+        val path = _uiState.value.shareTargetPickerPath
+        val current = path.lastOrNull() ?: return
+        updateUiState {
+            it.copy(
+                showShareTargetPicker = false,
+                shareSaveTargetFolderId = current.fileId,
+                shareSaveTargetLabel = path.joinToString(" › ") { it.label },
+                shareSaveTargetBreadcrumbs = path,
+            )
+        }
+    }
+
+    /** 分享浏览弹窗中转存目标面包屑点击 —— 回到指定层级 */
+    fun shareTargetBreadcrumbClick(index: Int) {
+        val path = _uiState.value.shareSaveTargetBreadcrumbs
+        if (index < 0 || index >= path.size || index == path.lastIndex) return
+        val target = path[index]
+        val newPath = path.subList(0, index + 1)
+        updateUiState {
+            it.copy(
+                shareSaveTargetFolderId = target.fileId,
+                shareSaveTargetLabel = newPath.joinToString(" › ") { it.label },
+                shareSaveTargetBreadcrumbs = newPath,
+            )
+        }
+    }
+
+    // --- 剪切板检测 ---
+
+    fun detectClipboardShareUrl() {
+        try {
+            val context = getApplication<Application>()
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+            val clip = clipboard.primaryClip ?: return
+            if (clip.itemCount == 0) return
+            val text = clip.getItemAt(0).text?.toString() ?: return
+            if (!apiClient.isShareUrl(text)) return
+
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val lastHash = prefs.getString("lastClipboardShareHash", "") ?: ""
+            val currentHash = text.hashCode().toString()
+            if (lastHash == currentHash) return
+
+            prefs.edit().putString("lastClipboardShareHash", currentHash).apply()
+            openShareUrl(text)
+        } catch (_: Exception) { }
+    }
+
+    // endregion
+
     // region ==================== 工具方法 ====================
 
     private fun updateUiState(transform: (Pan123BrowserUiState) -> Pan123BrowserUiState) {
@@ -757,6 +1151,15 @@ class Pan123BrowserViewModel @Inject constructor(
             folderSize = if (file.isDirectory) file.size else 0,
             category = pan123CategoryToLabel(file.category),
             createdAt = file.createAt
+        )
+    }
+
+    private fun shareItemToResource(item: Pan123ShareFileItem): WebDavResource {
+        return WebDavResource(
+            path = item.fileId,
+            name = item.fileName,
+            isDirectory = item.isDirectory,
+            size = item.size,
         )
     }
 

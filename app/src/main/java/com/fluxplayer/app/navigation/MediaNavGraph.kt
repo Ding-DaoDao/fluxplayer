@@ -33,11 +33,12 @@ fun NavGraphBuilder.mediaNavGraph(
                 }
                 context.startActivity(intent)
             },
-            onPlayVideos = { uris, startUri ->
+            onPlayVideos = { uris, startUri, isAudioOnly ->
                 val intent = Intent(context, PlayerActivity::class.java).apply {
                     action = Intent.ACTION_VIEW
                     data = startUri
                     putParcelableArrayListExtra(PlayerApi.API_PLAYLIST, ArrayList(uris))
+                    if (isAudioOnly) putExtra("audio_only", true)
                 }
                 context.startActivity(intent)
             },

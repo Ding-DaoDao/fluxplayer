@@ -90,7 +90,7 @@ private val cloudSources = setOf(
 @Composable
 fun HistoryTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
-    onPlayVideos: (List<Uri>, Uri) -> Unit = { _, _ -> },
+    onPlayVideos: (List<Uri>, Uri, Boolean) -> Unit = { _, _, _ -> },
     onNavigateToCloudDir: (String, String, String) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier,
     viewModel: HistoryViewModel = hiltViewModel(),

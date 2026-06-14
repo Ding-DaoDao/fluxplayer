@@ -10,7 +10,8 @@ data class C189FileItem(
     val fileCount: Int = 0,
     val folderSize: Long = 0,
     val mediaType: Int = -1,
-    val thumbnailUrl: String? = null
+    val thumbnailUrl: String? = null,
+    val md5: String = "",
 ) {
     val isVideo: Boolean
         get() {

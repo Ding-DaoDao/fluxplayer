@@ -16,6 +16,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.CloudUriScheme
+import com.fluxplayer.app.core.common.onCloudMediaClick
 import com.fluxplayer.app.core.common.onCloudVideoClick
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
@@ -34,7 +35,7 @@ import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuConten
 @Composable
 fun QuarkBrowserTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
-    onPlayVideos: (List<Uri>, Uri) -> Unit,
+    onPlayVideos: (List<Uri>, Uri, Boolean) -> Unit,
     onLogoutReady: (() -> Unit) -> Unit = {},
     driveType: String = "quark",
     onSettingsClick: () -> Unit = {},
@@ -98,6 +99,16 @@ fun QuarkBrowserTabContent(
                 viewModel.navigateToDir(state.items.indexOf(item))
             } else if (item.isImage) {
                 imageViewerIndex = state.items.indexOf(item)
+            } else if (item.isAudio) {
+                onCloudMediaClick(
+                    item = item,
+                    allItems = state.items,
+                    mediaFilter = { it.isAudio },
+                    resolveUrl = { viewModel.resolveVideoUri(item) },
+                    buildPlaylistUri = { CloudUriScheme.buildCloudUri(if (state.driveType == "uc") "uc" else "quark", it.path) },
+                    onPlayVideos = onPlayVideos,
+                    scope = scope,
+                )
             } else {
                 onCloudVideoClick(
                     item = item,

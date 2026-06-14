@@ -117,55 +117,65 @@ class PlayerActivity : ComponentActivity() {
             val danmakuForCurrentEpisode by viewModel.danmakuForCurrentEpisode.collectAsStateWithLifecycle()
 
             CompositionLocalProvider(LocalUseMaterialYouControls provides (uiState.playerPreferences?.useMaterialYouControls == true)) {
-                NextPlayerTheme(darkTheme = true) {
-                    MediaPlayerScreen(
-                        player = player,
-                        viewModel = viewModel,
-                        playerPreferences = uiState.playerPreferences ?: return@NextPlayerTheme,
-                        danmakuList = danmakuList,
-                        danmakuFileUri = danmakuFileUri,
-                        danmakuEnabled = danmakuEnabled,
-                        danmakuForCurrentEpisode = danmakuForCurrentEpisode,
-                        onTextureView = { tv -> playerTextureView = tv },
-                        onSelectSubtitleClick = {
-                            lifecycleScope.launch {
-                                val uri = subtitleFileSuspendLauncher.launch(
-                                    arrayOf(
-                                        MimeTypes.APPLICATION_SUBRIP,
-                                        MimeTypes.APPLICATION_TTML,
-                                        MimeTypes.TEXT_VTT,
-                                        MimeTypes.TEXT_SSA,
-                                        MimeTypes.BASE_TYPE_APPLICATION + "/octet-stream",
-                                        MimeTypes.BASE_TYPE_TEXT + "/*",
-                                    ),
-                                ) ?: return@launch
-                                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                maybeInitControllerFuture()
-                                controllerFuture?.await()?.addSubtitleTrack(uri)
-                            }
-                        },
-                        onDanmakuPickFile = {
-                            lifecycleScope.launch {
-                                val uri = danmakuFileSuspendLauncher.launch(
-                                    arrayOf("text/xml", "application/json", "*/*"),
-                                ) ?: return@launch
-                                try {
-                                    contentResolver.takePersistableUriPermission(
-                                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                    )
-                                } catch (e: SecurityException) {
-                                    Log.w("PlayerActivity", "URI does not support persistable permission", e)
+                val isAudioOnly = intent.getBooleanExtra("audio_only", false)
+                if (isAudioOnly) {
+                    NextPlayerTheme(darkTheme = false) {
+                        AudioPlaybackScreen(
+                            player = player ?: return@NextPlayerTheme,
+                            onBackClick = { finishAndStopPlayerSession() },
+                        )
+                    }
+                } else {
+                    NextPlayerTheme(darkTheme = true) {
+                        MediaPlayerScreen(
+                            player = player,
+                            viewModel = viewModel,
+                            playerPreferences = uiState.playerPreferences ?: return@NextPlayerTheme,
+                            danmakuList = danmakuList,
+                            danmakuFileUri = danmakuFileUri,
+                            danmakuEnabled = danmakuEnabled,
+                            danmakuForCurrentEpisode = danmakuForCurrentEpisode,
+                            onTextureView = { tv -> playerTextureView = tv },
+                            onSelectSubtitleClick = {
+                                lifecycleScope.launch {
+                                    val uri = subtitleFileSuspendLauncher.launch(
+                                        arrayOf(
+                                            MimeTypes.APPLICATION_SUBRIP,
+                                            MimeTypes.APPLICATION_TTML,
+                                            MimeTypes.TEXT_VTT,
+                                            MimeTypes.TEXT_SSA,
+                                            MimeTypes.BASE_TYPE_APPLICATION + "/octet-stream",
+                                            MimeTypes.BASE_TYPE_TEXT + "/*",
+                                        ),
+                                    ) ?: return@launch
+                                    contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    maybeInitControllerFuture()
+                                    controllerFuture?.await()?.addSubtitleTrack(uri)
                                 }
-                                viewModel.loadDanmaku(this@PlayerActivity, uri)
-                            }
-                        },
-                        onDanmakuLocalFileSelected = { uri ->
-                            lifecycleScope.launch {
-                                viewModel.loadDanmaku(this@PlayerActivity, uri)
-                            }
-                        },
-                        onBackClick = { finishAndStopPlayerSession() },
-                    )
+                            },
+                            onDanmakuPickFile = {
+                                lifecycleScope.launch {
+                                    val uri = danmakuFileSuspendLauncher.launch(
+                                        arrayOf("text/xml", "application/json", "*/*"),
+                                    ) ?: return@launch
+                                    try {
+                                        contentResolver.takePersistableUriPermission(
+                                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                        )
+                                    } catch (e: SecurityException) {
+                                        Log.w("PlayerActivity", "URI does not support persistable permission", e)
+                                    }
+                                    viewModel.loadDanmaku(this@PlayerActivity, uri)
+                                }
+                            },
+                            onDanmakuLocalFileSelected = { uri ->
+                                lifecycleScope.launch {
+                                    viewModel.loadDanmaku(this@PlayerActivity, uri)
+                                }
+                            },
+                            onBackClick = { finishAndStopPlayerSession() },
+                        )
+                    }
                 }
             }
         }
@@ -257,20 +267,32 @@ class PlayerActivity : ComponentActivity() {
             it == (mediaContentUri ?: uri).toString()
         }.takeIf { it >= 0 } ?: 0
 
+        val isAudioOnly = intent.getBooleanExtra("audio_only", false)
         val defaultTitle = playerApi.title
         val mediaItems = playlist.mapIndexed { index, uriString ->
             MediaItem.Builder().apply {
-                setUri(uriString)
+                val itemUri = Uri.parse(uriString)
+                setUri(itemUri)
                 setMediaId(uriString)
                 val isCurrentItem = index == mediaItemIndexToPlay
+                // 音频模式：从 fragment 提取标题（格式：encodedName|size）
+                val fragmentTitle = if (isAudioOnly) {
+                    itemUri.encodedFragment
+                        ?.substringBefore('|')
+                        ?.let { Uri.decode(it) }
+                        ?.ifBlank { null }
+                } else null
                 setMediaMetadata(
                     MediaMetadata.Builder().apply {
-                        // 所有项都设置 title，非当前播放项用 defaultTitle 作为 fallback
+                        val title = when {
+                            isCurrentItem && !playerApi.title.isNullOrEmpty() -> playerApi.title
+                            fragmentTitle != null -> fragmentTitle
+                            isCurrentItem -> playerApi.title
+                            else -> defaultTitle
+                        }
+                        setTitle(title)
                         if (isCurrentItem) {
-                            setTitle(playerApi.title)
                             setExtras(positionMs = playerApi.position?.toLong())
-                        } else if (!defaultTitle.isNullOrEmpty()) {
-                            setTitle(defaultTitle)
                         }
                     }.build(),
                 )

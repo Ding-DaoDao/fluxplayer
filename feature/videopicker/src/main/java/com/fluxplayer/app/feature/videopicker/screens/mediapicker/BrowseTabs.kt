@@ -102,7 +102,7 @@ private fun buildProviderList(
 @Composable
 fun BrowseTabs(
     onPlayVideo: (Uri, String?) -> Unit,
-    onPlayVideos: (List<Uri>, Uri) -> Unit,
+    onPlayVideos: (List<Uri>, Uri, Boolean) -> Unit,
     onSettingsClick: () -> Unit,
     selectedProvider: String?,
     onProviderSelected: (String?) -> Unit,

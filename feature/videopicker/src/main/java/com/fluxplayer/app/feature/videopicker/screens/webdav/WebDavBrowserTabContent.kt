@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fluxplayer.app.core.common.onCloudMediaClick
 import com.fluxplayer.app.core.common.onCloudVideoClick
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.model.WebDavServer
@@ -32,7 +33,7 @@ import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuConten
 fun WebDavBrowserTabContent(
     serverId: String? = null,
     onPlayVideo: (Uri, String?) -> Unit,
-    onPlayVideos: (List<Uri>, Uri) -> Unit,
+    onPlayVideos: (List<Uri>, Uri, Boolean) -> Unit,
     onSettingsClick: () -> Unit,
     navigateToDirParam: Pair<String, String>? = null,
     onNavigateToDirConsumed: () -> Unit = {},
@@ -100,6 +101,16 @@ fun WebDavBrowserTabContent(
                 if (idx != null) viewModel.navigateToDir(idx)
             } else if (item.isImage) {
                 imageViewerIndex = (currentDir?.items ?: emptyList()).indexOf(item)
+            } else if (item.isAudio && server != null) {
+                onCloudMediaClick(
+                    item = item,
+                    allItems = currentDir?.items ?: emptyList(),
+                    mediaFilter = { it.isAudio },
+                    resolveUrl = { Uri.parse(buildSingleWebDavAuthUri(item, server)) },
+                    buildPlaylistUri = { Uri.parse(buildSingleWebDavAuthUri(it, server)) },
+                    onPlayVideos = onPlayVideos,
+                    scope = scope,
+                )
             } else if (item.isVideo && server != null) {
                 onCloudVideoClick(
                     item = item,

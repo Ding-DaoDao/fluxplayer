@@ -121,6 +121,12 @@ class Pan123ApiClient(
         val json = JSONObject(body)
         val cfg = json.getJSONObject("data")
         config = cfg
+        val apis = cfg.optJSONObject("interfaceapi")
+        if (apis != null) {
+            val names = apis.names()
+            val keys = if (names != null) (0 until names.length()).map { names.getString(it) } else emptyList()
+            Log.d(TAG, "Config interfaceapi keys: $keys")
+        }
         cfg
     }
 
@@ -498,18 +504,22 @@ class Pan123ApiClient(
 
     suspend fun getUserInfo(): Result<Pan123UserInfo> = runCatching {
         loadConfig().getOrThrow()
-        val endpoint = apiEndpoint("userInfo")
+        val endpoint = apiEndpoint("getUserInfo")
+        Log.d(TAG, "getUserInfo resolved endpoint: $endpoint")
         val json = apiGet(endpoint)
+        Log.d(TAG, "getUserInfo response: $json")
         val data = json.optJSONObject("data") ?: throw IllegalStateException("No user data")
+        val vipInfos = data.optJSONArray("UserVipDetailInfos")
+        val firstVip = if (vipInfos != null && vipInfos.length() > 0) vipInfos.getJSONObject(0) else null
         Pan123UserInfo(
-            nickname = data.optString("nickname", ""),
-            uid = data.optLong("uid", 0),
-            spaceUsed = data.optLong("spaceUsed", 0),
-            spacePermanent = data.optLong("spacePermanent", 0),
-            isVip = data.optBoolean("isVip", false),
-            headImage = data.optString("headImage", ""),
-            vipDesc = data.optString("vipDesc", ""),
-            vipTimeDesc = data.optString("vipTimeDesc", "")
+            nickname = data.optString("Nickname", ""),
+            uid = data.optLong("UID", 0),
+            spaceUsed = data.optLong("SpaceUsed", 0),
+            spacePermanent = data.optLong("SpacePermanent", 0),
+            isVip = data.optBoolean("Vip", false),
+            headImage = data.optString("HeadImage", ""),
+            vipDesc = firstVip?.optString("VipDesc", "") ?: "",
+            vipTimeDesc = firstVip?.optString("TimeDesc", "") ?: ""
         )
     }
 
@@ -551,6 +561,130 @@ class Pan123ApiClient(
             "X-MF-PAN-RANGE" to "1",
             "User-Agent" to "123pan/v3.1.3(Android 10;;Xiaomi 24031PN0DC)"
         )
+    }
+
+    // endregion
+
+    // region ==================== 分享链接 ====================
+
+    fun parseShareUrl(url: String): Pair<String, String?>? {
+        try {
+            val normalized = url.trim()
+            val uri = java.net.URI(normalized)
+            val host = uri.host ?: return null
+            val path = uri.path ?: ""
+
+            // https://123865.com/s/u9izjv-SYpOv?pwd=Qiye
+            if (host.contains("123865.com") && path.startsWith("/s/")) {
+                val shareKey = path.removePrefix("/s/").trimEnd('/')
+                if (shareKey.isBlank()) return null
+                val query = uri.query ?: ""
+                val pwd = query.split("&")
+                    .map { it.split("=", limit = 2) }
+                    .associate { it[0] to (it.getOrNull(1) ?: "") }["pwd"]
+                return shareKey to pwd
+            }
+
+            // https://1840976528.mshare.123pan.cn/123pan/cHCOTd-jVoM
+            if (host.contains("mshare.123pan.cn") && path.contains("/123pan/")) {
+                val shareKey = path.substringAfter("/123pan/").trimEnd('/')
+                if (shareKey.isBlank()) return null
+                return shareKey to null
+            }
+
+            return null
+        } catch (e: Exception) {
+            Log.e(TAG, "parseShareUrl error: ${e.message}")
+            return null
+        }
+    }
+
+    fun isShareUrl(text: String): Boolean = parseShareUrl(text) != null
+
+    suspend fun listShareFiles(
+        shareKey: String,
+        sharePwd: String?,
+        parentFileId: String = "0",
+    ): Result<Pan123ShareListing> = runCatching {
+        loadConfig().getOrThrow()
+        val baseUrl = apiEndpoint("shareFileDetails")
+        val url = buildUrl(baseUrl, mapOf(
+            "Page" to "1",
+            "limit" to "100",
+            "next" to "-1",
+            "ParentFileId" to parentFileId,
+            "shareKey" to shareKey,
+            "SharePwd" to (sharePwd ?: ""),
+            "orderBy" to "update_time",
+            "orderDirection" to "desc",
+        ))
+        Log.d(TAG, "listShareFiles URL: $url")
+        val json = apiGet(url)
+
+        val code = json.optInt("code", -1)
+        if (code != 0) {
+            val msg = json.optString("message", "获取分享内容失败")
+            throw IllegalStateException(msg)
+        }
+
+        val data = json.optJSONObject("data")
+            ?: throw IllegalStateException("分享内容为空")
+        val infoList = data.optJSONArray("InfoList")
+        val items = mutableListOf<Pan123ShareFileItem>()
+        if (infoList != null) {
+            for (i in 0 until infoList.length()) {
+                val f = infoList.getJSONObject(i)
+                items.add(
+                    Pan123ShareFileItem(
+                        fileId = f.optString("FileId", ""),
+                        fileName = f.optString("FileName", ""),
+                        type = f.optInt("Type", 0),
+                        size = f.optLong("Size", 0),
+                        etag = f.optString("Etag", ""),
+                    )
+                )
+            }
+        }
+        Pan123ShareListing(files = items, total = data.optInt("total", items.size))
+    }
+
+    suspend fun copySaveFiles(
+        shareKey: String,
+        sharePwd: String?,
+        files: List<Pan123ShareFileItem>,
+        targetFolderId: String,
+    ): Result<Boolean> = runCatching {
+        if (files.isEmpty()) throw IllegalArgumentException("files 不能为空")
+        loadConfig().getOrThrow()
+        val endpoint = apiEndpoint("copySaveFiles")
+        Log.d(TAG, "copySaveFiles endpoint: $endpoint")
+        val fileListArray = JSONArray()
+        files.forEach { file ->
+            fileListArray.put(JSONObject().apply {
+                put("drive_id", 0)
+                put("etag", file.etag)
+                put("file_id", file.fileId)
+                put("file_name", file.fileName)
+                put("parent_file_id", targetFolderId)
+                put("size", file.size)
+                put("type", file.type)
+            })
+        }
+        val body = JSONObject().apply {
+            put("share_key", shareKey)
+            put("share_pwd", sharePwd ?: "")
+            put("file_list", fileListArray)
+            put("current_level", 1)
+            put("event", "transfer")
+        }
+        Log.d(TAG, "copySaveFiles body: $body")
+        val json = apiPost(endpoint, body)
+        val code = json.optInt("code", -1)
+        if (code != 0) {
+            val msg = json.optString("message", "转存失败")
+            throw IllegalStateException(msg)
+        }
+        true
     }
 
     // endregion

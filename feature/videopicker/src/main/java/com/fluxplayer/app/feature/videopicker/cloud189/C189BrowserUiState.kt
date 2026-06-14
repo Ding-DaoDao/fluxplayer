@@ -33,4 +33,40 @@ data class C189BrowserUiState(
     val pickerFolders: List<WebDavResource> = emptyList(),
     val pickerIsLoading: Boolean = false,
     val playedUriSet: Set<String> = emptySet(),
+
+    // === 分享 ===
+    val showShareInputDialog: Boolean = false,
+    val shareInputText: String = "",
+
+    // === 用户信息 ===
+    val showUserInfoDialog: Boolean = false,
+    val userNickname: String = "",
+    val userPhone: String = "",
+    val userCapacity: Long = 0,
+    val userAvailable: Long = 0,
+    val userVipExpireTime: String = "",
+
+    // === 分享浏览 ===
+    val showShareBrowse: Boolean = false,
+    val shareBrowseKey: String = "",
+    val shareBrowsePwd: String = "",
+    val shareBrowseShareId: String = "",
+    val shareSaveTargetFolderId: String = "-11",
+    val shareSaveTargetFolderLabel: String = "根目录",
+    val showShareTargetPicker: Boolean = false,
+    val shareTargetPickerFolders: List<WebDavResource> = emptyList(),
+    val shareTargetPickerIsLoading: Boolean = false,
+    val shareTargetPickerPath: List<C189Breadcrumb> = emptyList(),
+    val shareSaveTargetBreadcrumbs: List<C189Breadcrumb> = emptyList(),
+
+    // === 分享弹窗独立状态（不污染主界面 items/breadcrumbs） ===
+    val shareItems: List<WebDavResource> = emptyList(),
+    val shareBreadcrumbs: List<C189Breadcrumb> = emptyList(),
+    val shareName: String = "",
+    val shareCurrentFileId: String = "",
+    val shareIsFolder: Boolean = false,
+    val shareMode: Int = 0,
+    val shareIsLoading: Boolean = false,
+    val shareHasMore: Boolean = true,
+    val shareCurrentPage: Int = 1,
 )

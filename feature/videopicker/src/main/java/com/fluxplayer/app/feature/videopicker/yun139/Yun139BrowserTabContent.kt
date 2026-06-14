@@ -20,6 +20,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.CloudUriScheme
+import com.fluxplayer.app.core.common.onCloudMediaClick
 import com.fluxplayer.app.core.common.onCloudVideoClick
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
@@ -43,7 +44,7 @@ private const val TAG = "Yun139Login"
 @Composable
 fun Yun139BrowserTabContent(
     onPlayVideo: (Uri, String?) -> Unit,
-    onPlayVideos: (List<Uri>, Uri) -> Unit,
+    onPlayVideos: (List<Uri>, Uri, Boolean) -> Unit,
     onLogoutReady: (() -> Unit) -> Unit = {},
     onSettingsClick: () -> Unit = {},
     navigateToDirParam: Pair<String, String>? = null,
@@ -97,6 +98,15 @@ fun Yun139BrowserTabContent(
         onItemClick = { item ->
             if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
             else if (item.isImage) imageViewerIndex = state.items.indexOf(item)
+            else if (item.isAudio) onCloudMediaClick(
+                item = item,
+                allItems = state.items,
+                mediaFilter = { it.isAudio },
+                resolveUrl = { viewModel.resolveVideoUri(item) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("yun139", it.path) },
+                onPlayVideos = onPlayVideos,
+                scope = scope,
+            )
             else onCloudVideoClick(
                 item = item,
                 allItems = state.items,

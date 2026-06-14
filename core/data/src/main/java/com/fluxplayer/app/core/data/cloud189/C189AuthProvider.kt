@@ -11,6 +11,13 @@ object C189AuthProvider {
     @Volatile var isActive: Boolean = false
     @Volatile var userAgent: String = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36"
 
+    /** token 刷新成功后的回调，用于 ViewModel 持久化保存 */
+    @Volatile var onTokensRefreshed: (() -> Unit)? = null
+
+    fun notifyTokensRefreshed() {
+        onTokensRefreshed?.invoke()
+    }
+
     fun hasValidSession(): Boolean = isActive && sessionKey.isNotBlank()
     fun isTokenExpired(): Boolean = expiresIn > 0 && System.currentTimeMillis() > expiresIn
 
