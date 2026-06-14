@@ -1,19 +1,39 @@
 package com.fluxplayer.app.settings.screens.appearance
 
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -96,6 +116,15 @@ private fun AppearancePreferencesContent(
                         isChecked = uiState.preferences.useDynamicColors,
                         onClick = { onEvent(AppearancePreferencesEvent.ToggleUseDynamicColors) },
                         isLastItem = false
+                    )
+                }
+                if (!uiState.preferences.useDynamicColors) {
+                    HorizontalDivider()
+                    ThemeColorPicker(
+                        selectedColor = uiState.preferences.customSeedColor,
+                        onColorSelected = { color ->
+                            onEvent(AppearancePreferencesEvent.UpdateCustomSeedColor(color))
+                        },
                     )
                 }
                 HorizontalDivider()
@@ -186,6 +215,35 @@ private fun AppearancePreferencesContent(
                     )
                 }
             }
+
+            // 不透明度设置
+            ListSectionTitle(text = stringResource(R.string.opacity))
+            Column {
+                PreferenceSlider(
+                    title = stringResource(R.string.top_bar_opacity),
+                    value = uiState.preferences.topBarOpacity.toFloat(),
+                    valueRange = 0f..100f,
+                    onValueChange = { onEvent(AppearancePreferencesEvent.UpdateTopBarOpacity(it.toInt())) },
+                    isFirstItem = true,
+                    isLastItem = false
+                )
+                PreferenceSlider(
+                    title = stringResource(R.string.bottom_bar_opacity),
+                    value = uiState.preferences.bottomBarOpacity.toFloat(),
+                    valueRange = 0f..100f,
+                    onValueChange = { onEvent(AppearancePreferencesEvent.UpdateBottomBarOpacity(it.toInt())) },
+                    isFirstItem = false,
+                    isLastItem = false
+                )
+                PreferenceSlider(
+                    title = stringResource(R.string.container_opacity),
+                    value = uiState.preferences.containerOpacity.toFloat(),
+                    valueRange = 0f..100f,
+                    onValueChange = { onEvent(AppearancePreferencesEvent.UpdateContainerOpacity(it.toInt())) },
+                    isFirstItem = false,
+                    isLastItem = true
+                )
+            }
         }
 
         uiState.showDialog?.let { showDialog ->
@@ -222,6 +280,69 @@ private fun AppearancePreferencesContent(
                                 },
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 预设主题色选择卡
+ */
+private data class PresetColor(val color: Int, val label: String)
+
+private val presetColors = listOf(
+    PresetColor(0xFF3482FF.toInt(), "Blue"),
+    PresetColor(0xFFE53935.toInt(), "Red"),
+    PresetColor(0xFF43A047.toInt(), "Green"),
+    PresetColor(0xFF8E24AA.toInt(), "Purple"),
+    PresetColor(0xFFFB8C00.toInt(), "Orange"),
+    PresetColor(0xFFD81B60.toInt(), "Pink"),
+    PresetColor(0xFF00897B.toInt(), "Teal"),
+    PresetColor(0xFF3949AB.toInt(), "Indigo"),
+)
+
+@Composable
+private fun ThemeColorPicker(
+    selectedColor: Int,
+    onColorSelected: (Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        androidx.compose.material3.Text(
+            text = stringResource(R.string.theme_color),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(vertical = 4.dp),
+        ) {
+            items(presetColors) { preset ->
+                val isSelected = selectedColor == preset.color
+                val borderColor = if (isSelected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outlineVariant
+                val borderWidth = if (isSelected) 3.dp else 1.dp
+
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color(preset.color))
+                        .border(borderWidth, borderColor, CircleShape)
+                        .clickable { onColorSelected(preset.color) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isSelected) {
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(Color.White),
+                        )
                     }
                 }
             }

@@ -85,6 +85,12 @@
     <string name="blur_alpha">Blur opacity</string>
     <string name="top_bar">Top bar</string>
     <string name="bottom_bar">Bottom bar</string>
+    <string name="theme_color">Theme color</string>
+    <string name="opacity">Opacity</string>
+    <string name="top_bar_opacity">Top bar opacity</string>
+    <string name="bottom_bar_opacity">Bottom bar opacity</string>
+    <string name="container_opacity">Container opacity</string>
+    <string name="container">Container</string>
     <string name="compose_engine_material">Material 3</string>
     <string name="compose_engine_miuix">Miuix</string>
     <string name="controls_lock">Lock controls</string>
@@ -375,7 +381,8 @@
     <string name="backup_webdav_account_hint">Enter your WebDAV account</string>
     <string name="backup_subfolder">Subfolder</string>
     <string name="backup_device_name">Device Name</string>
-    <string name="backup_device_name_hint">e.g. My Phone</string>
+    <string name="backup_device_name_hint">Optional. Included in backup filename (e.g., MyPhone)</string>
+    <string name="backup_device_name_format_hint">Backup file format: fluxplayer_backup_{DeviceName}_{Date}_{Time}.zip</string>
     <string name="backup_test_webdav">Test WebDAV Configuration</string>
     <string name="backup_test_webdav_desc">Test WebDAV service status</string>
     <string name="backup_auto_check">Auto check new backups</string>
@@ -415,5 +422,8 @@
     <string name="backup_restore_complete_title">Restore Complete</string>
     <string name="backup_restore_complete_message">Settings have been restored. It is recommended to restart the app for all settings to take full effect.</string>
     <string name="backup_restart_app">Restart App</string>
+    <string name="backup_restore_confirm_message">This will overwrite all current settings with the backup data. Continue?</string>
+    <string name="backup_new_available_title">New Backup Available</string>
+    <string name="backup_new_available_message">A backup file was found on the server. Would you like to restore from it?</string>
 
 </resources>

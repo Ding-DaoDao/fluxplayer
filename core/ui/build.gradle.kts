@@ -53,6 +53,7 @@ dependencies {
     implementation(libs.miuix.icons.android)
     implementation(libs.miuix.preference.android)
     implementation(libs.haze)
+    implementation(libs.material.kolor)
 
     implementation(libs.androidx.hilt.navigation.compose)
 

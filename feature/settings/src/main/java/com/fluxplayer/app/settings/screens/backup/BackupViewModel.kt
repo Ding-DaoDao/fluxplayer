@@ -223,10 +223,12 @@ class BackupViewModel @Inject constructor(
             try {
                 val backup = backupManager.createBackup()
                 if (c.backupPath.isNotBlank()) {
-                    // 写入指定路径
-                    val file = java.io.File(c.backupPath, "fluxplayer_backup.zip")
+                    // 写入指定路径（使用带时间戳的文件名）
+                    val fileName = c.generateBackupFileName()
+                    val file = java.io.File(c.backupPath, fileName)
                     file.parentFile?.mkdirs()
                     backupManager.exportToUri(backup, Uri.fromFile(file))
+                    backupManager.cleanupLocalBackups(c)
                 } else {
                     // 路径为空时提示
                     errors.add("未设置本地备份路径，已跳过本地备份")
@@ -277,14 +279,12 @@ class BackupViewModel @Inject constructor(
                 val result = backupManager.uploadToCloud(c)
                 result.fold(
                     onSuccess = {
-                        // 上传后验证文件是否存在
-                        val path = c.remoteBackupPath()
+                        // 上传后刷新文件列表验证
                         val listResult = backupManager.listRemoteBackupFiles(c)
                         listResult.fold(
                             onSuccess = { files ->
-                                val uploaded = files.any { it.path == path }
-                                if (uploaded) {
-                                    _remoteFiles.value = files
+                                _remoteFiles.value = files
+                                if (files.isNotEmpty()) {
                                     _uiState.value = BackupUiState(
                                         successMessage = "上传到 WebDAV 成功并已验证",
                                     )
@@ -330,6 +330,13 @@ class BackupViewModel @Inject constructor(
 
     fun clearRestoreCompleted() {
         _uiState.value = _uiState.value.copy(restoreCompleted = false)
+    }
+
+    /** 清除"发现新备份"标记 */
+    fun clearPendingNewBackup() {
+        viewModelScope.launch {
+            backupWebDavDataSource.update { it.copy(hasPendingNewBackup = false) }
+        }
     }
 
     /** 重启应用 */

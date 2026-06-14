@@ -53,6 +53,14 @@ data class ApplicationPreferences(
     val bottomBarBlurRadius: Int = 25,
     val bottomBarBlurAlpha: Int = 73,
 
+    // 不透明度（独立于模糊效果，0-100，100=完全不透明）
+    val topBarOpacity: Int = 100,
+    val bottomBarOpacity: Int = 100,
+    val containerOpacity: Int = 100,
+
+    // 自定义主题色（0 = 使用默认/动态取色）
+    val customSeedColor: Int = 0,
+
     // 主题引擎
     val composeEngine: ComposeEngine = ComposeEngine.MATERIAL,
 

@@ -132,7 +132,7 @@ fun C189BrowserTabContent(
                 onPlayVideos = onPlayVideos,
                 scope = scope,
             )
-            else onCloudVideoClick(
+            else if (item.isVideo) onCloudVideoClick(
                 item = item,
                 allItems = state.items,
                 resolveUrl = { viewModel.resolveVideoUri(item) },
@@ -198,6 +198,7 @@ fun C189BrowserTabContent(
         onExitClick = { viewModel.logout() },
         playedUriSet = state.playedUriSet,
         cloudProviderKey = "cloud189",
+        notificationEvents = viewModel.messageEvents,
         providerMenuItems = { onDismiss ->
                 DropdownMenuItem(
                     text = { Text("签到") },

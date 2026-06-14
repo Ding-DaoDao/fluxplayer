@@ -2,9 +2,11 @@ package com.fluxplayer.app.feature.videopicker.composables
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -79,7 +81,7 @@ fun <T> SharedShareBrowseDialog(
                     )
                     Spacer(Modifier.width(4.dp))
                     Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         targetBreadcrumbs.forEachIndexed { index, crumb ->
@@ -282,7 +284,7 @@ fun <T> SharedShareTargetPickerDialog(
             Column(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
                 // 路径面包屑
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     path.forEachIndexed { index, crumb ->

@@ -19,8 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import com.fluxplayer.app.core.ui.components.NextDialog
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -293,10 +293,10 @@ fun HistoryTabContent(
     }
 
     if (showClearDialog) {
-        AlertDialog(
+        NextDialog(
             onDismissRequest = { showClearDialog = false },
             title = { FluxText("清除全部历史") },
-            text = { FluxText("确定清除所有播放记录吗？此操作不可恢复。") },
+            content = { FluxText("确定清除所有播放记录吗？此操作不可恢复。") },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.clearAll()
@@ -314,10 +314,10 @@ fun HistoryTabContent(
     }
 
     itemToDelete?.let { item ->
-        AlertDialog(
+        NextDialog(
             onDismissRequest = { itemToDelete = null },
             title = { FluxText("删除历史记录") },
-            text = { FluxText("确定删除「${item.title}」的播放记录吗？") },
+            content = { FluxText("确定删除「${item.title}」的播放记录吗？") },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.deleteItem(item.uriString)

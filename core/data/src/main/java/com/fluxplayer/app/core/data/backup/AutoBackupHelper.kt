@@ -50,9 +50,11 @@ class AutoBackupHelper @Inject constructor(
             return
         }
         try {
-            val file = File(config.backupPath, "fluxplayer_backup.zip")
+            val fileName = config.generateBackupFileName()
+            val file = File(config.backupPath, fileName)
             file.parentFile?.mkdirs()
             backupManager.exportToUri(backup, Uri.fromFile(file))
+            backupManager.cleanupLocalBackups(config)
             Log.d(TAG, "本地自动备份完成: ${file.absolutePath}")
         } catch (e: Exception) {
             Log.e(TAG, "本地自动备份失败", e)
@@ -85,6 +87,7 @@ class AutoBackupHelper @Inject constructor(
                     val hasFiles = files.isNotEmpty()
                     if (hasFiles) {
                         Log.d(TAG, "检测到 ${files.size} 个远程备份文件")
+                        backupWebDavDataSource.update { it.copy(hasPendingNewBackup = true) }
                     }
                     hasFiles
                 },

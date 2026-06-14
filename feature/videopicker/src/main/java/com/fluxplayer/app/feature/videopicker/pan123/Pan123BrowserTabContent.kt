@@ -125,7 +125,7 @@ fun Pan123BrowserTabContent(
                 onPlayVideos = onPlayVideos,
                 scope = scope,
             )
-            else onCloudVideoClick(
+            else if (item.isVideo) onCloudVideoClick(
                 item = item,
                 allItems = state.items,
                 resolveUrl = { viewModel.resolveVideoUri(item) },
@@ -194,6 +194,7 @@ fun Pan123BrowserTabContent(
         onExitClick = { viewModel.logout() },
         playedUriSet = state.playedUriStrings,
         cloudProviderKey = "pan123",
+        notificationEvents = viewModel.messageEvents,
         providerMenuItems = { onDismiss ->
             DropdownMenuItem(
                 text = { Text("盘内搜索") },

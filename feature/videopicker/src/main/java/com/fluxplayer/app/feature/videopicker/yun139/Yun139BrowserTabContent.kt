@@ -107,7 +107,7 @@ fun Yun139BrowserTabContent(
                 onPlayVideos = onPlayVideos,
                 scope = scope,
             )
-            else onCloudVideoClick(
+            else if (item.isVideo) onCloudVideoClick(
                 item = item,
                 allItems = state.items,
                 resolveUrl = { viewModel.resolveVideoUri(item) },
@@ -167,6 +167,7 @@ fun Yun139BrowserTabContent(
         onExitClick = { viewModel.logout() },
         playedUriSet = state.playedUriStrings,
         cloudProviderKey = "yun139",
+        notificationEvents = viewModel.messageEvents,
     )
 
     val renameItem = state.items.getOrNull(renameIndex)

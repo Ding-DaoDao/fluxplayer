@@ -13,8 +13,11 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.fluxplayer.app.core.model.ComposeEngine
+import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamicColorScheme
 
 private val lightScheme = lightColorScheme(
     primary = primaryLight,
@@ -249,10 +252,11 @@ fun NextPlayerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     highContrastDarkTheme: Boolean = false,
     dynamicColor: Boolean = true,
+    customSeedColor: Int = 0,
     composeEngine: ComposeEngine = ComposeEngine.MATERIAL,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = resolveColorScheme(darkTheme, highContrastDarkTheme, dynamicColor)
+    val colorScheme = resolveColorScheme(darkTheme, highContrastDarkTheme, dynamicColor, customSeedColor)
 
     CompositionLocalProvider(LocalComposeEngine provides composeEngine) {
         when (composeEngine) {
@@ -275,7 +279,29 @@ private fun resolveColorScheme(
     darkTheme: Boolean,
     highContrastDarkTheme: Boolean,
     dynamicColor: Boolean,
+    customSeedColor: Int,
 ): ColorScheme = when {
+    // 自定义主题色优先级最高
+    customSeedColor != 0 -> {
+        val scheme = dynamicColorScheme(
+            seedColor = Color(customSeedColor),
+            isDark = darkTheme,
+            isAmoled = false,
+            style = PaletteStyle.TonalSpot,
+        )
+        if (darkTheme && highContrastDarkTheme) scheme.copy(
+            background = backgroundPureBlack,
+            surface = surfacePureBlack,
+            surfaceDim = surfaceDimPureBlack,
+            surfaceBright = surfaceBrightPureBlack,
+            surfaceContainerLowest = surfaceContainerLowestPureBlack,
+            surfaceContainerLow = surfaceContainerLowPureBlack,
+            surfaceContainer = surfaceContainerPureBlack,
+            surfaceContainerHigh = surfaceContainerHighPureBlack,
+            surfaceContainerHighest = surfaceContainerHighestPureBlack,
+        ) else scheme
+    }
+
     dynamicColor && supportsDynamicTheming() -> {
         val context = LocalContext.current
         when {

@@ -109,7 +109,7 @@ fun QuarkBrowserTabContent(
                     onPlayVideos = onPlayVideos,
                     scope = scope,
                 )
-            } else {
+            } else if (item.isVideo) {
                 onCloudVideoClick(
                     item = item,
                     allItems = state.items,
@@ -176,6 +176,7 @@ fun QuarkBrowserTabContent(
         onExitClick = { viewModel.logout() },
         playedUriSet = state.playedUriSet,
         cloudProviderKey = if (state.driveType == "uc") "uc" else "quark",
+        notificationEvents = viewModel.messageEvents,
     )
 
     val renameItem = state.items.getOrNull(renameIndex)

@@ -30,7 +30,6 @@ data class BackupData(
 data class OpenListBackupConfig(
     val autoStart: Boolean = false,
     val adminPassword: String? = null,
-    val databaseIncluded: Boolean = false,
 )
 
 @Serializable

@@ -1,7 +1,6 @@
 package com.fluxplayer.app.feature.player
 
 import android.net.Uri
-import android.widget.Toast
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -58,6 +57,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import com.fluxplayer.app.core.model.FluxMessageEvent
+import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
+import com.fluxplayer.app.core.ui.components.FluxNotificationState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -107,6 +109,8 @@ fun AudioPlaybackScreen(
     var showSpeedMenu by remember { mutableStateOf(false) }
     var currentSpeed by remember { mutableStateOf(player.playbackParameters.speed) }
     LaunchedEffect(player.playbackParameters) { currentSpeed = player.playbackParameters.speed }
+
+    val notificationState = remember { FluxNotificationState() }
 
     Box(
         modifier = modifier
@@ -169,6 +173,7 @@ fun AudioPlaybackScreen(
                     player.setPlaybackSpeed(it)
                     currentSpeed = it
                 },
+                notificationState = notificationState,
             )
 
             Spacer(Modifier.height(20.dp))
@@ -205,6 +210,13 @@ fun AudioPlaybackScreen(
                 strokeWidth = 3.dp,
             )
         }
+
+        FluxNotificationBanner(
+            event = notificationState.currentEvent,
+            onDismiss = { notificationState.dismiss() },
+            modifier = Modifier
+                .align(Alignment.BottomCenter),
+        )
     }
 }
 
@@ -319,6 +331,7 @@ private fun FunctionRow(
     showSpeedMenu: Boolean,
     onSpeedMenuChange: (Boolean) -> Unit,
     onSpeedSelected: (Float) -> Unit,
+    notificationState: FluxNotificationState,
 ) {
     val context = LocalContext.current
 
@@ -347,14 +360,14 @@ private fun FunctionRow(
         FunctionButton(
             icon = { Icon(painterResource(coreUiR.drawable.ic_loop_all), contentDescription = null, tint = DarkText, modifier = Modifier.size(22.dp)) },
             label = "定时",
-            onClick = { Toast.makeText(context, "开发中", Toast.LENGTH_SHORT).show() },
+            onClick = { notificationState.show(FluxMessageEvent.Info("开发中")) },
         )
 
         // 下载
         FunctionButton(
             icon = { Icon(painterResource(coreUiR.drawable.ic_playlist), contentDescription = null, tint = DarkText, modifier = Modifier.size(22.dp)) },
             label = "下载",
-            onClick = { Toast.makeText(context, "开发中", Toast.LENGTH_SHORT).show() },
+            onClick = { notificationState.show(FluxMessageEvent.Info("开发中")) },
         )
     }
 }

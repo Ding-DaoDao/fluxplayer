@@ -137,13 +137,14 @@ class BackupManager @Inject constructor(
 
     // ==================== WebDAV 云备份 ====================
 
-    /** 上传备份到 WebDAV 服务器（使用配置中的子文件夹路径） */
+    /** 上传备份到 WebDAV 服务器（使用配置中的子文件夹路径，文件名带时间戳） */
     suspend fun uploadToCloud(
         config: BackupWebDavConfig,
     ): Result<Unit> {
         val backup = createBackup()
         val zipBytes = zipBackupData(backup)
-        val path = config.remoteBackupPath()
+        val fileName = config.generateBackupFileName()
+        val path = config.remoteBackupPath(fileName)
         return webDavRepository.uploadFile(
             baseUrl = config.url,
             path = path,
@@ -182,6 +183,18 @@ class BackupManager @Inject constructor(
                 parseFromZip(bis)
             }
         }
+    }
+
+    /** 清理本地旧备份文件，仅保留最新的一个 */
+    fun cleanupLocalBackups(config: BackupWebDavConfig) {
+        if (!config.keepOnlyLatestBackup || config.backupPath.isBlank()) return
+        val dir = File(config.backupPath)
+        if (!dir.isDirectory) return
+        val backupFiles = dir.listFiles { file ->
+            file.isFile && file.name.startsWith("fluxplayer_backup") && file.name.endsWith(".zip")
+        }?.sortedByDescending { it.lastModified() } ?: return
+        if (backupFiles.size <= 1) return
+        backupFiles.drop(1).forEach { it.delete() }
     }
 
     /** 列出 WebDAV 服务器上的备份文件（仅 .zip 文件） */

@@ -170,6 +170,7 @@ fun WebDavBrowserTabContent(
         onCreateFolder = { showCreateFolderDialog = true },
         playedUriSet = extraState.playedUriStrings,
         cloudProviderKey = serverId?.let { "webdav:$it" } ?: "webdav",
+        notificationEvents = viewModel.messageEvents,
     )
 
     val renameItem = currentDir?.items?.getOrNull(renameIndex)

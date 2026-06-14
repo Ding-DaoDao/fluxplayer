@@ -1,7 +1,6 @@
 package com.fluxplayer.app.feature.videopicker.openlist
 
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -127,8 +126,8 @@ fun OpenListBrowserTabContent(
                     item = item,
                     onDismiss = onDismiss,
                     onMove = { onDismiss(); viewModel.startMove(index) },
-                    onDelete = { onDismiss(); Toast.makeText(context, "暂不支持删除", Toast.LENGTH_SHORT).show() },
-                    onRename = { onDismiss(); Toast.makeText(context, "暂不支持重命名", Toast.LENGTH_SHORT).show() },
+                    onDelete = { onDismiss(); viewModel.notifier.info("暂不支持删除") },
+                    onRename = { onDismiss(); viewModel.notifier.info("暂不支持重命名") },
                     onDownload = { onDismiss(); viewModel.downloadFile(index) },
                 )
             }
@@ -167,6 +166,7 @@ fun OpenListBrowserTabContent(
         },
         playedUriSet = state.playedUriSet,
         cloudProviderKey = "openlist",
+        notificationEvents = viewModel.messageEvents,
     )
 
     // 移动文件 —— 目标文件夹选择器

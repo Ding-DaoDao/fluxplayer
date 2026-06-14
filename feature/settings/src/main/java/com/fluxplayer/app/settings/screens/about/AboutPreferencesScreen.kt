@@ -2,7 +2,6 @@ package com.fluxplayer.app.settings.screens.about
 
 import android.content.Context
 import android.os.Build
-import android.widget.Toast
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -49,7 +48,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fluxplayer.app.core.common.extensions.appIcon
+import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
+import com.fluxplayer.app.core.ui.components.FluxNotificationState
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
@@ -62,11 +64,17 @@ fun AboutPreferencesScreen(
 ) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+    val notificationState = remember { FluxNotificationState() }
 
     FluxSettingsScaffold(
         title = stringResource(id = R.string.about_name),
         onNavigateUp = onNavigateUp,
     ) { innerPadding ->
+        FluxNotificationBanner(
+            event = notificationState.currentEvent,
+            onDismiss = { notificationState.dismiss() },
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -78,6 +86,7 @@ fun AboutPreferencesScreen(
                 onGithubClick = {
                     uriHandler.openUriOrShowToast(
                         uri = GITHUB_URL,
+                        notificationState = notificationState,
                         context = context,
                     )
                 },
@@ -214,10 +223,10 @@ private fun Context.appVersion(): String {
     return "${packageInfo.versionName} ($versionCode)"
 }
 
-internal fun UriHandler.openUriOrShowToast(uri: String, context: Context) {
+internal fun UriHandler.openUriOrShowToast(uri: String, context: Context, notificationState: FluxNotificationState) {
     try {
         openUri(uri = uri)
     } catch (e: Exception) {
-        Toast.makeText(context, context.getString(R.string.error_opening_link), Toast.LENGTH_SHORT).show()
+        notificationState.show(FluxMessageEvent.Error(context.getString(R.string.error_opening_link)))
     }
 }

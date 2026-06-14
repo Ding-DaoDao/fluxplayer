@@ -6,7 +6,6 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.TextureView
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -51,6 +50,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import com.fluxplayer.app.core.model.FluxMessageEvent
+import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
+import com.fluxplayer.app.core.ui.components.FluxNotificationState
+import com.fluxplayer.app.core.ui.components.NextDialog
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -145,6 +148,10 @@ fun MediaPlayerScreen(
             @Suppress("DEPRECATION")
             context.getSystemService(Vibrator::class.java) as? Vibrator
         }
+    }
+    val notificationState = remember { FluxNotificationState() }
+    LaunchedEffect(Unit) {
+        viewModel.messageEvents.collect { notificationState.show(it) }
     }
     val volumeState = rememberVolumeState(
         player = player,
@@ -626,7 +633,9 @@ fun MediaPlayerScreen(
                                         },
                                         onPictureInPictureClick = {
                                             if (!pictureInPictureState.hasPipPermission) {
-                                                Toast.makeText(context, coreUiR.string.enable_pip_from_settings, Toast.LENGTH_SHORT).show()
+                                                notificationState.show(
+                                                    FluxMessageEvent.Info(context.getString(coreUiR.string.enable_pip_from_settings)),
+                                                )
                                                 pictureInPictureState.openPictureInPictureSettings()
                                             } else {
                                                 pictureInPictureState.enterPictureInPictureMode()
@@ -788,6 +797,18 @@ fun MediaPlayerScreen(
                 onDismiss = { overlayView = null },
             )
         }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize(),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            FluxNotificationBanner(
+                event = notificationState.currentEvent,
+                onDismiss = { notificationState.dismiss() },
+                modifier = Modifier,
+            )
+        }
     }
 
     errorState.error?.let { error ->
@@ -801,13 +822,10 @@ fun MediaPlayerScreen(
                 player.play()
             }
         }
-        AlertDialog(
+        NextDialog(
             onDismissRequest = { },
             title = {
                 Text(text = stringResource(coreUiR.string.error_playing_video))
-            },
-            text = {
-                Text(text = error.message ?: stringResource(coreUiR.string.unknown_error))
             },
             confirmButton = {
                 if (player.hasNextMediaItem()) {
@@ -831,6 +849,9 @@ fun MediaPlayerScreen(
                 ) {
                     Text(text = stringResource(coreUiR.string.exit))
                 }
+            },
+            content = {
+                Text(text = error.message ?: stringResource(coreUiR.string.unknown_error))
             },
         )
     }

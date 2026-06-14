@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.util.withContext
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
+import com.fluxplayer.app.core.ui.components.FluxNotificationState
 import com.fluxplayer.app.core.ui.components.NextSegmentedListItem
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.extensions.plus
@@ -38,11 +40,17 @@ fun LibrariesScreen(
 ) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+    val notificationState = remember { FluxNotificationState() }
 
     FluxSettingsScaffold(
         title = stringResource(id = R.string.libraries),
         onNavigateUp = onNavigateUp,
     ) { innerPadding ->
+        FluxNotificationBanner(
+            event = notificationState.currentEvent,
+            onDismiss = { notificationState.dismiss() },
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
         val libs = remember { Libs.Builder().withContext(context).build() }
 
         LazyColumn(
@@ -94,7 +102,7 @@ fun LibrariesScreen(
                     isLastItem = index == libs.libraries.lastIndex,
                     onClick = {
                         library.website?.takeIf { it.isNotBlank() }?.let {
-                            uriHandler.openUriOrShowToast(uri = it, context = context)
+                            uriHandler.openUriOrShowToast(uri = it, context = context, notificationState = notificationState)
                         }
                     },
                 )

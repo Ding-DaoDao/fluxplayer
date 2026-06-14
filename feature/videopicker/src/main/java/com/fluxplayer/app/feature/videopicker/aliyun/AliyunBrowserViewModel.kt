@@ -4,7 +4,9 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import android.widget.Toast
+import com.fluxplayer.app.core.common.FluxNotificationDelegate
+import com.fluxplayer.app.core.model.FluxMessageEvent
+import kotlinx.coroutines.flow.SharedFlow
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -44,6 +46,16 @@ class AliyunBrowserViewModel @Inject constructor(
     private val playbackHistoryRepository: PlaybackHistoryRepository,
     private val cloudDownloadRepository: CloudDownloadRepository,
 ) : androidx.lifecycle.AndroidViewModel(application) {
+    // region ==================== 统一通知 ====================
+
+    /** 通知事件委托 */
+    val notifier = FluxNotificationDelegate(viewModelScope)
+
+    /** 供 UI 层收集的通知事件流 */
+    val messageEvents: SharedFlow<FluxMessageEvent> = notifier.events
+
+    // endregion
+
 
     companion object {
         private const val PREF_NAME = "alipan"
@@ -618,11 +630,11 @@ class AliyunBrowserViewModel @Inject constructor(
             val result = apiClient.createFolder(name, state.currentFileId)
             result.fold(
                 onSuccess = {
-                    Toast.makeText(getApplication(), "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("文件夹创建成功")
                     refresh()
                 },
                 onFailure = { e ->
-                    Toast.makeText(getApplication(), "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("创建失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
                 }
             )
@@ -636,11 +648,11 @@ class AliyunBrowserViewModel @Inject constructor(
             val result = apiClient.trashFile(item.path)
             result.fold(
                 onSuccess = {
-                    Toast.makeText(getApplication(), "删除成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("删除成功")
                     refresh()
                 },
                 onFailure = { e ->
-                    Toast.makeText(getApplication(), "删除失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("删除失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
                 }
             )
@@ -654,11 +666,11 @@ class AliyunBrowserViewModel @Inject constructor(
             val result = apiClient.renameFile(item.path, newName)
             result.fold(
                 onSuccess = {
-                    Toast.makeText(getApplication(), "重命名成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("重命名成功")
                     refresh()
                 },
                 onFailure = { e ->
-                    Toast.makeText(getApplication(), "重命名失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("重命名失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
                 }
             )
@@ -702,7 +714,7 @@ class AliyunBrowserViewModel @Inject constructor(
                 },
                 onFailure = { e ->
                     updateUiState { it.copy(pickerFolders = emptyList(), pickerIsLoading = false) }
-                    Toast.makeText(getApplication(), "加载文件夹失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("加载文件夹失败: ${e.message}")
                 }
             )
         }
@@ -715,11 +727,11 @@ class AliyunBrowserViewModel @Inject constructor(
             val result = apiClient.createFolder(name, actualParentId)
             result.fold(
                 onSuccess = {
-                    Toast.makeText(getApplication(), "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("文件夹创建成功")
                     loadFoldersForPicker(parentFolderId)
                 },
                 onFailure = { e ->
-                    Toast.makeText(getApplication(), "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("创建失败: ${e.message}")
                     updateUiState { it.copy(pickerIsLoading = false) }
                 }
             )
@@ -734,12 +746,12 @@ class AliyunBrowserViewModel @Inject constructor(
             val result = apiClient.moveFile(fileId, actualTargetId)
             result.fold(
                 onSuccess = {
-                    Toast.makeText(getApplication(), "移动成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("移动成功")
                     dismissPicker()
                     refresh()
                 },
                 onFailure = { e ->
-                    Toast.makeText(getApplication(), "移动失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("移动失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
                 }
             )
@@ -796,14 +808,14 @@ class AliyunBrowserViewModel @Inject constructor(
                                                 progress = 1f,
                                                 completedFilePath = event.filePath
                                             )
-                                            Toast.makeText(getApplication(), "下载完成: ${event.fileName}", Toast.LENGTH_SHORT).show()
+                                            notifier.success("下载完成: ${event.fileName}")
                                         }
                                     }
                                     is CloudDownloadRepository.DownloadEvent.Failed -> {
                                         if (event.fileName == res.name) {
                                             _downloadProgress.value = null
                                             if (event.error != "下载已取消") {
-                                                Toast.makeText(getApplication(), "下载失败: ${event.error}", Toast.LENGTH_SHORT).show()
+                                                notifier.error("下载失败: ${event.error}")
                                             }
                                         }
                                     }
@@ -821,11 +833,11 @@ class AliyunBrowserViewModel @Inject constructor(
                         eventJob.cancel()
                     },
                     onFailure = { e ->
-                        Toast.makeText(getApplication(), "获取下载链接失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                        notifier.error("获取下载链接失败: ${e.message}")
                     }
                 )
             } catch (e: Exception) {
-                Toast.makeText(getApplication(), "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("下载失败: ${e.message}")
                 _downloadProgress.value = null
             }
         }
@@ -840,7 +852,7 @@ class AliyunBrowserViewModel @Inject constructor(
         val context = getApplication<Application>()
         val file = File(filePath)
         if (!file.exists()) {
-            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+            notifier.info("文件不存在")
             return
         }
         try {
@@ -856,7 +868,7 @@ class AliyunBrowserViewModel @Inject constructor(
             context.startActivity(Intent.createChooser(intent, "分享文件").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: Exception) {
             Log.e("AliyunVM", "分享文件失败", e)
-            Toast.makeText(context, "无法打开文件: ${e.message}", Toast.LENGTH_SHORT).show()
+            notifier.info("无法打开文件: ${e.message}")
         }
     }
 

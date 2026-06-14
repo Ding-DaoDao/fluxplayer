@@ -24,12 +24,15 @@ import com.fluxplayer.app.feature.player.danmaku.DanmakuSearchViewMode
 import com.fluxplayer.app.feature.player.state.SubtitleOptionsEvent
 import com.fluxplayer.app.feature.player.state.VideoZoomEvent
 import android.util.Log
-import android.widget.Toast
+import com.fluxplayer.app.core.common.FluxNotificationDelegate
+import com.fluxplayer.app.core.model.FluxMessageEvent
+import kotlinx.coroutines.flow.SharedFlow
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -42,6 +45,16 @@ class PlayerViewModel @Inject constructor(
     private val getSortedPlaylistUseCase: GetSortedPlaylistUseCase,
     private val danmakuRepository: DanmakuRepository,
 ) : ViewModel() {
+    // region ==================== 统一通知 ====================
+
+    /** 通知事件委托 */
+    val notifier = FluxNotificationDelegate(viewModelScope)
+
+    /** 供 UI 层收集的通知事件流 */
+    val messageEvents: SharedFlow<FluxMessageEvent> = notifier.events
+
+    // endregion
+
 
     var playWhenReady: Boolean = true
 
@@ -128,7 +141,7 @@ class PlayerViewModel @Inject constructor(
                 _danmakuFileUri.value = uri
                 danmakuEnabled.value = true
                 danmakuForCurrentEpisode.value = true
-                Toast.makeText(context, "弹幕已加载（${list.size}条）", Toast.LENGTH_SHORT).show()
+                notifier.success("弹幕已加载（${list.size}条）")
                 // 保存本地弹幕上下文（用于切集自动加载）
                 val filePath = uri.path?.let { java.io.File(it) }
                 if (filePath != null && filePath.parentFile != null) {
@@ -243,7 +256,7 @@ class PlayerViewModel @Inject constructor(
                             danmakuForCurrentEpisode.value = true
                             _danmakuDownloadState.value = DanmakuDownloadState.Ready(uri.toString())
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "弹幕已加载（${list.size}条）", Toast.LENGTH_SHORT).show()
+                                notifier.success("弹幕已加载（${list.size}条）")
                             }
                             // 保存网络弹幕上下文（用于切集自动加载）
                             lastAnimeInfo = lastAnimeInfo?.copy(currentEpisode = episode)
@@ -410,8 +423,9 @@ class PlayerViewModel @Inject constructor(
         Log.d(TAG, "silentLoadLocalDanmaku: ${file.name}")
         viewModelScope.launch {
             withContext(Dispatchers.Main) {
-                Toast.makeText(context, "正在加载 ${file.name}", Toast.LENGTH_SHORT).show()
+                notifier.info("正在加载 ${file.name}")
             }
+            delay(800) // 给「正在加载」toast 留出展示时间
             val list = withContext(Dispatchers.IO) {
                 DanmakuParser.loadFromUri(context, Uri.fromFile(file))
             }
@@ -421,7 +435,7 @@ class PlayerViewModel @Inject constructor(
                 danmakuEnabled.value = true
                 danmakuForCurrentEpisode.value = true
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "已加载 ${list.size} 条弹幕", Toast.LENGTH_SHORT).show()
+                    notifier.success("已加载 ${list.size} 条弹幕")
                 }
             } else {
                 Log.d(TAG, "silentLoadLocalDanmaku: failed to load ${file.name}")
@@ -438,8 +452,9 @@ class PlayerViewModel @Inject constructor(
         Log.d(TAG, "silentLoadNetworkDanmaku: episode=${episode.title} (${episode.episodeId})")
         viewModelScope.launch {
             withContext(Dispatchers.Main) {
-                Toast.makeText(context, "正在加载 ${episode.title}", Toast.LENGTH_SHORT).show()
+                notifier.info("正在加载 ${episode.title}")
             }
+            delay(800) // 给「正在加载」toast 留出展示时间
             try {
                 val uri = withContext(Dispatchers.IO) {
                     danmakuRepository.downloadAndCache(source, episode)
@@ -456,7 +471,7 @@ class PlayerViewModel @Inject constructor(
                             danmakuEnabled.value = true
                             danmakuForCurrentEpisode.value = true
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "已加载 ${list.size} 条弹幕", Toast.LENGTH_SHORT).show()
+                                notifier.success("已加载 ${list.size} 条弹幕")
                             }
                         }
                     }
@@ -504,7 +519,7 @@ class PlayerViewModel @Inject constructor(
                             danmakuForCurrentEpisode.value = true
                             _danmakuDownloadState.value = DanmakuDownloadState.Ready(uri.toString())
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "弹幕已加载（${list.size}条）", Toast.LENGTH_SHORT).show()
+                                notifier.success("弹幕已加载（${list.size}条）")
                             }
                             return@launch
                         }

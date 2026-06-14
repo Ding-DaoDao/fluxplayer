@@ -5,7 +5,9 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import android.widget.Toast
+import com.fluxplayer.app.core.common.FluxNotificationDelegate
+import com.fluxplayer.app.core.model.FluxMessageEvent
+import kotlinx.coroutines.flow.SharedFlow
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -44,6 +46,16 @@ class C189BrowserViewModel @Inject constructor(
     private val playbackHistoryRepository: PlaybackHistoryRepository,
     private val cloudDownloadRepository: CloudDownloadRepository,
 ) : androidx.lifecycle.AndroidViewModel(application) {
+    // region ==================== 统一通知 ====================
+
+    /** 通知事件委托 */
+    val notifier = FluxNotificationDelegate(viewModelScope)
+
+    /** 供 UI 层收集的通知事件流 */
+    val messageEvents: SharedFlow<FluxMessageEvent> = notifier.events
+
+    // endregion
+
 
     companion object {
         private const val TAG = "C189BrowserVM"
@@ -587,10 +599,10 @@ class C189BrowserViewModel @Inject constructor(
                 withSessionRecovery {
                     apiClient.createFolder(state.currentFolderId, name).getOrThrow()
                 }
-                Toast.makeText(getApplication(), "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                notifier.success("文件夹创建成功")
                 refresh()
             } catch (e: Exception) {
-                Toast.makeText(getApplication(), "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("创建失败: ${e.message}")
                 updateUiState { it.copy(isLoading = false) }
             }
         }
@@ -604,10 +616,10 @@ class C189BrowserViewModel @Inject constructor(
                 withSessionRecovery {
                     apiClient.deleteFiles(listOf(item.path)).getOrThrow()
                 }
-                Toast.makeText(getApplication(), "删除成功", Toast.LENGTH_SHORT).show()
+                notifier.success("删除成功")
                 refresh()
             } catch (e: Exception) {
-                Toast.makeText(getApplication(), "删除失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("删除失败: ${e.message}")
                 updateUiState { it.copy(isLoading = false) }
             }
         }
@@ -621,10 +633,10 @@ class C189BrowserViewModel @Inject constructor(
                 withSessionRecovery {
                     apiClient.renameFile(item.path, newName).getOrThrow()
                 }
-                Toast.makeText(getApplication(), "重命名成功", Toast.LENGTH_SHORT).show()
+                notifier.success("重命名成功")
                 refresh()
             } catch (e: Exception) {
-                Toast.makeText(getApplication(), "重命名失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("重命名失败: ${e.message}")
                 updateUiState { it.copy(isLoading = false) }
             }
         }
@@ -661,7 +673,7 @@ class C189BrowserViewModel @Inject constructor(
                 },
                 onFailure = { e ->
                     updateUiState { it.copy(pickerFolders = emptyList(), pickerIsLoading = false) }
-                    Toast.makeText(getApplication(), "加载文件夹失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("加载文件夹失败: ${e.message}")
                 }
             )
         }
@@ -675,10 +687,10 @@ class C189BrowserViewModel @Inject constructor(
                 withSessionRecovery {
                     apiClient.createFolder(actualParentId, name).getOrThrow()
                 }
-                Toast.makeText(getApplication(), "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                notifier.success("文件夹创建成功")
                 loadFoldersForPicker(parentFolderId)
             } catch (e: Exception) {
-                Toast.makeText(getApplication(), "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("创建失败: ${e.message}")
                 updateUiState { it.copy(pickerIsLoading = false) }
             }
         }
@@ -693,10 +705,10 @@ class C189BrowserViewModel @Inject constructor(
                 withSessionRecovery {
                     apiClient.moveFiles(listOf(fileId), actualTargetId).getOrThrow()
                 }
-                Toast.makeText(getApplication(), "移动成功", Toast.LENGTH_SHORT).show()
+                notifier.success("移动成功")
                 dismissPicker(); refresh()
             } catch (e: Exception) {
-                Toast.makeText(getApplication(), "移动失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("移动失败: ${e.message}")
                 updateUiState { it.copy(isLoading = false) }
             }
         }
@@ -748,14 +760,14 @@ class C189BrowserViewModel @Inject constructor(
                                                 progress = 1f,
                                                 completedFilePath = event.filePath
                                             )
-                                            Toast.makeText(getApplication(), "下载完成: ${event.fileName}", Toast.LENGTH_SHORT).show()
+                                            notifier.success("下载完成: ${event.fileName}")
                                         }
                                     }
                                     is CloudDownloadRepository.DownloadEvent.Failed -> {
                                         if (event.fileName == res.name) {
                                             _downloadProgress.value = null
                                             if (event.error != "下载已取消") {
-                                                Toast.makeText(getApplication(), "下载失败: ${event.error}", Toast.LENGTH_SHORT).show()
+                                                notifier.error("下载失败: ${event.error}")
                                             }
                                         }
                                     }
@@ -772,11 +784,11 @@ class C189BrowserViewModel @Inject constructor(
                         eventJob.cancel()
                     },
                     onFailure = { e ->
-                        Toast.makeText(getApplication(), "获取下载链接失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                        notifier.error("获取下载链接失败: ${e.message}")
                     }
                 )
             } catch (e: Exception) {
-                Toast.makeText(getApplication(), "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("下载失败: ${e.message}")
                 _downloadProgress.value = null
             }
         }
@@ -791,7 +803,7 @@ class C189BrowserViewModel @Inject constructor(
         val context = getApplication<Application>()
         val file = File(filePath)
         if (!file.exists()) {
-            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+            notifier.info("文件不存在")
             return
         }
         try {
@@ -805,7 +817,7 @@ class C189BrowserViewModel @Inject constructor(
             context.startActivity(Intent.createChooser(intent, "分享文件").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: Exception) {
             Log.e("C189VM", "分享文件失败", e)
-            Toast.makeText(context, "无法打开文件: ${e.message}", Toast.LENGTH_SHORT).show()
+            notifier.info("无法打开文件: ${e.message}")
         }
     }
 
@@ -885,7 +897,7 @@ class C189BrowserViewModel @Inject constructor(
         val lastSignDay = prefs.getString("lastSignDay", "") ?: ""
 
         if (lastSignDay == today) {
-            Toast.makeText(app, "今日已签到", Toast.LENGTH_SHORT).show()
+            notifier.success("今日已签到")
             return
         }
 
@@ -893,10 +905,10 @@ class C189BrowserViewModel @Inject constructor(
             apiClient.userSign().fold(
                 onSuccess = { msg ->
                     prefs.edit().putString("lastSignDay", today).apply()
-                    Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
+                    notifier.success(msg)
                 },
                 onFailure = { e ->
-                    Toast.makeText(app, "签到失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("签到失败: ${e.message}")
                 }
             )
         }
@@ -961,7 +973,7 @@ class C189BrowserViewModel @Inject constructor(
         val info = apiClient.parseShareUrl(rawUrl)
         if (info == null) {
             updateUiState { it.copy(showShareInputDialog = false) }
-            Toast.makeText(getApplication(), "请检查分享链接格式，应为 cloud.189.cn/t/...", Toast.LENGTH_SHORT).show()
+            notifier.error("请检查分享链接格式，应为 cloud.189.cn/t/...")
             return
         }
         updateUiState {
@@ -1026,7 +1038,7 @@ class C189BrowserViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 updateUiState { it.copy(shareIsLoading = false, showShareBrowse = false) }
-                Toast.makeText(getApplication(), "打开分享失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("打开分享失败: ${e.message}")
             }
         }
     }
@@ -1064,7 +1076,7 @@ class C189BrowserViewModel @Inject constructor(
                 },
                 onFailure = { e ->
                     updateUiState { it.copy(shareTargetPickerFolders = emptyList(), shareTargetPickerIsLoading = false) }
-                    Toast.makeText(getApplication(), "加载文件夹失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("加载文件夹失败: ${e.message}")
                 }
             )
         }
@@ -1147,12 +1159,12 @@ class C189BrowserViewModel @Inject constructor(
                     targetFolderId = targetId,
                 )
                 if (ok) {
-                    Toast.makeText(getApplication(), "已转存到 ${state.shareSaveTargetFolderLabel}: ${item.name}", Toast.LENGTH_SHORT).show()
+                    notifier.info("已转存到 ${state.shareSaveTargetFolderLabel}: ${item.name}")
                 } else {
-                    Toast.makeText(getApplication(), "转存失败，请重试", Toast.LENGTH_SHORT).show()
+                    notifier.error("转存失败，请重试")
                 }
             } catch (e: Exception) {
-                Toast.makeText(getApplication(), "转存失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("转存失败: ${e.message}")
             } finally {
                 updateUiState { it.copy(shareIsLoading = false) }
             }
@@ -1192,7 +1204,7 @@ class C189BrowserViewModel @Inject constructor(
                 successCount == 0 -> "转存失败，请重试"
                 else -> "成功 $successCount 项，失败 $failCount 项"
             }
-            Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+            notifier.info(msg)
         }
     }
 
@@ -1246,7 +1258,7 @@ class C189BrowserViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 updateUiState { it.copy(shareIsLoading = false) }
-                Toast.makeText(getApplication(), "进入文件夹失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("进入文件夹失败: ${e.message}")
             }
         }
     }
@@ -1285,7 +1297,7 @@ class C189BrowserViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 updateUiState { it.copy(shareIsLoading = false) }
-                Toast.makeText(getApplication(), "返回失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("返回失败: ${e.message}")
             }
         }
     }
@@ -1326,7 +1338,7 @@ class C189BrowserViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 updateUiState { it.copy(shareIsLoading = false) }
-                Toast.makeText(getApplication(), "跳转失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("跳转失败: ${e.message}")
             }
         }
     }

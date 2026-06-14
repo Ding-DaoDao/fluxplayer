@@ -33,6 +33,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +72,8 @@ private sealed interface BackupDialog {
     data object RestoreSource : BackupDialog
     data object RemoteFiles : BackupDialog
     data object RestoreComplete : BackupDialog
+    data object RestoreConfirm : BackupDialog
+    data object NewBackupAvailable : BackupDialog
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -94,6 +97,18 @@ fun BackupScreen(
         }
     }
 
+    // 页面离开时清除连接测试状态
+    DisposableEffect(Unit) {
+        onDispose { viewModel.clearConnectionState() }
+    }
+
+    // 检测到新备份时弹出提示
+    LaunchedEffect(config.hasPendingNewBackup) {
+        if (config.hasPendingNewBackup) {
+            dialog = BackupDialog.NewBackupAvailable
+        }
+    }
+
     // 输入框临时状态
     var editUsername by remember(config.username) { mutableStateOf(config.username) }
     var editPassword by remember(config.password) { mutableStateOf(config.password) }
@@ -101,6 +116,7 @@ fun BackupScreen(
     var editDeviceName by remember(config.deviceName) { mutableStateOf(config.deviceName) }
     var editBackupPath by remember(config.backupPath) { mutableStateOf(config.backupPath) }
     var ignoreListState by remember(config.restoreIgnoreList) { mutableStateOf(config.restoreIgnoreList.toSet()) }
+    var restoreIsRemote by remember { mutableStateOf(false) }
 
     // 文件选择器
     val createBackupLauncher = rememberLauncherForActivityResult(
@@ -304,13 +320,21 @@ fun BackupScreen(
             },
             onDismissClick = { dialog = null },
             content = {
-                OutlinedTextField(
-                    value = editDeviceName,
-                    onValueChange = { editDeviceName = it },
-                    placeholder = { Text(stringResource(R.string.backup_device_name_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column {
+                    OutlinedTextField(
+                        value = editDeviceName,
+                        onValueChange = { editDeviceName = it },
+                        placeholder = { Text(stringResource(R.string.backup_device_name_hint)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.backup_device_name_format_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             },
         )
 
@@ -373,13 +397,12 @@ fun BackupScreen(
 
         BackupDialog.RestoreSource -> RestoreSourceDialog(
             onLocal = {
-                dialog = null
-                restoreBackupLauncher.launch(arrayOf("application/zip", "application/json", "*/*"))
+                restoreIsRemote = false
+                dialog = BackupDialog.RestoreConfirm
             },
             onRemote = {
-                dialog = null
-                viewModel.listRemoteFiles()
-                dialog = BackupDialog.RemoteFiles
+                restoreIsRemote = true
+                dialog = BackupDialog.RestoreConfirm
             },
             onDismiss = { dialog = null },
         )
@@ -404,6 +427,31 @@ fun BackupScreen(
             onDismiss = {
                 dialog = null
                 viewModel.clearRestoreCompleted()
+            },
+        )
+
+        BackupDialog.RestoreConfirm -> RestoreConfirmDialog(
+            onConfirm = {
+                if (restoreIsRemote) {
+                    viewModel.listRemoteFiles()
+                    dialog = BackupDialog.RemoteFiles
+                } else {
+                    dialog = null
+                    restoreBackupLauncher.launch(arrayOf("application/zip", "application/json", "*/*"))
+                }
+            },
+            onDismiss = { dialog = null },
+        )
+
+        BackupDialog.NewBackupAvailable -> NewBackupAvailableDialog(
+            onRestore = {
+                viewModel.clearPendingNewBackup()
+                viewModel.listRemoteFiles()
+                dialog = BackupDialog.RemoteFiles
+            },
+            onDismiss = {
+                viewModel.clearPendingNewBackup()
+                dialog = null
             },
         )
 
@@ -631,6 +679,60 @@ private fun RestoreCompleteDialog(
         confirmButton = {
             TextButton(onClick = onRestart) {
                 Text(stringResource(R.string.backup_restart_app))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun RestoreConfirmDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    NextDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.restore_backup)) },
+        content = {
+            Text(
+                stringResource(R.string.backup_restore_confirm_message),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.restore_backup))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun NewBackupAvailableDialog(
+    onRestore: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    NextDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.backup_new_available_title)) },
+        content = {
+            Text(
+                stringResource(R.string.backup_new_available_message),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onRestore) {
+                Text(stringResource(R.string.backup_restore_remote))
             }
         },
         dismissButton = {

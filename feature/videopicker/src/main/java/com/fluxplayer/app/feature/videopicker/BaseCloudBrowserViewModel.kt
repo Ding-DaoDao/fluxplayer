@@ -4,17 +4,19 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
-import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.fluxplayer.app.core.common.FluxNotificationDelegate
 import com.fluxplayer.app.core.common.PickerUtils
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.WebDavResource
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -41,6 +43,16 @@ import java.util.Locale
 abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
     application: Application
 ) : AndroidViewModel(application) {
+
+    // region ==================== 统一通知 ====================
+
+    /** 通知事件委托，供子类和 UI 层调用 */
+    val notifier = FluxNotificationDelegate(viewModelScope)
+
+    /** 供 UI 层收集的通知事件流 */
+    val messageEvents: SharedFlow<FluxMessageEvent> = notifier.events
+
+    // endregion
 
     // region ==================== 抽象方法（子类必须实现） ====================
 
@@ -615,11 +627,11 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
             val result = doCreateFolder(name, state.currentFileId)
             result.fold(
                 onSuccess = {
-                    Toast.makeText(getApplication(), "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("文件夹创建成功")
                     refresh()
                 },
                 onFailure = { e ->
-                    Toast.makeText(getApplication(), "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("创建失败: ${e.message}")
                     updateState(CommonStateUpdate(isLoading = false))
                 }
             )
@@ -635,11 +647,11 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
             val result = doDeleteResource(item)
             result.fold(
                 onSuccess = {
-                    Toast.makeText(getApplication(), "删除成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("删除成功")
                     refresh()
                 },
                 onFailure = { e ->
-                    Toast.makeText(getApplication(), "删除失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("删除失败: ${e.message}")
                     updateState(CommonStateUpdate(isLoading = false))
                 }
             )
@@ -655,11 +667,11 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
             val result = doRenameResource(item, newName)
             result.fold(
                 onSuccess = {
-                    Toast.makeText(getApplication(), "重命名成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("重命名成功")
                     refresh()
                 },
                 onFailure = { e ->
-                    Toast.makeText(getApplication(), "重命名失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("重命名失败: ${e.message}")
                     updateState(CommonStateUpdate(isLoading = false))
                 }
             )
@@ -694,11 +706,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                     val e = infoResult.exceptionOrNull()!!
                     Log.e("BaseCloudVM", "获取下载链接失败", e)
                     _downloadProgress.value = null
-                    Toast.makeText(
-                        getApplication(),
-                        "获取下载链接失败: ${e.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    notifier.error("获取下载链接失败: ${e.message}")
                     return@launch
                 }
 
@@ -734,11 +742,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                                         progress = 1f,
                                         completedFilePath = event.filePath
                                     )
-                                    Toast.makeText(
-                                        getApplication(),
-                                        "下载完成: ${event.fileName}",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    notifier.success("下载完成: ${event.fileName}")
                                 }
                             }
 
@@ -746,11 +750,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                                 if (event.fileName == info.fileName) {
                                     _downloadProgress.value = null
                                     if (event.error != "下载已取消") {
-                                        Toast.makeText(
-                                            getApplication(),
-                                            "下载失败: ${event.error}",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                                        notifier.error("下载失败: ${event.error}")
                                     }
                                 }
                             }
@@ -769,7 +769,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
             } catch (e: Exception) {
                 Log.e("BaseCloudVM", "下载异常", e)
-                Toast.makeText(getApplication(), "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("下载失败: ${e.message}")
                 _downloadProgress.value = null
             }
         }
@@ -790,11 +790,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                     val e = infoResult.exceptionOrNull()!!
                     Log.e("BaseCloudVM", "获取下载链接失败", e)
                     _downloadProgress.value = null
-                    Toast.makeText(
-                        getApplication(),
-                        "获取下载链接失败: ${e.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    notifier.error("获取下载链接失败: ${e.message}")
                     return@launch
                 }
                 val info = infoResult.getOrThrow()
@@ -815,11 +811,11 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                     info.headers.forEach { (key, value) -> addRequestHeader(key, value) }
                 }
                 dm.enqueue(request)
-                Toast.makeText(getApplication(), "开始下载: ${info.fileName}", Toast.LENGTH_SHORT).show()
+                notifier.info("开始下载: ${info.fileName}")
                 _downloadProgress.value = null
             } catch (e: Exception) {
                 Log.e("BaseCloudVM", "下载异常", e)
-                Toast.makeText(getApplication(), "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("下载失败: ${e.message}")
                 _downloadProgress.value = null
             }
         }
@@ -834,7 +830,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
         val context = getApplication<Application>()
         val file = File(filePath)
         if (!file.exists()) {
-            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+            notifier.error("文件不存在")
             return
         }
         try {
@@ -856,7 +852,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
             context.startActivity(Intent.createChooser(intent, "分享文件").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: Exception) {
             Log.e("BaseCloudVM", "打开文件失败", e)
-            Toast.makeText(context, "无法打开文件: ${e.message}", Toast.LENGTH_SHORT).show()
+            notifier.error("无法打开文件: ${e.message}")
         }
     }
 
@@ -923,11 +919,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                             pickerIsLoading = false
                         )
                     )
-                    Toast.makeText(
-                        getApplication(),
-                        "加载文件夹失败: ${e.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    notifier.error("加载文件夹失败: ${e.message}")
                 }
             )
         }
@@ -942,11 +934,11 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
             result.fold(
                 onSuccess = {
-                    Toast.makeText(getApplication(), "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("文件夹创建成功")
                     loadFoldersForPicker(parentFolderId)
                 },
                 onFailure = { e ->
-                    Toast.makeText(getApplication(), "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("创建失败: ${e.message}")
                     updateState(CommonStateUpdate(pickerIsLoading = false))
                 }
             )
@@ -963,12 +955,12 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
             val result = doMoveResource(fileId, actualTargetId)
             result.fold(
                 onSuccess = {
-                    Toast.makeText(getApplication(), "移动成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("移动成功")
                     dismissPicker()
                     refresh()
                 },
                 onFailure = { e ->
-                    Toast.makeText(getApplication(), "移动失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("移动失败: ${e.message}")
                     updateState(CommonStateUpdate(isLoading = false))
                 }
             )
@@ -1000,8 +992,12 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
     // region ==================== 工具方法 ====================
 
+    @Deprecated(
+        "使用 notifier.success/error/info 代替",
+        ReplaceWith("notifier.success(msg)", "com.fluxplayer.app.core.common.FluxNotificationDelegate"),
+    )
     protected fun snackbar(msg: String) {
-        Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+        notifier.info(msg)
     }
 
     protected fun formatTimestamp(ts: Long): String {

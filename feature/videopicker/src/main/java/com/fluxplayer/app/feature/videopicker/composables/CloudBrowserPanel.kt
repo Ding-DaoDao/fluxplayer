@@ -12,10 +12,12 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -34,13 +36,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.components.DoneButton
+import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
+import com.fluxplayer.app.core.ui.components.FluxNotificationState
 import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.feature.videopicker.DirectoryState
+import kotlinx.coroutines.flow.SharedFlow
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -76,6 +82,7 @@ fun <T> CloudBrowserPanel(
     playedUriSet: Set<String> = emptySet(),
     cloudProviderKey: String = "",
     providerMenuItems: @Composable ((onDismiss: () -> Unit) -> Unit) = {},
+    notificationEvents: SharedFlow<FluxMessageEvent>? = null,
 ) {
     // 从 navigationStack 或扁平参数获取当前目录状态
     val topEntry = navigationStack.lastOrNull()
@@ -177,7 +184,7 @@ fun <T> CloudBrowserPanel(
 
                 Box(modifier = Modifier.weight(1f)) {
                     AnimatedContent(
-                        targetState = navigationStack.lastOrNull(),
+                        targetState = navigationStack.lastOrNull()?.key,
                         transitionSpec = {
                             if (stackGrowing) {
                                 slideInHorizontally(dirTween) { it / 4 } + fadeIn(dirAlphaTween) togetherWith
@@ -188,12 +195,15 @@ fun <T> CloudBrowserPanel(
                             }.using(SizeTransform(clip = false))
                         },
                         label = "DirectoryTransition",
-                    ) { topEntry ->
-                        if (topEntry != null) {
-                            key(topEntry.key) {
+                    ) { targetKey ->
+                        val entry = if (targetKey != null) {
+                            navigationStack.lastOrNull { it.key == targetKey }
+                        } else null
+                        if (targetKey != null && entry != null) {
+                            key(entry.key) {
                                 val listState = rememberLazyListState()
                                 DirectoryStackContent(
-                                    entry = topEntry,
+                                    entry = entry,
                                     listState = listState,
                                     isLoadingMore = isLoadingMore,
                                     onItemClick = onItemClick,
@@ -282,14 +292,6 @@ fun <T> CloudBrowserPanel(
                             }
                         }
 
-                        if (curLoading && curItems.isNotEmpty()) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                CircularProgressIndicator()
-                            }
-                        }
                     }
                 }
             }
@@ -315,6 +317,21 @@ fun <T> CloudBrowserPanel(
             ) {
                 Icon(Icons.Default.Add, contentDescription = "新建文件夹")
             }
+        }
+
+        // 统一通知浮层
+        notificationEvents?.let { flow ->
+            val notificationState = remember { FluxNotificationState() }
+            LaunchedEffect(flow) {
+                flow.collect { notificationState.show(it) }
+            }
+            FluxNotificationBanner(
+                event = notificationState.currentEvent,
+                onDismiss = { notificationState.dismiss() },
+                onRetry = { onRefresh() },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter),
+            )
         }
     }
 
@@ -395,7 +412,7 @@ private fun <T> BreadcrumbBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             breadcrumbs.forEachIndexed { index, crumb ->
@@ -555,14 +572,6 @@ private fun DirectoryStackContent(
                 }
             }
 
-            if (entry.isLoading && entry.items.isNotEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
         }
     }
 }
@@ -608,7 +617,7 @@ private fun ItemCard(
                 Text(
                     text = item.name,
                     style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 val subtitle = remember(item) { buildItemSubtitle(item) }
@@ -690,9 +699,11 @@ fun buildItemSubtitle(item: WebDavResource): String {
 fun formatFileSize(bytes: Long): String {
     return when {
         bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> "${"%.1f".format(bytes / 1024.0)} KB"
-        bytes < 1024 * 1024 * 1024 -> "${"%.1f".format(bytes / (1024.0 * 1024))} MB"
-        else -> "${"%.2f".format(bytes / (1024.0 * 1024 * 1024))} GB"
+        bytes < 1024L * 1024 -> "${"%.1f".format(bytes / 1024.0)} KB"
+        bytes < 1024L * 1024 * 1024 -> "${"%.1f".format(bytes / (1024.0 * 1024))} MB"
+        bytes < 1024L * 1024 * 1024 * 1024 -> "${"%.2f".format(bytes / (1024.0 * 1024 * 1024))} GB"
+        bytes < 1024L * 1024 * 1024 * 1024 * 1024 -> "${"%.2f".format(bytes / (1024.0 * 1024 * 1024 * 1024))} TB"
+        else -> "${"%.2f".format(bytes / (1024.0 * 1024 * 1024 * 1024 * 1024))} PB"
     }
 }
 

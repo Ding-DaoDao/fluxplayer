@@ -115,7 +115,7 @@ fun AliyunBrowserTabContent(
                     onPlayVideos = onPlayVideos,
                     scope = scope,
                 )
-            } else {
+            } else if (item.isVideo) {
                 onCloudVideoClick(
                     item = item,
                     allItems = state.items,
@@ -224,6 +224,7 @@ fun AliyunBrowserTabContent(
         onExitClick = { viewModel.logout() },
         playedUriSet = state.playedUriSet,
         cloudProviderKey = "alipan",
+        notificationEvents = viewModel.messageEvents,
     )
 
     val renameItem = state.items.getOrNull(renameIndex)

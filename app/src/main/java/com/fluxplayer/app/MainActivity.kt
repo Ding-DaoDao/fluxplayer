@@ -1,11 +1,18 @@
 package com.fluxplayer.app
 
+import android.Manifest
+import android.content.Intent
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.spring
@@ -15,12 +22,16 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
@@ -33,7 +44,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.rememberNavController
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
-import com.google.accompanist.permissions.rememberPermissionState
+import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import dagger.hilt.android.AndroidEntryPoint
 import com.fluxplayer.app.core.common.storagePermission
 import com.fluxplayer.app.core.data.backup.AutoBackupHelper
@@ -107,22 +118,77 @@ class MainActivity : ComponentActivity() {
                 darkTheme = shouldUseDarkTheme,
                 highContrastDarkTheme = shouldUseHighContrastDarkTheme(uiState = uiState),
                 dynamicColor = shouldUseDynamicTheming(uiState = uiState),
+                customSeedColor = customSeedColor(uiState = uiState),
                 composeEngine = shouldUseComposeEngine(uiState = uiState),
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.surface,
                 ) {
-                    val storagePermissionState = rememberPermissionState(permission = storagePermission)
+                    val permissionsToRequest = remember {
+                        buildList {
+                            add(storagePermission)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                add(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }
+                    }
+                    val permissionsState = rememberMultiplePermissionsState(permissions = permissionsToRequest)
 
                     LifecycleEventEffect(event = Lifecycle.Event.ON_START) {
-                        storagePermissionState.launchPermissionRequest()
+                        if (!permissionsState.allPermissionsGranted) {
+                            permissionsState.launchMultiplePermissionRequest()
+                        }
                     }
 
-                    LaunchedEffect(key1 = storagePermissionState.status.isGranted) {
-                        if (storagePermissionState.status.isGranted) {
+                    val storageGranted = permissionsState.permissions.firstOrNull {
+                        it.permission == storagePermission
+                    }?.status?.isGranted ?: false
+
+                    LaunchedEffect(storageGranted) {
+                        if (storageGranted) {
                             synchronizer.startSync()
                         }
+                    }
+
+                    // MANAGE_EXTERNAL_STORAGE 引导（Android 11+）
+                    var showManageStorageDialog by remember { mutableStateOf(false) }
+                    val hasRequestedManageStorage = remember { mutableStateOf(false) }
+
+                    LaunchedEffect(storageGranted) {
+                        if (storageGranted
+                            && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                            && !Environment.isExternalStorageManager()
+                            && !hasRequestedManageStorage.value
+                        ) {
+                            showManageStorageDialog = true
+                            hasRequestedManageStorage.value = true
+                        }
+                    }
+
+                    val manageStorageLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.StartActivityForResult()
+                    ) {
+                        // 返回后无需额外处理
+                    }
+
+                    if (showManageStorageDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showManageStorageDialog = false },
+                            title = { Text("需要所有文件访问权限") },
+                            text = { Text("Flux Player 需要「所有文件访问」权限才能完整浏览和管理您的视频文件。请在接下来的设置页面中开启此权限。") },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    showManageStorageDialog = false
+                                    manageStorageLauncher.launch(
+                                        Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                                    )
+                                }) { Text("去开启") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showManageStorageDialog = false }) { Text("稍后再说") }
+                            },
+                        )
                     }
 
                     val mainNavController = rememberNavController()
@@ -224,4 +290,12 @@ fun shouldUseComposeEngine(
 ): ComposeEngine = when (uiState) {
     MainActivityUiState.Loading -> ComposeEngine.MATERIAL
     is MainActivityUiState.Success -> uiState.preferences.composeEngine
+}
+
+@Composable
+fun customSeedColor(
+    uiState: MainActivityUiState,
+): Int = when (uiState) {
+    MainActivityUiState.Loading -> 0
+    is MainActivityUiState.Success -> uiState.preferences.customSeedColor
 }

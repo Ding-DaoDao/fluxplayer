@@ -50,6 +50,10 @@ class AppearancePreferencesViewModel @Inject constructor(
             is AppearancePreferencesEvent.UpdateBottomBarBlurRadius -> updateBottomBarBlurRadius(event.value)
             is AppearancePreferencesEvent.UpdateBottomBarBlurAlpha -> updateBottomBarBlurAlpha(event.value)
             is AppearancePreferencesEvent.UpdateComposeEngine -> updateComposeEngine(event.composeEngine)
+            is AppearancePreferencesEvent.UpdateCustomSeedColor -> updateCustomSeedColor(event.value)
+            is AppearancePreferencesEvent.UpdateTopBarOpacity -> updateTopBarOpacity(event.value)
+            is AppearancePreferencesEvent.UpdateBottomBarOpacity -> updateBottomBarOpacity(event.value)
+            is AppearancePreferencesEvent.UpdateContainerOpacity -> updateContainerOpacity(event.value)
         }
     }
 
@@ -164,6 +168,41 @@ class AppearancePreferencesViewModel @Inject constructor(
             }
         }
     }
+
+    private fun updateCustomSeedColor(value: Int) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(
+                    customSeedColor = value,
+                    useDynamicColors = false,
+                )
+            }
+        }
+    }
+
+    private fun updateTopBarOpacity(value: Int) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(topBarOpacity = value.coerceIn(0, 100))
+            }
+        }
+    }
+
+    private fun updateBottomBarOpacity(value: Int) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(bottomBarOpacity = value.coerceIn(0, 100))
+            }
+        }
+    }
+
+    private fun updateContainerOpacity(value: Int) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(containerOpacity = value.coerceIn(0, 100))
+            }
+        }
+    }
 }
 
 @Stable
@@ -187,6 +226,10 @@ sealed interface AppearancePreferencesEvent {
     data class UpdateBottomBarBlurRadius(val value: Int) : AppearancePreferencesEvent
     data class UpdateBottomBarBlurAlpha(val value: Int) : AppearancePreferencesEvent
     data class UpdateComposeEngine(val composeEngine: ComposeEngine) : AppearancePreferencesEvent
+    data class UpdateCustomSeedColor(val value: Int) : AppearancePreferencesEvent
+    data class UpdateTopBarOpacity(val value: Int) : AppearancePreferencesEvent
+    data class UpdateBottomBarOpacity(val value: Int) : AppearancePreferencesEvent
+    data class UpdateContainerOpacity(val value: Int) : AppearancePreferencesEvent
 }
 
 sealed interface AppearancePreferenceDialog {

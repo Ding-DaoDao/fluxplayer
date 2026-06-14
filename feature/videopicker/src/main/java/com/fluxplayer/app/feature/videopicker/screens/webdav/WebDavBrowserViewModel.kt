@@ -5,7 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
-import android.widget.Toast
+import com.fluxplayer.app.core.common.FluxNotificationDelegate
+import com.fluxplayer.app.core.model.FluxMessageEvent
+import kotlinx.coroutines.flow.SharedFlow
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -61,6 +63,16 @@ class WebDavBrowserViewModel @Inject constructor(
     private val cloudDownloadRepository: CloudDownloadRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
+    // region ==================== 统一通知 ====================
+
+    /** 通知事件委托 */
+    val notifier = FluxNotificationDelegate(viewModelScope)
+
+    /** 供 UI 层收集的通知事件流 */
+    val messageEvents: SharedFlow<FluxMessageEvent> = notifier.events
+
+    // endregion
+
 
     companion object {
         private const val TAG = "WebDavBrowserVM"
@@ -451,12 +463,12 @@ class WebDavBrowserViewModel @Inject constructor(
             )
             result.fold(
                 onSuccess = {
-                    Toast.makeText(context, "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("文件夹创建成功")
                     directoryCache.remove(current.path)
                     loadDirectory(current.path)
                 },
                 onFailure = { e ->
-                    Toast.makeText(context, "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("创建失败: ${e.message}")
                 }
             )
         }
@@ -479,12 +491,12 @@ class WebDavBrowserViewModel @Inject constructor(
             )
             result.fold(
                 onSuccess = {
-                    Toast.makeText(context, "重命名成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("重命名成功")
                     directoryCache.remove(current.path)
                     loadDirectory(current.path)
                 },
                 onFailure = { e ->
-                    Toast.makeText(context, "重命名失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("重命名失败: ${e.message}")
                 }
             )
         }
@@ -503,12 +515,12 @@ class WebDavBrowserViewModel @Inject constructor(
             )
             result.fold(
                 onSuccess = {
-                    Toast.makeText(context, "删除成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("删除成功")
                     directoryCache.remove(current.path)
                     loadDirectory(current.path)
                 },
                 onFailure = { e ->
-                    Toast.makeText(context, "删除失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("删除失败: ${e.message}")
                 }
             )
         }
@@ -564,7 +576,7 @@ class WebDavBrowserViewModel @Inject constructor(
                     _stateFlow.update {
                         it.copy(pickerFolders = emptyList(), pickerIsLoading = false)
                     }
-                    Toast.makeText(context, "加载文件夹失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("加载文件夹失败: ${e.message}")
                 }
             )
         }
@@ -583,11 +595,11 @@ class WebDavBrowserViewModel @Inject constructor(
             )
             result.fold(
                 onSuccess = {
-                    Toast.makeText(context, "文件夹创建成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("文件夹创建成功")
                     loadFoldersForPicker(parentPath)
                 },
                 onFailure = { e ->
-                    Toast.makeText(context, "创建失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("创建失败: ${e.message}")
                     _stateFlow.update { it.copy(pickerIsLoading = false) }
                 }
             )
@@ -610,14 +622,14 @@ class WebDavBrowserViewModel @Inject constructor(
             )
             result.fold(
                 onSuccess = {
-                    Toast.makeText(context, "移动成功", Toast.LENGTH_SHORT).show()
+                    notifier.success("移动成功")
                     dismissPicker()
                     val current = _navigationStack.value.lastOrNull() ?: return@launch
                     directoryCache.remove(current.path)
                     loadDirectory(current.path)
                 },
                 onFailure = { e ->
-                    Toast.makeText(context, "移动失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    notifier.error("移动失败: ${e.message}")
                 }
             )
         }
@@ -671,14 +683,14 @@ class WebDavBrowserViewModel @Inject constructor(
                                         fileName = event.fileName, progress = 1f,
                                         completedFilePath = event.filePath
                                     )
-                                    Toast.makeText(context, "下载完成: ${event.fileName}", Toast.LENGTH_SHORT).show()
+                                    notifier.success("下载完成: ${event.fileName}")
                                 }
                             }
                             is CloudDownloadRepository.DownloadEvent.Failed -> {
                                 if (event.fileName == item.name) {
                                     _downloadProgress.value = null
                                     if (event.error != "下载已取消") {
-                                        Toast.makeText(context, "下载失败: ${event.error}", Toast.LENGTH_SHORT).show()
+                                        notifier.error("下载失败: ${event.error}")
                                     }
                                 }
                             }
@@ -694,7 +706,7 @@ class WebDavBrowserViewModel @Inject constructor(
                 )
                 eventJob.cancel()
             } catch (e: Exception) {
-                Toast.makeText(context, "下载失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                notifier.error("下载失败: ${e.message}")
                 _downloadProgress.value = null
             }
         }
@@ -708,7 +720,7 @@ class WebDavBrowserViewModel @Inject constructor(
     fun openDownloadedFile(filePath: String) {
         val file = File(filePath)
         if (!file.exists()) {
-            Toast.makeText(context, "文件不存在", Toast.LENGTH_SHORT).show()
+            notifier.info("文件不存在")
             return
         }
         try {
@@ -722,7 +734,7 @@ class WebDavBrowserViewModel @Inject constructor(
             context.startActivity(Intent.createChooser(intent, "分享文件").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: Exception) {
             Log.e("WebDavVM", "分享文件失败", e)
-            Toast.makeText(context, "无法打开文件: ${e.message}", Toast.LENGTH_SHORT).show()
+            notifier.info("无法打开文件: ${e.message}")
         }
     }
 
