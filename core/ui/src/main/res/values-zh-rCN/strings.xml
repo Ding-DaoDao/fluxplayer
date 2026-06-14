@@ -401,4 +401,9 @@
     <string name="backup_ignore_webdav">WebDAV 服务器列表</string>
     <string name="backup_ignore_openlist">OpenList 配置</string>
     <string name="backup_ignore_cloud_creds">云盘凭证信息</string>
+    <string name="backup_ignore_backup_settings">备份设置（WebDAV 配置、路径等）</string>
+    <string name="backup_restore_complete_title">恢复完成</string>
+    <string name="backup_restore_complete_message">设置已恢复成功，建议重启应用使所有设置完全生效</string>
+    <string name="backup_restart_app">重启应用</string>
+
 </resources>

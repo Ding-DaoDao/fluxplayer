@@ -70,6 +70,7 @@ private sealed interface BackupDialog {
     data object RestoreIgnore : BackupDialog
     data object RestoreSource : BackupDialog
     data object RemoteFiles : BackupDialog
+    data object RestoreComplete : BackupDialog
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -85,6 +86,13 @@ fun BackupScreen(
 
     // 对话框状态
     var dialog by remember { mutableStateOf<BackupDialog?>(null) }
+
+    // 恢复完成时自动弹出对话框
+    LaunchedEffect(uiState.restoreCompleted) {
+        if (uiState.restoreCompleted) {
+            dialog = BackupDialog.RestoreComplete
+        }
+    }
 
     // 输入框临时状态
     var editUsername by remember(config.username) { mutableStateOf(config.username) }
@@ -110,153 +118,158 @@ fun BackupScreen(
     LaunchedEffect(uiState.errorMessage) {
         uiState.errorMessage?.let { snackbarHostState.showSnackbar(it); viewModel.clearMessages() }
     }
-
     FluxSettingsScaffold(
         title = stringResource(R.string.backup_and_restore),
         onNavigateUp = onNavigateUp,
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(innerPadding),
+            ) {
+                // ============ WebDAV 设置 ============
+                ListSectionTitle(text = stringResource(R.string.backup_webdav_settings))
+                Column(
+                    Modifier.padding(horizontal = 12.dp),
+                ) {
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.backup_webdav_url),
+                        description = config.url.ifBlank { stringResource(R.string.backup_not_set) },
+                        onClick = {
+                            editUsername = config.username; editPassword = config.password
+                            editSubfolder = config.subfolder; dialog = BackupDialog.Account
+                        },
+                        isFirstItem = true,
+                    )
+                    HorizontalDivider()
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.backup_webdav_account),
+                        description = config.username.ifBlank { stringResource(R.string.backup_webdav_account_hint) },
+                        onClick = {
+                            editUsername = config.username; editPassword = config.password
+                            editSubfolder = config.subfolder; dialog = BackupDialog.Account
+                        },
+                    )
+                    HorizontalDivider()
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.backup_subfolder),
+                        description = config.subfolder.ifBlank { "/" },
+                        onClick = {
+                            editSubfolder = config.subfolder; dialog = BackupDialog.Account
+                        },
+                    )
+                    HorizontalDivider()
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.backup_device_name),
+                        description = config.deviceName.ifBlank { stringResource(R.string.backup_not_set) },
+                        onClick = {
+                            editDeviceName = config.deviceName; dialog = BackupDialog.DeviceName
+                        },
+                    )
+                    HorizontalDivider()
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.backup_test_webdav),
+                        description = when {
+                            uiState.connectionTesting -> stringResource(R.string.backup_testing)
+                            uiState.connectionSuccess == true -> stringResource(R.string.backup_connection_success)
+                            uiState.connectionSuccess == false -> stringResource(R.string.backup_connection_failed)
+                            else -> stringResource(R.string.backup_test_webdav_desc)
+                        },
+                        onClick = { viewModel.testConnection() },
+                    )
+                    HorizontalDivider()
+                    PreferenceSwitch(
+                        title = stringResource(R.string.backup_auto_check),
+                        description = stringResource(R.string.backup_auto_check_desc),
+                        isChecked = config.autoCheckNewBackup,
+                        onClick = {
+                            viewModel.updateConfigField { it.copy(autoCheckNewBackup = !it.autoCheckNewBackup) }
+                        },
+                    )
+                    HorizontalDivider()
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.backup_auto_sync),
+                        description = when (config.autoBackupSyncMode) {
+                            "both" -> stringResource(R.string.backup_sync_both)
+                            "local" -> stringResource(R.string.backup_sync_local)
+                            "remote" -> stringResource(R.string.backup_sync_remote)
+                            else -> config.autoBackupSyncMode
+                        },
+                        onClick = { dialog = BackupDialog.SyncMode },
+                        isLastItem = true,
+                    )
+                }
+
+                // ============ 备份与恢复 ============
+                Spacer(Modifier.padding(top = 8.dp))
+                ListSectionTitle(text = stringResource(R.string.backup_and_restore))
+                Column(
+                    Modifier.padding(horizontal = 12.dp),
+                ) {
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.backup_path),
+                        description = config.backupPath.ifBlank { stringResource(R.string.backup_not_set) },
+                        onClick = {
+                            editBackupPath = config.backupPath; dialog = BackupDialog.BackupPath
+                        },
+                        isFirstItem = true,
+                    )
+                    HorizontalDivider()
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.backup_action),
+                        description = stringResource(R.string.backup_action_desc),
+                        onClick = { viewModel.performFullBackup() },
+                    )
+                    HorizontalDivider()
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.backup_upload_to_cloud),
+                        description = stringResource(R.string.backup_upload_to_cloud_desc),
+                        onClick = { viewModel.uploadToCloud() },
+                    )
+                    HorizontalDivider()
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.restore_backup),
+                        description = stringResource(R.string.restore_backup_desc),
+                        onClick = { dialog = BackupDialog.RestoreSource },
+                    )
+                    HorizontalDivider()
+                    ClickablePreferenceItem(
+                        title = stringResource(R.string.backup_restore_ignore),
+                        description = config.restoreIgnoreList
+                            .ifEmpty { listOf(stringResource(R.string.backup_none)) }
+                            .joinToString(", "),
+                        onClick = {
+                            ignoreListState = config.restoreIgnoreList.toSet()
+                            dialog = BackupDialog.RestoreIgnore
+                        },
+                    )
+                    HorizontalDivider()
+                    PreferenceSwitch(
+                        title = stringResource(R.string.backup_keep_latest),
+                        description = stringResource(R.string.backup_keep_latest_desc),
+                        isChecked = config.keepOnlyLatestBackup,
+                        onClick = {
+                            viewModel.updateConfigField { it.copy(keepOnlyLatestBackup = !it.keepOnlyLatestBackup) }
+                        },
+                        isLastItem = true,
+                    )
+                }
+                Spacer(Modifier.padding(bottom = 32.dp))
+            }
+
             if (uiState.isLoading) {
-                Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                    contentAlignment = Alignment.Center,
+                ) {
                     CircularProgressIndicator()
                 }
-            } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(innerPadding),
-                ) {
-                    // ============ WebDAV 设置 ============
-                    ListSectionTitle(text = stringResource(R.string.backup_webdav_settings))
-                    Column(
-                        Modifier.padding(horizontal = 12.dp),
-                    ) {
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.backup_webdav_url),
-                            description = config.url.ifBlank { stringResource(R.string.backup_not_set) },
-                            onClick = {
-                                editUsername = config.username; editPassword = config.password
-                                editSubfolder = config.subfolder; dialog = BackupDialog.Account
-                            },
-                            isFirstItem = true,
-                        )
-                        HorizontalDivider()
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.backup_webdav_account),
-                            description = config.username.ifBlank { stringResource(R.string.backup_webdav_account_hint) },
-                            onClick = {
-                                editUsername = config.username; editPassword = config.password
-                                editSubfolder = config.subfolder; dialog = BackupDialog.Account
-                            },
-                        )
-                        HorizontalDivider()
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.backup_subfolder),
-                            description = config.subfolder.ifBlank { "/" },
-                            onClick = {
-                                editSubfolder = config.subfolder; dialog = BackupDialog.Account
-                            },
-                        )
-                        HorizontalDivider()
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.backup_device_name),
-                            description = config.deviceName.ifBlank { stringResource(R.string.backup_not_set) },
-                            onClick = {
-                                editDeviceName = config.deviceName; dialog = BackupDialog.DeviceName
-                            },
-                        )
-                        HorizontalDivider()
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.backup_test_webdav),
-                            description = when {
-                                uiState.connectionTesting -> stringResource(R.string.backup_testing)
-                                uiState.connectionSuccess == true -> stringResource(R.string.backup_connection_success)
-                                uiState.connectionSuccess == false -> stringResource(R.string.backup_connection_failed)
-                                else -> stringResource(R.string.backup_test_webdav_desc)
-                            },
-                            onClick = { viewModel.testConnection() },
-                        )
-                        HorizontalDivider()
-                        PreferenceSwitch(
-                            title = stringResource(R.string.backup_auto_check),
-                            description = stringResource(R.string.backup_auto_check_desc),
-                            isChecked = config.autoCheckNewBackup,
-                            onClick = {
-                                viewModel.updateConfigField { it.copy(autoCheckNewBackup = !it.autoCheckNewBackup) }
-                            },
-                        )
-                        HorizontalDivider()
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.backup_auto_sync),
-                            description = when (config.autoBackupSyncMode) {
-                                "both" -> stringResource(R.string.backup_sync_both)
-                                "local" -> stringResource(R.string.backup_sync_local)
-                                "remote" -> stringResource(R.string.backup_sync_remote)
-                                else -> config.autoBackupSyncMode
-                            },
-                            onClick = { dialog = BackupDialog.SyncMode },
-                            isLastItem = true,
-                        )
-                    }
-
-                    // ============ 备份与恢复 ============
-                    Spacer(Modifier.padding(top = 8.dp))
-                    ListSectionTitle(text = stringResource(R.string.backup_and_restore))
-                    Column(
-                        Modifier.padding(horizontal = 12.dp),
-                    ) {
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.backup_path),
-                            description = config.backupPath.ifBlank { stringResource(R.string.backup_not_set) },
-                            onClick = {
-                                editBackupPath = config.backupPath; dialog = BackupDialog.BackupPath
-                            },
-                            isFirstItem = true,
-                        )
-                        HorizontalDivider()
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.backup_action),
-                            description = stringResource(R.string.backup_action_desc),
-                            onClick = { viewModel.performFullBackup() },
-                        )
-                        HorizontalDivider()
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.backup_upload_to_cloud),
-                            description = stringResource(R.string.backup_upload_to_cloud_desc),
-                            onClick = { viewModel.uploadToCloud() },
-                        )
-                        HorizontalDivider()
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.restore_backup),
-                            description = stringResource(R.string.restore_backup_desc),
-                            onClick = { dialog = BackupDialog.RestoreSource },
-                        )
-                        HorizontalDivider()
-                        ClickablePreferenceItem(
-                            title = stringResource(R.string.backup_restore_ignore),
-                            description = config.restoreIgnoreList
-                                .ifEmpty { listOf(stringResource(R.string.backup_none)) }
-                                .joinToString(", "),
-                            onClick = {
-                                ignoreListState = config.restoreIgnoreList.toSet()
-                                dialog = BackupDialog.RestoreIgnore
-                            },
-                        )
-                        HorizontalDivider()
-                        PreferenceSwitch(
-                            title = stringResource(R.string.backup_keep_latest),
-                            description = stringResource(R.string.backup_keep_latest_desc),
-                            isChecked = config.keepOnlyLatestBackup,
-                            onClick = {
-                                viewModel.updateConfigField { it.copy(keepOnlyLatestBackup = !it.keepOnlyLatestBackup) }
-                            },
-                            isLastItem = true,
-                        )
-                    }
-                    Spacer(Modifier.padding(bottom = 32.dp))
-                }
             }
+
             SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
         }
     }
@@ -382,6 +395,18 @@ fun BackupScreen(
             onDismiss = { dialog = null },
         )
 
+        BackupDialog.RestoreComplete -> RestoreCompleteDialog(
+            onRestart = {
+                dialog = null
+                viewModel.clearRestoreCompleted()
+                viewModel.restartApp()
+            },
+            onDismiss = {
+                dialog = null
+                viewModel.clearRestoreCompleted()
+            },
+        )
+
         null -> { /* 无对话框 */ }
     }
 }
@@ -487,6 +512,7 @@ private fun RestoreIgnoreDialog(
                 "webdav_servers" to stringResource(R.string.backup_ignore_webdav),
                 "openlist_config" to stringResource(R.string.backup_ignore_openlist),
                 "cloud_credentials" to stringResource(R.string.backup_ignore_cloud_creds),
+                "backup_settings" to stringResource(R.string.backup_ignore_backup_settings),
             )
             Column {
                 options.forEach { (key, label) ->
@@ -585,6 +611,33 @@ private fun RemoteFilesDialog(
         },
         confirmButton = { },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+@Composable
+private fun RestoreCompleteDialog(
+    onRestart: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    NextDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.backup_restore_complete_title)) },
+        content = {
+            Text(
+                stringResource(R.string.backup_restore_complete_message),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onRestart) {
+                Text(stringResource(R.string.backup_restart_app))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
     )
 }
 

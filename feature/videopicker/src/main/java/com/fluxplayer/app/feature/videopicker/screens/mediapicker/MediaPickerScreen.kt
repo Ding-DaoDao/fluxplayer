@@ -531,6 +531,7 @@ internal fun MediaPickerScreen(
             if (selectionManager.isInSelectionMode || selectedTab != 0) return@Scaffold
 
             FloatingActionButtonMenu(
+                modifier = Modifier.padding(bottom = 80.dp),
                 expanded = isFabExpanded,
                 button = {
                     ToggleFloatingActionButton(

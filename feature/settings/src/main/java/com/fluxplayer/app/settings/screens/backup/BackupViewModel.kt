@@ -1,9 +1,12 @@
 package com.fluxplayer.app.settings.screens.backup
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.fluxplayer.app.core.data.backup.BackupManager
 import com.fluxplayer.app.core.data.webdav.WebDavClient
 import com.fluxplayer.app.core.datastore.datasource.BackupWebDavDataSource
@@ -25,6 +28,7 @@ class BackupViewModel @Inject constructor(
     private val backupWebDavDataSource: BackupWebDavDataSource,
     private val webDavClient: WebDavClient,
     private val webDavServersDataSource: WebDavServersDataSource,
+    @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BackupUiState())
@@ -158,9 +162,7 @@ class BackupViewModel @Inject constructor(
                     onSuccess = { backup ->
                         val ignoreList = c.restoreIgnoreList.toSet()
                         backupManager.restoreFromBackup(backup, ignoreList)
-                        _uiState.value = BackupUiState(
-                            successMessage = "从 $path 恢复成功，建议重启应用使设置生效",
-                        )
+                        _uiState.value = _uiState.value.copy(restoreCompleted = true, isLoading = false)
                     },
                     onFailure = { e ->
                         _uiState.value = BackupUiState(errorMessage = "恢复失败: ${e.message}")
@@ -198,9 +200,7 @@ class BackupViewModel @Inject constructor(
                     onSuccess = { backup ->
                         val c = config.first()
                         backupManager.restoreFromBackup(backup, c.restoreIgnoreList.toSet())
-                        _uiState.value = BackupUiState(
-                            successMessage = "恢复成功，建议重启应用使设置生效",
-                        )
+                        _uiState.value = _uiState.value.copy(restoreCompleted = true, isLoading = false)
                     },
                     onFailure = { e ->
                         _uiState.value = BackupUiState(errorMessage = "恢复失败: ${e.message}")
@@ -241,8 +241,7 @@ class BackupViewModel @Inject constructor(
                     val result = backupManager.uploadToCloud(c)
                     result.fold(
                         onSuccess = {
-                            // 上传后验证
-                            _uiState.value = _uiState.value.copy(
+                            _uiState.value = BackupUiState(
                                 successMessage = "本地与 WebDAV 备份完成",
                             )
                         },
@@ -328,6 +327,19 @@ class BackupViewModel @Inject constructor(
             connectionTesting = false,
         )
     }
+
+    fun clearRestoreCompleted() {
+        _uiState.value = _uiState.value.copy(restoreCompleted = false)
+    }
+
+    /** 重启应用 */
+    fun restartApp() {
+        val intent = appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)
+        val componentName = intent?.component
+        val restartIntent = Intent.makeRestartActivityTask(componentName)
+        appContext.startActivity(restartIntent)
+        Runtime.getRuntime().exit(0)
+    }
 }
 
 data class BackupUiState(
@@ -339,4 +351,5 @@ data class BackupUiState(
     val connectionTesting: Boolean = false,
     val connectionSuccess: Boolean? = null,
     val connectionMessage: String? = null,
+    val restoreCompleted: Boolean = false,
 )

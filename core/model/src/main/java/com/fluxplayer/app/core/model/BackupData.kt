@@ -19,6 +19,7 @@ data class BackupData(
     val pan123Config: Pan123BackupConfig? = null,
     val quarkConfig: QuarkBackupConfig? = null,
     val yun139Config: Yun139BackupConfig? = null,
+    val backupWebDavConfig: BackupWebDavConfig? = null,
 ) {
     companion object {
         const val CURRENT_VERSION = 2

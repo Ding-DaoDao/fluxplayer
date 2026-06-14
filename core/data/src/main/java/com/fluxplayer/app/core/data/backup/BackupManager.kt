@@ -8,6 +8,7 @@ import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.data.repository.WebDavRepository
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
+import com.fluxplayer.app.core.datastore.datasource.BackupWebDavDataSource
 import com.fluxplayer.app.core.datastore.datasource.WebDavServersDataSource
 import com.fluxplayer.app.core.model.AlipanBackupConfig
 import com.fluxplayer.app.core.model.BackupData
@@ -37,6 +38,7 @@ class BackupManager @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
     private val webDavRepository: WebDavRepository,
     private val webDavServersDataSource: WebDavServersDataSource,
+    private val backupWebDavDataSource: BackupWebDavDataSource,
     @ApplicationContext private val context: Context,
 ) {
     private val json = Json {
@@ -50,6 +52,7 @@ class BackupManager @Inject constructor(
         val playerPrefs = preferencesRepository.playerPreferences.value
         val webDavServers = webDavServersDataSource.webDavServers.first()
         val openListConfig = readOpenListConfig()
+        val backupConfig = backupWebDavDataSource.config.first()
 
         return BackupData(
             appPreferences = appPrefs,
@@ -61,6 +64,7 @@ class BackupManager @Inject constructor(
             pan123Config = readPan123Config(),
             quarkConfig = readQuarkConfig(),
             yun139Config = readYun139Config(),
+            backupWebDavConfig = backupConfig,
         )
     }
 
@@ -93,6 +97,13 @@ class BackupManager @Inject constructor(
             backup.pan123Config?.let { restorePan123Config(it) }
             backup.quarkConfig?.let { restoreQuarkConfig(it) }
             backup.yun139Config?.let { restoreYun139Config(it) }
+        }
+
+        // 5. 恢复备份设置（WebDAV 配置、路径等）
+        if ("backup_settings" !in ignoreList) {
+            backup.backupWebDavConfig?.let { config ->
+                backupWebDavDataSource.update { config }
+            }
         }
     }
 

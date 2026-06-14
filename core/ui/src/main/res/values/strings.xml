@@ -411,4 +411,9 @@
     <string name="backup_ignore_webdav">WebDAV servers</string>
     <string name="backup_ignore_openlist">OpenList config</string>
     <string name="backup_ignore_cloud_creds">Cloud credentials</string>
+    <string name="backup_ignore_backup_settings">Backup settings (WebDAV config, path, etc.)</string>
+    <string name="backup_restore_complete_title">Restore Complete</string>
+    <string name="backup_restore_complete_message">Settings have been restored. It is recommended to restart the app for all settings to take full effect.</string>
+    <string name="backup_restart_app">Restart App</string>
+
 </resources>
