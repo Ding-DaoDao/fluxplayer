@@ -1,5 +1,6 @@
 package com.fluxplayer.app.feature.player.ui.controls
 
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -95,28 +97,33 @@ fun ControlsTopView(
                     contentDescription = null,
                 )
             }
-            // 弹幕搜索/本地文件按钮（始终可见）
+            // 弹幕搜索/本地文件按钮（始终可见，图标同 mpv 的弹幕设置按钮）
             PlayerButton(onClick = onDanmakuSearchClick) {
                 Icon(
-                    painter = painterResource(R.drawable.ic_search),
+                    painter = painterResource(R.drawable.comment_note_24_filled),
                     contentDescription = null,
                 )
             }
-            // 弹幕开关按钮（仅在有数据时可用）
-            if (danmakuHasData) {
-                PlayerButton(onClick = onDanmakuToggleClick) {
-                    Icon(
-                        painter = painterResource(
-                            if (danmakuEnabled) R.drawable.ic_danmaku
-                            else R.drawable.ic_danmaku_off
-                        ),
-                        contentDescription = null,
-                    )
+            // 弹幕开关按钮（始终可见，图标同 mpv 的弹幕开关按钮）
+            val context = LocalContext.current
+            PlayerButton(onClick = {
+                if (danmakuHasData) {
+                    onDanmakuToggleClick()
+                } else {
+                    Toast.makeText(context, "请先选择弹幕文件", Toast.LENGTH_SHORT).show()
                 }
+            }) {
+                Icon(
+                    painter = painterResource(
+                        if (danmakuEnabled && danmakuHasData) R.drawable.ic_danmaku_visible
+                        else R.drawable.ic_danmaku_hidden
+                    ),
+                    contentDescription = null,
+                )
             }
             PlayerButton(onClick = onDanmakuSettingsClick) {
                 Icon(
-                    painter = painterResource(R.drawable.ic_settings),
+                    painter = painterResource(R.drawable.ic_danmaku_settings),
                     contentDescription = null,
                 )
             }

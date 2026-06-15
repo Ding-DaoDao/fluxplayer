@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 弹幕设置图标 - 聊天气泡 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M14,1a2,2 0,0 0,-2 2v6a2,2 0,0 0,2 2h7a2,2 0,0 0,2 -2L23,3a2,2 0,0 0,-2 -2zM14,4.5a0.5,0.5 0,0 1,0.5 -0.5h6a0.5,0.5 0,0 1,0 1h-6a0.5,0.5 0,0 1,-0.5 -0.5m0,3a0.5,0.5 0,0 1,0.5 -0.5h6a0.5,0.5 0,0 1,0 1h-6a0.5,0.5 0,0 1,-0.5 -0.5M5.25,3L11,3v6a3,3 0,0 0,3 3h7c0.35,0 0.687,-0.06 1,-0.17v2.92A3.25,3.25 0,0 1,18.75 18L13,18l-5,3.75c-0.824,0.618 -2,0.03 -2,-1L6,18h-0.75A3.25,3.25 0,0 1,2 14.75v-8.5A3.25,3.25 0,0 1,5.25 3"
+        android:fillColor="#FFFFFFFF"/>
+</vector>
