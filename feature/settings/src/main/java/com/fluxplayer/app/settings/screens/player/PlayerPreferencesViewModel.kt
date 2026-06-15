@@ -65,6 +65,7 @@ class PlayerPreferencesViewModel @Inject constructor(
             PlayerPreferencesUiEvent.ToggleUseDynamicLongPressSpeed -> toggleUseDynamicLongPressSpeed()
             is PlayerPreferencesUiEvent.UpdateDynamicLongPressMultiplier -> updateDynamicLongPressMultiplier(event.value)
             is PlayerPreferencesUiEvent.UpdateLongPressControlsSpeed -> updateLongPressControlsSpeed(event.value)
+            is PlayerPreferencesUiEvent.UpdateSpeedPresets -> updateSpeedPresets(event.presets)
         }
     }
 
@@ -229,6 +230,14 @@ class PlayerPreferencesViewModel @Inject constructor(
             }
         }
     }
+
+    fun updateSpeedPresets(presets: List<Float>) {
+        viewModelScope.launch {
+            preferencesRepository.updatePlayerPreferences {
+                it.copy(speedPresets = presets.sorted())
+            }
+        }
+    }
 }
 
 @Stable
@@ -247,6 +256,7 @@ sealed interface PlayerPreferenceDialog {
     data object CacheMaxSizeDialog : PlayerPreferenceDialog
     data object ClearCacheConfirmDialog : PlayerPreferenceDialog
     data object DynamicLongPressMultiplierDialog : PlayerPreferenceDialog
+    data object SpeedPresetsDialog : PlayerPreferenceDialog
 }
 
 sealed interface PlayerPreferencesUiEvent {
@@ -270,4 +280,5 @@ sealed interface PlayerPreferencesUiEvent {
     data object ToggleUseDynamicLongPressSpeed : PlayerPreferencesUiEvent
     data class UpdateDynamicLongPressMultiplier(val value: Float) : PlayerPreferencesUiEvent
     data class UpdateLongPressControlsSpeed(val value: Float) : PlayerPreferencesUiEvent
+    data class UpdateSpeedPresets(val presets: List<Float>) : PlayerPreferencesUiEvent
 }

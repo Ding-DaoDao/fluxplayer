@@ -1,8 +1,8 @@
 package com.fluxplayer.app.core.model
 
-import kotlinx.serialization.Serializable
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import kotlinx.serialization.Serializable
 
 /**
  * 备份专用的 WebDAV 服务器配置（独立于浏览用 WebDAV 列表）。

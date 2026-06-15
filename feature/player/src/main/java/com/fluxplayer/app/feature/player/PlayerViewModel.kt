@@ -589,6 +589,12 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    fun updateSpeedPresets(presets: List<Float>) {
+        viewModelScope.launch {
+            preferencesRepository.updatePlayerPreferences { it.copy(speedPresets = presets) }
+        }
+    }
+
     fun updateVideoContentScale(contentScale: VideoContentScale) {
         viewModelScope.launch {
             preferencesRepository.updatePlayerPreferences { it.copy(playerVideoZoom = contentScale) }

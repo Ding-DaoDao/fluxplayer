@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.model.ComposeEngine
+import com.fluxplayer.app.core.model.StartupPage
 import com.fluxplayer.app.core.model.ThemeConfig
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
@@ -154,6 +155,39 @@ private fun AppearancePreferencesContent(
                     icon = NextIcons.Appearance,
                     enabled = true,
                     onClick = { onEvent(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.ComposeEngine)) },
+                    isLastItem = false
+                )
+                HorizontalDivider()
+                PreferenceItem(
+                    title = stringResource(R.string.startup_page),
+                    description = uiState.preferences.startupPage.name(),
+                    icon = NextIcons.Appearance,
+                    enabled = true,
+                    onClick = { onEvent(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.StartupPage)) },
+                    isLastItem = false
+                )
+                HorizontalDivider()
+                PreferenceSwitch(
+                    title = stringResource(R.string.show_videos_tab),
+                    icon = NextIcons.Appearance,
+                    isChecked = uiState.preferences.showVideosTab,
+                    onClick = { onEvent(AppearancePreferencesEvent.ToggleShowVideosTab) },
+                    isLastItem = false
+                )
+                HorizontalDivider()
+                PreferenceSwitch(
+                    title = stringResource(R.string.show_browse_tab),
+                    icon = NextIcons.Appearance,
+                    isChecked = uiState.preferences.showBrowseTab,
+                    onClick = { onEvent(AppearancePreferencesEvent.ToggleShowBrowseTab) },
+                    isLastItem = false
+                )
+                HorizontalDivider()
+                PreferenceSwitch(
+                    title = stringResource(R.string.show_history_tab),
+                    icon = NextIcons.Appearance,
+                    isChecked = uiState.preferences.showHistoryTab,
+                    onClick = { onEvent(AppearancePreferencesEvent.ToggleShowHistoryTab) },
                     isLastItem = true
                 )
             }
@@ -276,6 +310,23 @@ private fun AppearancePreferencesContent(
                                 selected = (it == uiState.preferences.composeEngine),
                                 onClick = {
                                     onEvent(AppearancePreferencesEvent.UpdateComposeEngine(it))
+                                    onEvent(AppearancePreferencesEvent.ShowDialog(null))
+                                },
+                            )
+                        }
+                    }
+                }
+                AppearancePreferenceDialog.StartupPage -> {
+                    OptionsDialog(
+                        text = stringResource(id = R.string.startup_page),
+                        onDismissClick = { onEvent(AppearancePreferencesEvent.ShowDialog(null)) },
+                    ) {
+                        items(StartupPage.entries.toTypedArray()) {
+                            RadioTextButton(
+                                text = it.name(),
+                                selected = (it == uiState.preferences.startupPage),
+                                onClick = {
+                                    onEvent(AppearancePreferencesEvent.UpdateStartupPage(it))
                                     onEvent(AppearancePreferencesEvent.ShowDialog(null))
                                 },
                             )

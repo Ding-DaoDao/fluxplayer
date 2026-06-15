@@ -61,6 +61,14 @@
     <string name="compose_engine_description">切换 Material 3 或 Miuix 视觉风格</string>
     <string name="compose_engine_material">Material 3</string>
     <string name="compose_engine_miuix">Miuix</string>
+    <string name="tab_and_startup">底栏与启动页</string>
+    <string name="show_videos_tab">显示视频标签页</string>
+    <string name="show_browse_tab">显示浏览标签页</string>
+    <string name="show_history_tab">显示历史标签页</string>
+    <string name="startup_page">默认启动页</string>
+    <string name="startup_page_videos">视频</string>
+    <string name="startup_page_browse">浏览</string>
+    <string name="startup_page_history">历史</string>
     <string name="blur_effect">模糊效果</string>
     <string name="blur_effect_description">顶栏和底栏的毛玻璃效果</string>
     <string name="progressive_blur">渐变模糊</string>

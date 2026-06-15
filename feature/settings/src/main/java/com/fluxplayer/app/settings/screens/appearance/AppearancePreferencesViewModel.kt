@@ -7,6 +7,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.ComposeEngine
+import com.fluxplayer.app.core.model.StartupPage
 import com.fluxplayer.app.core.model.ThemeConfig
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,6 +55,10 @@ class AppearancePreferencesViewModel @Inject constructor(
             is AppearancePreferencesEvent.UpdateTopBarOpacity -> updateTopBarOpacity(event.value)
             is AppearancePreferencesEvent.UpdateBottomBarOpacity -> updateBottomBarOpacity(event.value)
             is AppearancePreferencesEvent.UpdateContainerOpacity -> updateContainerOpacity(event.value)
+            AppearancePreferencesEvent.ToggleShowVideosTab -> toggleShowVideosTab()
+            AppearancePreferencesEvent.ToggleShowBrowseTab -> toggleShowBrowseTab()
+            AppearancePreferencesEvent.ToggleShowHistoryTab -> toggleShowHistoryTab()
+            is AppearancePreferencesEvent.UpdateStartupPage -> updateStartupPage(event.startupPage)
         }
     }
 
@@ -203,6 +208,38 @@ class AppearancePreferencesViewModel @Inject constructor(
             }
         }
     }
+
+    private fun toggleShowVideosTab() {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(showVideosTab = !it.showVideosTab)
+            }
+        }
+    }
+
+    private fun toggleShowBrowseTab() {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(showBrowseTab = !it.showBrowseTab)
+            }
+        }
+    }
+
+    private fun toggleShowHistoryTab() {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(showHistoryTab = !it.showHistoryTab)
+            }
+        }
+    }
+
+    private fun updateStartupPage(startupPage: StartupPage) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(startupPage = startupPage)
+            }
+        }
+    }
 }
 
 @Stable
@@ -230,9 +267,14 @@ sealed interface AppearancePreferencesEvent {
     data class UpdateTopBarOpacity(val value: Int) : AppearancePreferencesEvent
     data class UpdateBottomBarOpacity(val value: Int) : AppearancePreferencesEvent
     data class UpdateContainerOpacity(val value: Int) : AppearancePreferencesEvent
+    data object ToggleShowVideosTab : AppearancePreferencesEvent
+    data object ToggleShowBrowseTab : AppearancePreferencesEvent
+    data object ToggleShowHistoryTab : AppearancePreferencesEvent
+    data class UpdateStartupPage(val startupPage: StartupPage) : AppearancePreferencesEvent
 }
 
 sealed interface AppearancePreferenceDialog {
     data object Theme : AppearancePreferenceDialog
     data object ComposeEngine : AppearancePreferenceDialog
+    data object StartupPage : AppearancePreferenceDialog
 }

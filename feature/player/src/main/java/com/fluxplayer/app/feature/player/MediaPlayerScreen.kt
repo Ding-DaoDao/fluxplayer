@@ -12,6 +12,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -108,6 +110,9 @@ import com.fluxplayer.app.feature.player.ui.SubtitleConfiguration
 import com.fluxplayer.app.feature.player.ui.VerticalProgressView
 import com.fluxplayer.app.feature.player.ui.controls.ControlsBottomView
 import com.fluxplayer.app.feature.player.ui.controls.ControlsTopView
+import com.fluxplayer.app.feature.player.ui.controls.CustomSpeedDialog
+import com.fluxplayer.app.feature.player.ui.controls.SpeedBar
+import com.fluxplayer.app.feature.player.ui.controls.speedMarkFraction
 import java.io.File
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -390,6 +395,16 @@ fun MediaPlayerScreen(
 
     var overlayView by remember { mutableStateOf<OverlayView?>(null) }
 
+    // 倍速横条显隐
+    var showSpeedBar by remember { mutableStateOf(false) }
+    // 自定义倍速弹窗
+    var showCustomSpeedDialog by remember { mutableStateOf(false) }
+
+    // 同步 controls 自动隐藏状态：显示倍速相关组件时保持 controls 显示
+    LaunchedEffect(showSpeedBar, showCustomSpeedDialog) {
+        controlsVisibilityState.suppressAutoHide = showSpeedBar || showCustomSpeedDialog
+    }
+
     val danmakuSources by viewModel.danmakuSources.collectAsStateWithLifecycle(emptyList())
     val danmakuDownloadState by viewModel.danmakuDownloadState.collectAsStateWithLifecycle(DanmakuDownloadState.Idle)
     val danmakuSearchViewMode by viewModel.danmakuSearchViewMode.collectAsStateWithLifecycle()
@@ -607,7 +622,8 @@ fun MediaPlayerScreen(
                                 val outroLabel = if (timestamps.outroMs < 0) "片尾"
                                     else "片尾 ${timestamps.outroMs.milliseconds.formatted()}"
 
-                                Column {
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    Column {
                                     ControlsBottomView(
                                         player = player,
                                         mediaPresentationState = mediaPresentationState,
@@ -706,18 +722,40 @@ fun MediaPlayerScreen(
                                         onOutroClick = { introOutroState.setOutro(INTRO_OUTRO_KEY, player.currentPosition) },
                                         onOutroLongClick = { introOutroState.setOutro(INTRO_OUTRO_KEY, -1L) },
                                         currentSpeed = currentSpeed,
-                                        onSpeedSelected = { speed ->
-                                            player.setPlaybackSpeed(speed)
+                                        onSpeedBarToggle = {
+                                            showSpeedBar = !showSpeedBar
+                                            controlsVisibilityState.suppressAutoHide = showSpeedBar
+                                            controlsVisibilityState.showControls()
                                         },
-                                        onSpeedMenuOpenChanged = { isOpen ->
-                                            if (isOpen) {
-                                                controlsVisibilityState.suppressAutoHide = true
-                                                controlsVisibilityState.showControls()
-                                            } else {
-                                                controlsVisibilityState.suppressAutoHide = false
-                                            }
-                                        },
+                                        speedMarkFraction = if (showSpeedBar) speedMarkFraction(currentSpeed, playerPreferences.speedPresets) else null,
                                     )
+                                    }
+
+                                    // 倍速横条：底部居中显示
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .padding(bottom = 84.dp),
+                                    ) {
+                                        // SpeedBar：倍速快捷选择条
+                                        AnimatedVisibility(
+                                            visible = showSpeedBar,
+                                            enter = fadeIn(),
+                                            exit = fadeOut(),
+                                        ) {
+                                            SpeedBar(
+                                                currentSpeed = currentSpeed,
+                                                presets = playerPreferences.speedPresets,
+                                                onSpeedSelected = { speed ->
+                                                    player.setPlaybackSpeed(speed)
+                                                },
+                                                onCustomClick = {
+                                                    showSpeedBar = false
+                                                    showCustomSpeedDialog = true
+                                                },
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         },
@@ -756,6 +794,41 @@ fun MediaPlayerScreen(
                             icon = painterResource(coreUiR.drawable.ic_brightness),
                         )
                     }
+                }
+            }
+
+            // 自定义倍速调节条：全屏透明遮罩 + 底部居中显示
+            AnimatedVisibility(
+                visible = showCustomSpeedDialog,
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {
+                                showCustomSpeedDialog = false
+                                showSpeedBar = true
+                            },
+                        ),
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    CustomSpeedDialog(
+                        currentSpeed = currentSpeed,
+                        onSpeedChanged = { speed ->
+                            player.setPlaybackSpeed(speed)
+                        },
+                        modifier = Modifier
+                            .padding(bottom = 84.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { },
+                            ),
+                    )
                 }
             }
 

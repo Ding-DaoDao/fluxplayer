@@ -1,10 +1,15 @@
 package com.fluxplayer.app.settings.screens.player
 
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -12,7 +17,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,8 +29,10 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -54,6 +63,8 @@ import com.fluxplayer.app.core.ui.preview.DayNightPreview
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
 import com.fluxplayer.app.settings.composables.OptionsDialog
 import com.fluxplayer.app.settings.extensions.name
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 fun PlayerPreferencesScreen(
@@ -162,6 +173,15 @@ private fun PlayerPreferencesContent(
                                 contentDescription = stringResource(id = R.string.reset_long_press_speed),
                             )
                         }
+                    },
+                )
+                HorizontalDivider()
+                ClickablePreferenceItem(
+                    title = "倍速预设",
+                    description = uiState.preferences.speedPresets.joinToString(", ") { "${it}x" },
+                    icon = NextIcons.Speed,
+                    onClick = {
+                        onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.SpeedPresetsDialog))
                     },
                 )
                 HorizontalDivider()
@@ -472,6 +492,18 @@ private fun PlayerPreferencesContent(
                         }
                     }
                 }
+
+                PlayerPreferenceDialog.SpeedPresetsDialog -> {
+                    SpeedPresetsDialog(
+                        currentPresets = uiState.preferences.speedPresets,
+                        onUpdatePresets = { presets ->
+                            onEvent(PlayerPreferencesUiEvent.UpdateSpeedPresets(presets))
+                        },
+                        onDismiss = {
+                            onEvent(PlayerPreferencesUiEvent.ShowDialog(null))
+                        },
+                    )
+                }
             }
         }
     }
@@ -488,6 +520,141 @@ private fun PlayerPreferencesScreenPreview() {
     }
 }
 
+@Composable
+fun SpeedPresetsDialog(
+    currentPresets: List<Float>,
+    onUpdatePresets: (List<Float>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var presets by remember(currentPresets) { mutableStateOf(currentPresets.sorted()) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var newSpeedText by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
+
+    val defaultPresets = listOf(0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f)
+
+    if (showAddDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showAddDialog = false
+                newSpeedText = ""
+                errorMessage = ""
+            },
+            title = { Text(text = "添加倍速") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = newSpeedText,
+                        onValueChange = {
+                            newSpeedText = it
+                            errorMessage = ""
+                        },
+                        label = { Text("倍速值 (0.1-10.0)") },
+                        singleLine = true,
+                        isError = errorMessage.isNotEmpty(),
+                    )
+                    if (errorMessage.isNotEmpty()) {
+                        Text(
+                            text = errorMessage,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val speed = newSpeedText.toFloatOrNull()
+                        when {
+                            speed == null -> errorMessage = "请输入有效的数字"
+                            speed < 0.1f || speed > 10.0f -> errorMessage = "倍速范围: 0.1-10.0"
+                            presets.any { abs(it - speed) < 0.001f } -> errorMessage = "该倍速已存在"
+                            else -> {
+                                presets = (presets + speed).sorted()
+                                showAddDialog = false
+                                newSpeedText = ""
+                                errorMessage = ""
+                            }
+                        }
+                    },
+                ) { Text("添加") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showAddDialog = false
+                        newSpeedText = ""
+                        errorMessage = ""
+                    },
+                ) { Text("取消") }
+            },
+        )
+    }
+
+    NextDialogWithDoneAndCancelButtons(
+        title = "倍速预设",
+        onDoneClick = {
+            onUpdatePresets(presets)
+            onDismiss()
+        },
+        onDismissClick = onDismiss,
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 当前预设列表
+                presets.forEach { speed ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = formatSpeed(speed),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        TextButton(
+                            onClick = {
+                                if (presets.size > 1) {
+                                    presets = presets.filter { abs(it - speed) > 0.001f }
+                                }
+                            },
+                            enabled = presets.size > 1,
+                        ) {
+                            Text(
+                                text = "删除",
+                                color = if (presets.size > 1) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                // 添加按钮
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilledIconButton(onClick = { showAddDialog = true }) {
+                        Icon(painter = painterResource(id = R.drawable.ic_add), contentDescription = "添加倍速")
+                    }
+                    TextButton(
+                        onClick = { presets = defaultPresets.sorted() },
+                    ) {
+                        Icon(imageVector = NextIcons.History, contentDescription = "恢复默认")
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("恢复默认")
+                    }
+                }
+            }
+        },
+    )
+}
+
 private fun formatBytes(bytes: Long): String {
     if (bytes <= 0) return "0 B"
     val units = arrayOf("B", "KB", "MB", "GB", "TB")
@@ -498,4 +665,24 @@ private fun formatBytes(bytes: Long): String {
         bytes / Math.pow(1024.0, digitGroups.toDouble()),
         units[digitGroups],
     )
+}
+
+/**
+ * 格式化速度为显示字符串：整数为 "1x"，非整数为 "1.2x"。
+ */
+private fun formatSpeed(speed: Float): String {
+    val rounded = roundToStep(speed)
+    return if (rounded == rounded.roundToInt().toFloat()) {
+        "${rounded.roundToInt()}x"
+    } else {
+        val s = "%.2f".format(rounded).trimEnd('0').trimEnd('.')
+        "${s}x"
+    }
+}
+
+/**
+ * 把速度四舍五入到 0.05 步长
+ */
+private fun roundToStep(value: Float): Float {
+    return ((value * 20f).roundToInt()) / 20f
 }

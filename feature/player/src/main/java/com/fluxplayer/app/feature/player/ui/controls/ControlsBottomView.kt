@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
@@ -25,19 +27,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,9 +56,9 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.fluxplayer.app.core.model.VideoContentScale
@@ -106,8 +104,8 @@ fun ControlsBottomView(
     onOutroClick: (() -> Unit)? = null,
     onOutroLongClick: (() -> Unit)? = null,
     currentSpeed: Float = 1.0f,
-    onSpeedSelected: (Float) -> Unit = {},
-    onSpeedMenuOpenChanged: (Boolean) -> Unit = {},
+    onSpeedBarToggle: () -> Unit = {},
+    speedMarkFraction: Float? = null,
 ) {
     val systemBarsPadding = WindowInsets.systemBars.union(WindowInsets.displayCutout).asPaddingValues()
     Column(
@@ -154,6 +152,7 @@ fun ControlsBottomView(
             position = mediaPresentationState.position.toFloat(),
             duration = mediaPresentationState.duration.toFloat(),
             bufferedFraction = mediaPresentationState.bufferedFraction,
+            speedMarkFraction = speedMarkFraction,
             onSeek = { onSeek(it.toLong()) },
             onSeekFinished = { onSeekEnd() },
         )
@@ -194,80 +193,27 @@ fun ControlsBottomView(
                     onLongClick = onOutroLongClick,
                 )
             }
-            // 播放速度按钮 — 文字标签样式 + DropdownMenu
-            var showSpeedMenu by remember { mutableStateOf(false) }
-            var showFineTuneDialog by remember { mutableStateOf(false) }
-            val presetSpeeds = listOf(0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f)
-            LaunchedEffect(showSpeedMenu) {
-                onSpeedMenuOpenChanged(showSpeedMenu)
-            }
-            Box {
-                Box(
-                    modifier = Modifier
-                        .defaultMinSize(minHeight = 48.dp)
-                        .noRippleClickable { showSpeedMenu = true }
-                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "x${String.format("%.1f", currentSpeed).trimEnd('0').trimEnd('.')}",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
+            // 播放速度按钮 — 测速表图标 + 角标倍速数字，点击打开倍速横条
+            PlayerButton(
+                onClick = { onSpeedBarToggle() },
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_speed),
+                        contentDescription = null,
+                        tint = Color.White,
                     )
-                }
-                DropdownMenu(
-                    expanded = showSpeedMenu,
-                    onDismissRequest = { showSpeedMenu = false },
-                    modifier = Modifier.background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(8.dp)),
-                ) {
-                    presetSpeeds.forEach { speed ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = "x${String.format("%.1f", speed).trimEnd('0').trimEnd('.')}",
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                            },
-                            onClick = {
-                                showSpeedMenu = false
-                                onSpeedSelected(speed)
-                            },
+                    if (currentSpeed != 1.0f) {
+                        Text(
+                            text = formatSpeed(currentSpeed),
+                            color = Color.White,
+                            fontSize = 7.sp,
+                            modifier = Modifier.offset(y = 13.dp),
                         )
                     }
-                    // 自定义按钮
-                    val isCustomSpeed = currentSpeed !in presetSpeeds
-                    val customLabel = if (isCustomSpeed) {
-                        "自定义|x${String.format("%.1f", currentSpeed).trimEnd('0').trimEnd('.')}"
-                    } else {
-                        "自定义"
-                    }
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = customLabel,
-                                color = Color.White,
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        },
-                        onClick = {
-                            showSpeedMenu = false
-                            showFineTuneDialog = true
-                        },
-                    )
                 }
             }
 
-            // 精细调速弹窗
-            if (showFineTuneDialog) {
-                FineTuneSpeedDialog(
-                    initialSpeed = currentSpeed,
-                    onSpeedChanged = { newSpeed ->
-                        onSpeedSelected(newSpeed)
-                    },
-                    onDismiss = { showFineTuneDialog = false },
-                )
-            }
             Spacer(modifier = Modifier.weight(1f))
             // 清晰度按钮：只有多个可选清晰度时才显示可点击的 DropdownMenu
             if (currentQualityLabel.isNotEmpty()) {
@@ -334,6 +280,7 @@ private fun PlayerSeekbar(
     position: Float,
     duration: Float,
     bufferedFraction: Float = 0f,
+    speedMarkFraction: Float? = null,
     onSeek: (Float) -> Unit,
     onSeekFinished: () -> Unit,
 ) {
@@ -344,6 +291,7 @@ private fun PlayerSeekbar(
                 value = position,
                 valueRange = 0f..duration,
                 bufferedFraction = bufferedFraction,
+                speedMarkFraction = speedMarkFraction,
                 onValueChange = onSeek,
                 onValueChangeFinished = onSeekFinished,
             )
@@ -353,6 +301,7 @@ private fun PlayerSeekbar(
                 value = position,
                 valueRange = 0f..duration,
                 bufferedFraction = bufferedFraction,
+                speedMarkFraction = speedMarkFraction,
                 onValueChange = onSeek,
                 onValueChangeFinished = onSeekFinished,
             )
@@ -367,6 +316,7 @@ private fun MaterialYouSlider(
     value: Float,
     valueRange: ClosedFloatingPointRange<Float>,
     bufferedFraction: Float = 0f,
+    speedMarkFraction: Float? = null,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit
 ) {
@@ -447,6 +397,15 @@ private fun MaterialYouSlider(
                         endCornerRadius = insideCornerRadius,
                     )
                 }
+
+                // 倍速标记点：在进度条对应位置画一个白色圆点
+                if (speedMarkFraction != null) {
+                    drawCircle(
+                        color = Color.White,
+                        radius = 4.dp.toPx(),
+                        center = Offset(size.width * speedMarkFraction, size.height / 2f),
+                    )
+                }
             }
         },
         thumb = {
@@ -491,6 +450,7 @@ private fun SimpleSlider(
     value: Float,
     valueRange: ClosedFloatingPointRange<Float>,
     bufferedFraction: Float = 0f,
+    speedMarkFraction: Float? = null,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit
 ) {
@@ -508,7 +468,7 @@ private fun SimpleSlider(
             )
         },
         track = {
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(12.dp)
@@ -533,6 +493,16 @@ private fun SimpleSlider(
                             .height(12.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(MaterialTheme.colorScheme.primary)
+                    )
+                }
+                // 倍速标记点
+                if (speedMarkFraction != null) {
+                    Box(
+                        modifier = Modifier
+                            .offset(x = (maxWidth * speedMarkFraction) - 4.dp)
+                            .align(Alignment.CenterStart)
+                            .size(8.dp)
+                            .background(Color.White, CircleShape)
                     )
                 }
             }
@@ -566,106 +536,3 @@ private fun IntroOutroButton(
     }
 }
 
-/**
- * 精细调速弹窗：左边-，右边+，中间可编辑速度文本，步长 0.1。
- */
-@Composable
-private fun FineTuneSpeedDialog(
-    initialSpeed: Float,
-    onSpeedChanged: (Float) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var speedText by remember { mutableStateOf(String.format("%.1f", initialSpeed)) }
-    val step = 0.1f
-    val minSpeed = 0.2f
-    val maxSpeed = 5.0f
-
-    fun applySpeed(text: String) {
-        val value = text.toFloatOrNull()
-        if (value != null && value in minSpeed..maxSpeed) {
-            onSpeedChanged(value)
-            speedText = String.format("%.1f", value)
-        } else {
-            // 恢复到当前有效速度
-            speedText = String.format("%.1f", initialSpeed)
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(text = "调速", color = Color.White)
-        },
-        text = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                // 减号按钮
-                PlayerButton(
-                    modifier = Modifier.size(48.dp),
-                    onClick = {
-                        val current = speedText.toFloatOrNull() ?: initialSpeed
-                        val newSpeed = ((current - step) * 10).toInt().coerceAtLeast((minSpeed * 10).toInt()) / 10f
-                        onSpeedChanged(newSpeed)
-                        speedText = String.format("%.1f", newSpeed)
-                    },
-                ) {
-                    Text(text = "-", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // 可编辑速度文本
-                OutlinedTextField(
-                    value = speedText,
-                    onValueChange = { newText ->
-                        // 只允许数字和小数点
-                        val filtered = newText.filter { it.isDigit() || it == '.' }
-                        if (filtered.count { it == '.' } <= 1 && filtered.length <= 4) {
-                            speedText = filtered
-                        }
-                    },
-                    modifier = Modifier.width(80.dp),
-                    textStyle = MaterialTheme.typography.titleLarge.copy(
-                        color = Color.White,
-                        textAlign = TextAlign.Center,
-                    ),
-                    singleLine = true,
-                )
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // 加号按钮
-                PlayerButton(
-                    modifier = Modifier.size(48.dp),
-                    onClick = {
-                        val current = speedText.toFloatOrNull() ?: initialSpeed
-                        val newSpeed = ((current + step) * 10).toInt().coerceAtMost((maxSpeed * 10).toInt()) / 10f
-                        onSpeedChanged(newSpeed)
-                        speedText = String.format("%.1f", newSpeed)
-                    },
-                ) {
-                    Text(text = "+", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    applySpeed(speedText)
-                    onDismiss()
-                },
-            ) {
-                Text(text = "确定", color = Color.White)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(text = "取消", color = Color.White.copy(alpha = 0.7f))
-            }
-        },
-        containerColor = Color.Black.copy(alpha = 0.85f),
-    )
-}

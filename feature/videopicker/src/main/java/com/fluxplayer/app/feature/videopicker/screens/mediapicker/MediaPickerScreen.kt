@@ -118,6 +118,7 @@ import com.fluxplayer.app.core.ui.extensions.copy
 import com.fluxplayer.app.core.ui.preview.DayNightPreview
 import com.fluxplayer.app.core.ui.preview.VideoPickerPreviewParameterProvider
 import com.fluxplayer.app.core.model.ComposeEngine
+import com.fluxplayer.app.core.model.StartupPage
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.core.ui.theme.LocalHazeState
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
@@ -171,7 +172,31 @@ fun MediaPickerRoute(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val activeWebDavServers by viewModel.activeWebDavServers.collectAsStateWithLifecycle()
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+
+    val visibleTabs = remember(uiState.preferences) {
+        buildList {
+            if (uiState.preferences.showVideosTab) add(0)
+            if (uiState.preferences.showBrowseTab) add(1)
+            if (uiState.preferences.showHistoryTab) add(2)
+        }.ifEmpty { listOf(0) }
+    }
+
+    var selectedTab by rememberSaveable {
+        mutableIntStateOf(
+            when (uiState.preferences.startupPage) {
+                StartupPage.VIDEOS -> if (0 in visibleTabs) 0 else visibleTabs.first()
+                StartupPage.BROWSE -> if (1 in visibleTabs) 1 else visibleTabs.first()
+                StartupPage.HISTORY -> if (2 in visibleTabs) 2 else visibleTabs.first()
+            }
+        )
+    }
+
+    // 当设置变更导致当前 Tab 被隐藏时，自动切到第一个可见 Tab
+    LaunchedEffect(visibleTabs) {
+        if (selectedTab !in visibleTabs && visibleTabs.isNotEmpty()) {
+            selectedTab = visibleTabs.first()
+        }
+    }
 
     MediaPickerScreen(
         uiState = uiState,
@@ -190,8 +215,15 @@ fun MediaPickerRoute(
         },
         onSettingsClick = onSettingsClick,
         onSearchClick = onSearchClick,
-        onWebDavClick = { selectedTab = 1 },
+        onWebDavClick = {
+            if (1 in visibleTabs) {
+                selectedTab = 1
+            } else {
+                selectedTab = visibleTabs.first()
+            }
+        },
         onEvent = viewModel::onEvent,
+        visibleTabs = visibleTabs,
     )
 }
 
@@ -210,6 +242,7 @@ internal fun MediaPickerScreen(
     onSearchClick: () -> Unit = {},
     onWebDavClick: () -> Unit = {},
     onEvent: (MediaPickerUiEvent) -> Unit = {},
+    visibleTabs: List<Int> = listOf(0, 1, 2),
 ) {
     val selectionManager = rememberSelectionManager()
     val permissionState = rememberPermissionState(permission = storagePermission)
@@ -491,39 +524,45 @@ internal fun MediaPickerScreen(
                 NavigationBar(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
-                    NavigationBarItem(
-                        selected = selectedTab == 0,
-                        onClick = { onTabSelected(0) },
-                        icon = {
-                            Icon(
-                                imageVector = NextIcons.Video,
-                                contentDescription = null,
-                            )
-                        },
-                        label = { Text(stringResource(R.string.videos)) },
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 1,
-                        onClick = { onTabSelected(1) },
-                        icon = {
-                            Icon(
-                                imageVector = NextIcons.Folder,
-                                contentDescription = null,
-                            )
-                        },
-                        label = { Text(stringResource(R.string.browse)) },
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 2,
-                        onClick = { onTabSelected(2) },
-                        icon = {
-                            Icon(
-                                imageVector = NextIcons.History,
-                                contentDescription = null,
-                            )
-                        },
-                        label = { Text(stringResource(R.string.history)) },
-                    )
+                    if (0 in visibleTabs) {
+                        NavigationBarItem(
+                            selected = selectedTab == 0,
+                            onClick = { onTabSelected(0) },
+                            icon = {
+                                Icon(
+                                    imageVector = NextIcons.Video,
+                                    contentDescription = null,
+                                )
+                            },
+                            label = { Text(stringResource(R.string.videos)) },
+                        )
+                    }
+                    if (1 in visibleTabs) {
+                        NavigationBarItem(
+                            selected = selectedTab == 1,
+                            onClick = { onTabSelected(1) },
+                            icon = {
+                                Icon(
+                                    imageVector = NextIcons.Folder,
+                                    contentDescription = null,
+                                )
+                            },
+                            label = { Text(stringResource(R.string.browse)) },
+                        )
+                    }
+                    if (2 in visibleTabs) {
+                        NavigationBarItem(
+                            selected = selectedTab == 2,
+                            onClick = { onTabSelected(2) },
+                            icon = {
+                                Icon(
+                                    imageVector = NextIcons.History,
+                                    contentDescription = null,
+                                )
+                            },
+                            label = { Text(stringResource(R.string.history)) },
+                        )
+                    }
                 }
             }
         },
@@ -727,6 +766,7 @@ internal fun MediaPickerScreen(
                     onTabSelected = onTabSelected,
                     backdrop = backdrop,
                     hazeState = hazeState,
+                    visibleTabs = visibleTabs,
                 )
             }
         }
@@ -1204,6 +1244,7 @@ private fun FloatingBottomBar(
     onTabSelected: (Int) -> Unit,
     backdrop: LayerBackdrop?,
     hazeState: HazeState,
+    visibleTabs: List<Int> = listOf(0, 1, 2),
 ) {
     val navBarModifier = if (backdrop != null) {
         Modifier
@@ -1215,7 +1256,7 @@ private fun FloatingBottomBar(
     }
     if (backdrop != null) {
         // 液态玻璃模式：三层叠加底栏（Legado 架构）
-        val tabsCount = 3
+        val tabsCount = visibleTabs.size
         val tabsBackdrop = rememberLayerBackdrop()
         val combinedBackdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop)
         val indicatorAnim = remember { Animatable(selectedTab.toFloat()) }
@@ -1230,11 +1271,11 @@ private fun FloatingBottomBar(
 
         val selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer
         val unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-        val tabs = listOf(
-            Triple(NextIcons.Video, stringResource(R.string.videos), 0),
-            Triple(NextIcons.Folder, stringResource(R.string.browse), 1),
-            Triple(NextIcons.History, stringResource(R.string.history), 2),
-        )
+        val tabs = buildList {
+            if (0 in visibleTabs) add(Triple(NextIcons.Video, stringResource(R.string.videos), 0))
+            if (1 in visibleTabs) add(Triple(NextIcons.Folder, stringResource(R.string.browse), 1))
+            if (2 in visibleTabs) add(Triple(NextIcons.History, stringResource(R.string.history), 2))
+        }
 
         Box(
             modifier = Modifier
@@ -1355,39 +1396,45 @@ private fun FloatingBottomBar(
             containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.8f),
             modifier = navBarModifier,
         ) {
-            NavigationBarItem(
-                selected = selectedTab == 0,
-                onClick = { onTabSelected(0) },
-                icon = {
-                    Icon(
-                        imageVector = NextIcons.Video,
-                        contentDescription = null,
-                    )
-                },
-                label = { Text(stringResource(R.string.videos)) },
-            )
-            NavigationBarItem(
-                selected = selectedTab == 1,
-                onClick = { onTabSelected(1) },
-                icon = {
-                    Icon(
-                        imageVector = NextIcons.Folder,
-                        contentDescription = null,
-                    )
-                },
-                label = { Text(stringResource(R.string.browse)) },
-            )
-            NavigationBarItem(
-                selected = selectedTab == 2,
-                onClick = { onTabSelected(2) },
-                icon = {
-                    Icon(
-                        imageVector = NextIcons.History,
-                        contentDescription = null,
-                    )
-                },
-                label = { Text("历史") },
-            )
+            if (0 in visibleTabs) {
+                NavigationBarItem(
+                    selected = selectedTab == 0,
+                    onClick = { onTabSelected(0) },
+                    icon = {
+                        Icon(
+                            imageVector = NextIcons.Video,
+                            contentDescription = null,
+                        )
+                    },
+                    label = { Text(stringResource(R.string.videos)) },
+                )
+            }
+            if (1 in visibleTabs) {
+                NavigationBarItem(
+                    selected = selectedTab == 1,
+                    onClick = { onTabSelected(1) },
+                    icon = {
+                        Icon(
+                            imageVector = NextIcons.Folder,
+                            contentDescription = null,
+                        )
+                    },
+                    label = { Text(stringResource(R.string.browse)) },
+                )
+            }
+            if (2 in visibleTabs) {
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { onTabSelected(2) },
+                    icon = {
+                        Icon(
+                            imageVector = NextIcons.History,
+                            contentDescription = null,
+                        )
+                    },
+                    label = { Text(stringResource(R.string.history)) },
+                )
+            }
         }
     }
 }

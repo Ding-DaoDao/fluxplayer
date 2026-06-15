@@ -75,7 +75,6 @@ val Configuration.isPortrait: Boolean
 enum class OverlayView {
     AUDIO_SELECTOR,
     SUBTITLE_SELECTOR,
-    PLAYBACK_SPEED,
     VIDEO_CONTENT_SCALE,
     PLAYLIST,
     QUALITY_SELECTOR,

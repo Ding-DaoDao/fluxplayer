@@ -83,6 +83,9 @@ data class PlayerPreferences(
     // 动态长按速度
     val useDynamicLongPressSpeed: Boolean = false,
     val dynamicLongPressMultiplier: Float = 2.0f,
+
+    // 倍速抽屉的自定义预设档位
+    val speedPresets: List<Float> = listOf(0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f),
 ) {
 
     companion object {

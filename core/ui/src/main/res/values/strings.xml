@@ -93,6 +93,14 @@
     <string name="container">Container</string>
     <string name="compose_engine_material">Material 3</string>
     <string name="compose_engine_miuix">Miuix</string>
+    <string name="tab_and_startup">Tabs &amp; startup page</string>
+    <string name="show_videos_tab">Show Videos tab</string>
+    <string name="show_browse_tab">Show Browse tab</string>
+    <string name="show_history_tab">Show History tab</string>
+    <string name="startup_page">Default startup page</string>
+    <string name="startup_page_videos">Videos</string>
+    <string name="startup_page_browse">Browse</string>
+    <string name="startup_page_history">History</string>
     <string name="controls_lock">Lock controls</string>
     <string name="controls_unlock">Unlock controls</string>
     <string name="select_playback_speed">Select playback speed</string>
