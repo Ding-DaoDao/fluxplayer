@@ -9,22 +9,18 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.ui.compose.state.rememberPreviousButtonState
 import com.fluxplayer.app.core.ui.R as coreUiR
 import com.fluxplayer.app.feature.player.LocalControlsVisibilityState
 
-@OptIn(UnstableApi::class)
 @Composable
 internal fun PreviousButton(player: Player, modifier: Modifier = Modifier) {
-    val state = rememberPreviousButtonState(player)
     val controlsVisibilityState = LocalControlsVisibilityState.current
 
     PlayerButton(
         modifier = modifier.size(48.dp),
-        isEnabled = state.isEnabled,
+        isEnabled = player.hasPreviousMediaItem(),
         onClick = {
-            state.onClick()
+            player.seekToPreviousMediaItem()
             controlsVisibilityState?.showControls()
         },
     ) {

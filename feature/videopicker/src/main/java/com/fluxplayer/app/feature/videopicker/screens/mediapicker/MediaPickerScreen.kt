@@ -164,7 +164,7 @@ fun MediaPickerRoute(
     viewModel: MediaPickerViewModel = hiltViewModel(),
     onPlayVideo: (uri: Uri, title: String?) -> Unit,
     onPlayVideos: (uris: List<Uri>, startUri: Uri, isAudioOnly: Boolean) -> Unit,
-    onFolderClick: (folderPath: String) -> Unit,
+    onFolderClick: (folderPath: String, selectedTab: Int) -> Unit,
     onSettingsClick: () -> Unit,
     onSearchClick: () -> Unit,
     onNavigateUp: () -> Unit,
@@ -183,11 +183,12 @@ fun MediaPickerRoute(
 
     var selectedTab by rememberSaveable {
         mutableIntStateOf(
-            when (uiState.preferences.startupPage) {
-                StartupPage.VIDEOS -> if (0 in visibleTabs) 0 else visibleTabs.first()
-                StartupPage.BROWSE -> if (1 in visibleTabs) 1 else visibleTabs.first()
-                StartupPage.HISTORY -> if (2 in visibleTabs) 2 else visibleTabs.first()
-            }
+            viewModel.routedTab?.takeIf { it in visibleTabs }
+                ?: when (uiState.preferences.startupPage) {
+                    StartupPage.VIDEOS -> if (0 in visibleTabs) 0 else visibleTabs.first()
+                    StartupPage.BROWSE -> if (1 in visibleTabs) 1 else visibleTabs.first()
+                    StartupPage.HISTORY -> if (2 in visibleTabs) 2 else visibleTabs.first()
+                }
         )
     }
 
@@ -211,7 +212,7 @@ fun MediaPickerRoute(
         },
         onFolderClick = { folderPath ->
             viewModel.folderPath?.let { viewModel.recordFootprint(it, folderPath) }
-            onFolderClick(folderPath)
+            onFolderClick(folderPath, selectedTab)
         },
         onSettingsClick = onSettingsClick,
         onSearchClick = onSearchClick,

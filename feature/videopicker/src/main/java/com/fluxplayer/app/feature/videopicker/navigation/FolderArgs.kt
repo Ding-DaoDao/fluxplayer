@@ -5,8 +5,10 @@ import androidx.lifecycle.SavedStateHandle
 
 internal class FolderArgs private constructor(
     val folderId: String?,
+    val selectedTab: Int?,
 ) {
     constructor(savedStateHandle: SavedStateHandle) : this(
         folderId = savedStateHandle.get<String>(folderIdArg)?.let { Uri.decode(it) },
+        selectedTab = savedStateHandle.get<Int>(selectedTabArg),
     )
 }

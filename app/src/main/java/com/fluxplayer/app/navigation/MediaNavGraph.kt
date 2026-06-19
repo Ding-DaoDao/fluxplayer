@@ -42,7 +42,9 @@ fun NavGraphBuilder.mediaNavGraph(
                 }
                 context.startActivity(intent)
             },
-            onFolderClick = navController::navigateToMediaPickerScreen,
+            onFolderClick = { folderPath, selectedTab ->
+                navController.navigateToMediaPickerScreen(folderPath, selectedTab)
+            },
             onSettingsClick = navController::navigateToSettings,
             onSearchClick = navController::navigateToSearch,
         )
@@ -57,7 +59,7 @@ fun NavGraphBuilder.mediaNavGraph(
                 }
                 context.startActivity(intent)
             },
-            onFolderClick = navController::navigateToMediaPickerScreen,
+            onFolderClick = { navController.navigateToMediaPickerScreen(it) },
         )
     }
 }

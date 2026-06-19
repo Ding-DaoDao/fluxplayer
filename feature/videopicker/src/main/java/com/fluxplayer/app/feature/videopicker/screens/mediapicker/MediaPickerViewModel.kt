@@ -45,6 +45,7 @@ class MediaPickerViewModel @Inject constructor(
     private val folderArgs = FolderArgs(savedStateHandle)
 
     val folderPath = folderArgs.folderId
+    val routedTab = folderArgs.selectedTab
 
     private val uiStateInternal = MutableStateFlow(
         MediaPickerUiState(

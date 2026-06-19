@@ -5,4 +5,5 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class MediaPickerRoute(
     val folderId: String? = null,
+    val selectedTab: Int? = null,
 )

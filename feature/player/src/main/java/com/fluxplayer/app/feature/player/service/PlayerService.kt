@@ -131,6 +131,13 @@ class PlayerService : MediaSessionService() {
 
     private var isMediaItemReady = false
 
+    /**
+     * 当前播放器会话内的倍速。会话开始时初始化为全局默认倍速，用户修改倍速时更新，
+     * 切集/切清晰度时重新应用，Service 销毁后随实例消失（下次进入重新取全局默认值）。
+     * 这样可在未退出播放界面的情况下切集时保留用户设置的倍速。
+     */
+    private var sessionPlaybackSpeed: Float = 1.0f
+
     private var loudnessEnhancer: LoudnessEnhancer? = null
 
     companion object {
@@ -148,6 +155,8 @@ class PlayerService : MediaSessionService() {
                 mediaSession?.player?.run {
                     playerSpecificSubtitleDelayMilliseconds = metadata.subtitleDelayMilliseconds ?: 0L
                     playerSpecificSubtitleSpeed = metadata.subtitleSpeed ?: 1f
+                    // 切集时重新应用会话倍速，避免 Media3 未保留 PlaybackParameters 或被 STATE_IDLE 重置。
+                    setPlaybackSpeed(sessionPlaybackSpeed)
                 }
 
                 metadata.positionMs?.takeIf { playerPreferences.resume == Resume.YES }?.let {
@@ -267,6 +276,9 @@ class PlayerService : MediaSessionService() {
             val currentMediaItem = player.currentMediaItem ?: return
             val playbackSpeed = playbackParameters.speed
 
+            // 追踪当前会话倍速，切集/切清晰度时重新应用（而不是重置为全局默认）。
+            sessionPlaybackSpeed = playbackSpeed
+
             serviceScope.launch {
                 mediaRepository.updateMediumPlaybackSpeed(
                     uri = currentMediaItem.mediaId,
@@ -284,7 +296,9 @@ class PlayerService : MediaSessionService() {
 
             if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_IDLE) {
                 mediaSession?.player?.trackSelectionParameters = TrackSelectionParameters.DEFAULT
-                mediaSession?.player?.setPlaybackSpeed(playerPreferences.defaultPlaybackSpeed)
+                // 切清晰度(setMediaItems→STATE_IDLE)或自动播完切下一集(STATE_ENDED)时，
+                // 保留会话倍速而非重置为全局默认，符合"未退出播放界面时保留用户倍速"的预期。
+                mediaSession?.player?.setPlaybackSpeed(sessionPlaybackSpeed)
             }
 
             if (playbackState == Player.STATE_READY) {
@@ -649,7 +663,9 @@ class PlayerService : MediaSessionService() {
                     LoopMode.ONE -> Player.REPEAT_MODE_ONE
                     LoopMode.ALL -> Player.REPEAT_MODE_ALL
                 }
-                it.setPlaybackSpeed(playerPreferences.defaultPlaybackSpeed)
+                // 会话倍速以全局默认值起步，之后由用户的修改驱动（见 onPlaybackParametersChanged）。
+                sessionPlaybackSpeed = playerPreferences.defaultPlaybackSpeed
+                it.setPlaybackSpeed(sessionPlaybackSpeed)
             }
 
         try {
