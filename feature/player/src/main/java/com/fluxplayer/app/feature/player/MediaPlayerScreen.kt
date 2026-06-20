@@ -405,6 +405,14 @@ fun MediaPlayerScreen(
         controlsVisibilityState.suppressAutoHide = showSpeedBar || showCustomSpeedDialog
     }
 
+    // 手动隐藏 controls 时（非自动隐藏），同步关闭倍速条
+    LaunchedEffect(controlsVisibilityState.controlsVisible) {
+        if (!controlsVisibilityState.controlsVisible) {
+            showSpeedBar = false
+            showCustomSpeedDialog = false
+        }
+    }
+
     val danmakuSources by viewModel.danmakuSources.collectAsStateWithLifecycle(emptyList())
     val danmakuDownloadState by viewModel.danmakuDownloadState.collectAsStateWithLifecycle(DanmakuDownloadState.Idle)
     val danmakuSearchViewMode by viewModel.danmakuSearchViewMode.collectAsStateWithLifecycle()

@@ -101,9 +101,7 @@ class C189ApiClient(
                 && accessToken.isNotBlank()) {
                 try {
                     login4MergedClient(accessToken)
-                    sessionKey = C189AuthProvider.sessionKey
-                    sessionSecret = C189AuthProvider.sessionSecret
-                    C189AuthProvider.notifyTokensRefreshed()
+                    // login4MergedClient 已同步 C189AuthProvider 并通知持久化
                     return signedGet(path, queryParams, false)
                 } catch (e: Exception) {
                     Log.w(TAG, "signedGet retry failed", e)
@@ -150,9 +148,7 @@ class C189ApiClient(
                 && accessToken.isNotBlank()) {
                 try {
                     login4MergedClient(accessToken)
-                    sessionKey = C189AuthProvider.sessionKey
-                    sessionSecret = C189AuthProvider.sessionSecret
-                    C189AuthProvider.notifyTokensRefreshed()
+                    // login4MergedClient 已同步 C189AuthProvider 并通知持久化
                     return signedPost(path, formParams, false)
                 } catch (e: Exception) {
                     Log.w(TAG, "signedPost retry failed", e)
@@ -202,6 +198,7 @@ class C189ApiClient(
                 if (refreshAccessToken()) {
                     accessToken = C189AuthProvider.accessToken
                     sessionKey = C189AuthProvider.sessionKey
+                    sessionSecret = C189AuthProvider.sessionSecret
                     return openApiPost(actionPath, formParams, false)
                 }
             }
@@ -673,6 +670,12 @@ class C189ApiClient(
             C189AuthProvider.setFamilyTokens(familySk, familySs)
         }
 
+        // 同步核心 token 到全局 AuthProvider 并触发持久化
+        C189AuthProvider.accessToken = accessToken
+        C189AuthProvider.sessionKey = sessionKey
+        C189AuthProvider.sessionSecret = sessionSecret
+        C189AuthProvider.isActive = true
+        C189AuthProvider.notifyTokensRefreshed()
     }
 
     /** 随机设备型号 (Xiaomi 系列, 来自海阔视界) */
@@ -758,6 +761,8 @@ class C189ApiClient(
                     accessToken = newAt
                     C189AuthProvider.accessToken = newAt
                     C189AuthProvider.expiresIn = System.currentTimeMillis() + 518400000
+                    // 用新 accessToken 刷新 sessionKey/sessionSecret
+                    tryRefreshSessionViaAccessToken(newAt)
                     C189AuthProvider.notifyTokensRefreshed()
                     Log.d(TAG, "refreshAccessToken: 通过 sessionKey 成功")
                     return true
