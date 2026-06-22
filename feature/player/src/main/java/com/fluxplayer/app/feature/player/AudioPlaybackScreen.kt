@@ -1,13 +1,6 @@
 package com.fluxplayer.app.feature.player
 
 import android.net.Uri
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
@@ -25,12 +18,12 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Forward10
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.outlined.AccessTime
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -38,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,40 +42,40 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import com.fluxplayer.app.core.model.FluxMessageEvent
-import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
-import com.fluxplayer.app.core.ui.components.FluxNotificationState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
-import com.fluxplayer.app.core.ui.R as coreUiR
-import com.fluxplayer.app.feature.player.state.MediaPresentationState
+import coil3.compose.AsyncImage
+import com.fluxplayer.app.core.model.FluxMessageEvent
+import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
+import com.fluxplayer.app.core.ui.components.FluxNotificationState
 import com.fluxplayer.app.feature.player.state.rememberMediaPresentationState
 import com.fluxplayer.app.feature.player.state.rememberMetadataState
+import com.fluxplayer.app.core.ui.R as coreUiR
+import androidx.compose.material.icons.Icons.AutoMirrored
+import androidx.compose.material.icons.automirrored.filled.List
 
-private val BgTop = Color(0xFFFFFFFF)
-private val BgBottom = Color(0xFFF0F4F8)
-private val DarkText = Color(0xFF1A1A1A)
-private val SubtleText = Color(0xFF666666)
-private val TrackBg = Color(0xFFE0E0E0)
-private val VinylBlack = Color(0xFF1A1A1A)
-private val VinylGroove = Color(0xFF2A2A2A)
-private val LabelBlue1 = Color(0xFF4A90D9)
-private val LabelBlue2 = Color(0xFF1E5AA8)
-private val ArmSilver = Color(0xFFB0B0B0)
-private val PivotSilver = Color(0xFF8A8A8A)
+// region ── 颜色常量 ──
+
+private val PlayerBg = Color(0xFF111111)
+private val TagBg = Color(0x2DFFFFFF)
+private val TrackBg = Color(0x40FFFFFF)
+private val SubtleWhite = Color(0xCCFFFFFF)
+private val BlueAccent = Color(0xFF3B82F6)
+private val White = Color.White
+
+// endregion
 
 @Composable
 fun AudioPlaybackScreen(
@@ -93,90 +87,152 @@ fun AudioPlaybackScreen(
     val mediaState = rememberMediaPresentationState(player)
 
     val title = metadataState.title ?: ""
-    val fileSizeBytes = remember(player.currentMediaItem) {
-        player.currentMediaItem?.localConfiguration?.uri
-            ?.encodedFragment
-            ?.substringAfter('|')
-            ?.toLongOrNull() ?: 0L
+
+    // 封面图 URI（从 MediaMetadata 或 extras 中提取）
+    val artworkUri: Uri? = remember(player.currentMediaItem) {
+        player.currentMediaItem?.mediaMetadata?.artworkUri
     }
 
+    // 作者（从 MediaMetadata.artist 中提取）
+    val author: String? = remember(player.currentMediaItem) {
+        player.currentMediaItem?.mediaMetadata?.artist?.toString()
+    }
+
+    // 平台名（从 extras 中取，暂时留空）
+    val platform: String? = remember(player.currentMediaItem) {
+        player.currentMediaItem?.mediaMetadata?.extras?.getString("platform")
+    }
+
+    // 集数标题（从 extras 中取，暂时留空）
+    val episodeTitle: String? = remember(player.currentMediaItem) {
+        player.currentMediaItem?.mediaMetadata?.extras?.getString("episode_title")
+    }
+
+    // ── 拖拽状态 ──
     var isScrubbing by remember { mutableStateOf(false) }
     var scrubPosition by remember { mutableFloatStateOf(0f) }
     val displayPosition = if (isScrubbing) scrubPosition else mediaState.position.toFloat()
 
-    // 速度菜单
-    val speeds = listOf(0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f)
+    // ── 速度菜单 ──
     var showSpeedMenu by remember { mutableStateOf(false) }
     var currentSpeed by remember { mutableStateOf(player.playbackParameters.speed) }
     LaunchedEffect(player.playbackParameters) { currentSpeed = player.playbackParameters.speed }
 
     val notificationState = remember { FluxNotificationState() }
 
+    // ── UI ──
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(BgTop, BgBottom))),
+            .background(PlayerBg),
     ) {
+        // 背景层：模糊封面图
+        if (artworkUri != null) {
+            AsyncImage(
+                model = artworkUri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(30.dp)
+                    .graphicsLayer { alpha = 0.85f },
+            )
+        }
+
+        // 渐变遮罩：顶部浅暗、底部深暗
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = 0.2f),
+                            Color.Black.copy(alpha = 0.6f),
+                            Color.Black.copy(alpha = 0.85f),
+                        ),
+                    ),
+                ),
+        )
+
+        // 内容层
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 24.dp),
         ) {
-            // ── TopBar ──
+            // ── 顶部导航 ──
             TopBar(onBackClick = onBackClick)
 
-            Spacer(Modifier.weight(0.8f))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            // ── 唱片 + 唱臂 ──
-            VinylSection(
-                isPlaying = mediaState.isPlaying,
+            // ── 专辑封面 ──
+            AlbumCover(
+                artworkUri = artworkUri,
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
 
-            Spacer(Modifier.height(36.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // ── 歌曲名 ──
+            // ── AL听书按钮 ──
+            AiListenButton(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                onClick = {
+                    notificationState.show(FluxMessageEvent.Info("AL听书功能开发中"))
+                },
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── 书名 ──
             Text(
                 text = title,
+                color = White,
                 fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = DarkText,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
                     .basicMarquee(),
             )
 
-            // ── 文件大小 ──
-            if (fileSizeBytes > 0) {
-                Spacer(Modifier.height(6.dp))
+            // ── 作者 / 平台标签 ──
+            if (author != null || platform != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (author != null) {
+                        InfoTag(text = author)
+                    }
+                    if (author != null && platform != null) {
+                        Spacer(modifier = Modifier.width(16.dp))
+                    }
+                    if (platform != null) {
+                        InfoTag(text = platform)
+                    }
+                }
+            }
+
+            // ── 集数标题 ──
+            if (!episodeTitle.isNullOrEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = formatFileSize(fileSizeBytes),
-                    fontSize = 13.sp,
-                    color = SubtleText,
+                    text = episodeTitle,
+                    color = SubtleWhite,
+                    fontSize = 16.sp,
                     textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
 
-            Spacer(Modifier.weight(1f))
-
-            // ── 功能行 ──
-            FunctionRow(
-                currentSpeed = currentSpeed,
-                showSpeedMenu = showSpeedMenu,
-                onSpeedMenuChange = { showSpeedMenu = it },
-                onSpeedSelected = {
-                    player.setPlaybackSpeed(it)
-                    currentSpeed = it
-                },
-                notificationState = notificationState,
-            )
-
-            Spacer(Modifier.height(20.dp))
+            Spacer(modifier = Modifier.weight(1f))
 
             // ── 进度条 ──
             AudioSeekbar(
@@ -187,17 +243,28 @@ fun AudioPlaybackScreen(
                     player.seekTo(scrubPosition.toLong())
                     isScrubbing = false
                 },
-                onSkipForward = {
-                    player.seekTo((player.currentPosition + 15_000L).coerceAtMost(player.duration))
-                },
             )
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // ── 控制行 ──
-            TransportRow(player = player)
+            // ── 播放控制行 ──
+            TransportRow(player = player, isPlaying = mediaState.isPlaying)
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // ── 底部功能栏 ──
+            BottomFunctionRow(
+                currentSpeed = currentSpeed,
+                showSpeedMenu = showSpeedMenu,
+                onSpeedMenuChange = { showSpeedMenu = it },
+                onSpeedSelected = {
+                    player.setPlaybackSpeed(it)
+                    currentSpeed = it
+                },
+                notificationState = notificationState,
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
         }
 
         // 缓冲指示器
@@ -206,7 +273,7 @@ fun AudioPlaybackScreen(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(48.dp),
-                color = DarkText,
+                color = White,
                 strokeWidth = 3.dp,
             )
         }
@@ -214,11 +281,12 @@ fun AudioPlaybackScreen(
         FluxNotificationBanner(
             event = notificationState.currentEvent,
             onDismiss = { notificationState.dismiss() },
-            modifier = Modifier
-                .align(Alignment.BottomCenter),
+            modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
 }
+
+// region ── 子组件 ──
 
 @Composable
 private fun TopBar(onBackClick: () -> Unit) {
@@ -227,126 +295,262 @@ private fun TopBar(onBackClick: () -> Unit) {
             .fillMaxWidth()
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         IconButton(onClick = onBackClick) {
-            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "返回", tint = DarkText)
+            Icon(
+                painter = painterResource(coreUiR.drawable.ic_arrow_left),
+                contentDescription = "返回",
+                tint = White,
+            )
         }
-        IconButton(onClick = { }) {
-            Icon(Icons.Default.MoreVert, contentDescription = "更多", tint = DarkText)
+        Text(
+            text = "正在播放",
+            color = White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+@Composable
+private fun AlbumCover(artworkUri: Uri?, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(300.dp)
+            .shadow(12.dp, RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color(0xFF2A2A2A)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (artworkUri != null) {
+            AsyncImage(
+                model = artworkUri,
+                contentDescription = "专辑封面",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            // 无封面时显示音频图标占位
+            Icon(
+                painter = painterResource(coreUiR.drawable.ic_file_audio),
+                contentDescription = null,
+                tint = Color(0xFF666666),
+                modifier = Modifier.size(64.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun VinylSection(isPlaying: Boolean, modifier: Modifier = Modifier) {
-    val infiniteTransition = rememberInfiniteTransition(label = "vinyl")
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing)),
-        label = "rotation",
-    )
-    val tonearmAngle by animateFloatAsState(
-        targetValue = if (isPlaying) 25f else 45f,
-        animationSpec = tween(600),
-        label = "tonearm",
-    )
+private fun AiListenButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = BlueAccent,
+        modifier = modifier,
+    ) {
+        Text(
+            text = "AL听书",
+            color = White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+        )
+    }
+}
 
-    Box(modifier = modifier.size(320.dp)) {
-        // 唱片
-        Canvas(
+@Composable
+private fun InfoTag(text: String) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = TagBg,
+    ) {
+        Text(
+            text = text,
+            color = White,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp),
+        )
+    }
+}
+
+@Composable
+private fun AudioSeekbar(
+    position: Float,
+    duration: Float,
+    onSeek: (Float) -> Unit,
+    onSeekFinished: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Slider(
+            value = if (duration > 0f) (position / duration).coerceIn(0f, 1f) else 0f,
+            onValueChange = { fraction -> onSeek(fraction * duration) },
+            onValueChangeFinished = onSeekFinished,
+            modifier = Modifier.fillMaxWidth(),
+            colors = SliderDefaults.colors(
+                thumbColor = White,
+                activeTrackColor = White,
+                inactiveTrackColor = TrackBg,
+            ),
+        )
+        Row(
             modifier = Modifier
-                .size(280.dp)
-                .align(Alignment.CenterStart)
-                .padding(start = 8.dp)
-                .graphicsLayer { rotationZ = if (isPlaying) rotation else 0f },
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            val r = size.minDimension / 2f
-            val center = Offset(size.width / 2f, size.height / 2f)
+            Text(
+                text = formatTime(position.toLong()),
+                fontSize = 12.sp,
+                color = SubtleWhite,
+            )
+            Text(
+                text = formatTime(duration.toLong()),
+                fontSize = 12.sp,
+                color = SubtleWhite,
+            )
+        }
+    }
+}
 
-            drawCircle(color = VinylBlack, radius = r, center = center)
+@Composable
+private fun TransportRow(player: Player, isPlaying: Boolean) {
+    val playPauseState = androidx.media3.ui.compose.state.rememberPlayPauseButtonState(player)
 
-            for (i in 1..6) {
-                drawCircle(
-                    color = VinylGroove,
-                    radius = r * (0.55f + i * 0.06f),
-                    center = center,
-                    style = Stroke(width = 0.8f.dp.toPx()),
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 上一集
+        IconButton(onClick = { player.seekToPrevious() }) {
+            Icon(
+                painter = painterResource(coreUiR.drawable.ic_skip_prev),
+                contentDescription = "上一集",
+                tint = SubtleWhite,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+
+        // 快退 15s
+        IconButton(onClick = {
+            player.seekTo((player.currentPosition - 15_000L).coerceAtLeast(0L))
+        }) {
+            Icon(
+                imageVector = Icons.Filled.Replay,
+                contentDescription = "快退15秒",
+                tint = SubtleWhite,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+
+        // 播放 / 暂停（大圆按钮）
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .shadow(6.dp, CircleShape)
+                .background(White, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            IconButton(
+                onClick = { playPauseState.onClick() },
+                modifier = Modifier.size(80.dp),
+            ) {
+                Icon(
+                    painter = painterResource(
+                        if (playPauseState.showPlay) coreUiR.drawable.ic_play
+                        else coreUiR.drawable.ic_pause,
+                    ),
+                    contentDescription = if (playPauseState.showPlay) "播放" else "暂停",
+                    tint = Color(0xFF111111),
+                    modifier = Modifier.size(32.dp),
                 )
             }
-
-            drawCircle(
-                brush = Brush.radialGradient(
-                    listOf(Color(0x40FFFFFF), Color.Transparent),
-                    center = center, radius = r * 0.8f,
-                ),
-                radius = r * 0.8f, center = center,
-            )
-
-            val labelR = r * 0.48f
-            drawCircle(
-                brush = Brush.radialGradient(listOf(LabelBlue1, LabelBlue2), center, labelR),
-                radius = labelR, center = center,
-            )
-            drawCircle(
-                color = Color.White.copy(0.15f), radius = labelR, center = center,
-                style = Stroke(width = 1f.dp.toPx()),
-            )
-            drawCircle(color = Color(0xFFCCCCCC), radius = r * 0.04f, center = center)
         }
 
-        // 唱臂
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val pivotX = size.width * 0.92f
-            val pivotY = size.height * 0.05f
-            val armLength = size.width * 0.55f
-
-            drawCircle(color = PivotSilver, radius = 12f.dp.toPx(), center = Offset(pivotX, pivotY))
-            drawCircle(color = Color(0xFF666666), radius = 5f.dp.toPx(), center = Offset(pivotX, pivotY))
-
-            val angleRad = Math.toRadians(tonearmAngle.toDouble())
-            val endX = pivotX - armLength * kotlin.math.sin(angleRad).toFloat()
-            val endY = pivotY + armLength * kotlin.math.cos(angleRad).toFloat()
-
-            drawLine(
-                color = ArmSilver, start = Offset(pivotX, pivotY), end = Offset(endX, endY),
-                strokeWidth = 4f.dp.toPx(), cap = StrokeCap.Round,
+        // 快进 15s
+        IconButton(onClick = {
+            player.seekTo((player.currentPosition + 15_000L).coerceAtMost(player.duration))
+        }) {
+            Icon(
+                imageVector = Icons.Filled.Forward10,
+                contentDescription = "快进15秒",
+                tint = SubtleWhite,
+                modifier = Modifier.size(24.dp),
             )
+        }
 
-            val headLen = 24f.dp.toPx()
-            val headAngle = angleRad
-            val hx = endX - headLen * kotlin.math.sin(headAngle).toFloat() * 0.5f
-            val hy = endY + headLen * kotlin.math.cos(headAngle).toFloat() * 0.5f
-            drawLine(
-                color = Color(0xFF999999), start = Offset(endX, endY), end = Offset(hx, hy),
-                strokeWidth = 7f.dp.toPx(), cap = StrokeCap.Round,
+        // 下一集
+        IconButton(onClick = { player.seekToNext() }) {
+            Icon(
+                painter = painterResource(coreUiR.drawable.ic_skip_next),
+                contentDescription = "下一集",
+                tint = SubtleWhite,
+                modifier = Modifier.size(24.dp),
             )
         }
     }
 }
 
 @Composable
-private fun FunctionRow(
+private fun BottomFunctionRow(
     currentSpeed: Float,
     showSpeedMenu: Boolean,
     onSpeedMenuChange: (Boolean) -> Unit,
     onSpeedSelected: (Float) -> Unit,
     notificationState: FluxNotificationState,
 ) {
-    val context = LocalContext.current
-
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        // 播放列表
+        FunctionButton(
+            icon = {
+                Icon(
+                    imageVector = AutoMirrored.Filled.List,
+                    contentDescription = null,
+                    tint = SubtleWhite,
+                    modifier = Modifier.size(24.dp),
+                )
+            },
+            label = "列表",
+            onClick = { notificationState.show(FluxMessageEvent.Info("开发中")) },
+        )
+
+        // 定时关闭
+        FunctionButton(
+            icon = {
+                Icon(
+                    imageVector = Icons.Outlined.AccessTime,
+                    contentDescription = null,
+                    tint = SubtleWhite,
+                    modifier = Modifier.size(24.dp),
+                )
+            },
+            label = "定时",
+            onClick = { notificationState.show(FluxMessageEvent.Info("定时关闭开发中")) },
+        )
+
         // 倍速
         Box {
             FunctionButton(
-                icon = { Icon(Icons.Default.Speed, contentDescription = null, tint = DarkText, modifier = Modifier.size(24.dp)) },
-                label = String.format("%.1gx", currentSpeed),
+                icon = {
+                    Icon(
+                        painter = painterResource(coreUiR.drawable.ic_speed),
+                        contentDescription = null,
+                        tint = SubtleWhite,
+                        modifier = Modifier.size(24.dp),
+                    )
+                },
+                label = "${currentSpeed}x",
                 onClick = { onSpeedMenuChange(true) },
             )
-            DropdownMenu(expanded = showSpeedMenu, onDismissRequest = { onSpeedMenuChange(false) }) {
+            DropdownMenu(
+                expanded = showSpeedMenu,
+                onDismissRequest = { onSpeedMenuChange(false) },
+            ) {
                 listOf(0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f).forEach { speed ->
                     DropdownMenuItem(
                         text = { Text(String.format("%.1gx", speed)) },
@@ -356,18 +560,32 @@ private fun FunctionRow(
             }
         }
 
-        // 定时
+        // 设置
         FunctionButton(
-            icon = { Icon(painterResource(coreUiR.drawable.ic_loop_all), contentDescription = null, tint = DarkText, modifier = Modifier.size(22.dp)) },
-            label = "定时",
-            onClick = { notificationState.show(FluxMessageEvent.Info("开发中")) },
+            icon = {
+                Icon(
+                    painter = painterResource(coreUiR.drawable.ic_settings),
+                    contentDescription = null,
+                    tint = SubtleWhite,
+                    modifier = Modifier.size(24.dp),
+                )
+            },
+            label = "设置",
+            onClick = { notificationState.show(FluxMessageEvent.Info("设置开发中")) },
         )
 
-        // 下载
+        // 收藏
         FunctionButton(
-            icon = { Icon(painterResource(coreUiR.drawable.ic_playlist), contentDescription = null, tint = DarkText, modifier = Modifier.size(22.dp)) },
-            label = "下载",
-            onClick = { notificationState.show(FluxMessageEvent.Info("开发中")) },
+            icon = {
+                Icon(
+                    imageVector = Icons.Outlined.FavoriteBorder,
+                    contentDescription = null,
+                    tint = SubtleWhite,
+                    modifier = Modifier.size(24.dp),
+                )
+            },
+            label = "收藏",
+            onClick = { notificationState.show(FluxMessageEvent.Info("收藏开发中")) },
         )
     }
 }
@@ -380,94 +598,21 @@ private fun FunctionButton(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.let { mod ->
-            mod.background(Color.Transparent, shape = CircleShape)
-        },
     ) {
-        IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) { icon() }
-        Text(text = label, fontSize = 12.sp, color = DarkText)
-    }
-}
-
-@Composable
-private fun AudioSeekbar(
-    position: Float,
-    duration: Float,
-    onSeek: (Float) -> Unit,
-    onSeekFinished: () -> Unit,
-    onSkipForward: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Slider(
-            value = if (duration > 0f) (position / duration).coerceIn(0f, 1f) else 0f,
-            onValueChange = { fraction -> onSeek(fraction * duration) },
-            onValueChangeFinished = onSeekFinished,
-            modifier = Modifier.fillMaxWidth(),
-            colors = SliderDefaults.colors(
-                thumbColor = DarkText,
-                activeTrackColor = DarkText,
-                inactiveTrackColor = TrackBg,
-            ),
+        IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
+            icon()
+        }
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            color = SubtleWhite,
         )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(text = formatTime(position.toLong()), fontSize = 12.sp, color = SubtleText)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = formatTime(duration.toLong()), fontSize = 12.sp, color = SubtleText)
-                Spacer(Modifier.width(4.dp))
-                IconButton(onClick = onSkipForward, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Default.Forward10, contentDescription = "快进15s", tint = SubtleText, modifier = Modifier.size(16.dp))
-                }
-            }
-        }
     }
 }
 
-@Composable
-private fun TransportRow(player: Player) {
-    val playPauseState = androidx.media3.ui.compose.state.rememberPlayPauseButtonState(player)
+// endregion
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = { }) {
-            Icon(Icons.AutoMirrored.Filled.List, contentDescription = "播放列表", tint = DarkText, modifier = Modifier.size(24.dp))
-        }
-        IconButton(onClick = { player.seekToPrevious() }) {
-            Icon(painterResource(coreUiR.drawable.ic_skip_prev), contentDescription = "上一首", tint = DarkText, modifier = Modifier.size(28.dp))
-        }
-        Box(
-            modifier = Modifier
-                .size(64.dp)
-                .background(DarkText, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            IconButton(onClick = { playPauseState.onClick() }, modifier = Modifier.size(64.dp)) {
-                Icon(
-                    painter = painterResource(
-                        if (playPauseState.showPlay) coreUiR.drawable.ic_play else coreUiR.drawable.ic_pause,
-                    ),
-                    contentDescription = "播放/暂停",
-                    tint = Color.White,
-                    modifier = Modifier.size(32.dp),
-                )
-            }
-        }
-        IconButton(onClick = { player.seekToNext() }) {
-            Icon(painterResource(coreUiR.drawable.ic_skip_next), contentDescription = "下一首", tint = DarkText, modifier = Modifier.size(28.dp))
-        }
-        IconButton(onClick = { }) {
-            Icon(Icons.Default.MoreVert, contentDescription = "更多", tint = DarkText, modifier = Modifier.size(24.dp))
-        }
-    }
-}
+// region ── 工具函数 ──
 
 private fun formatTime(ms: Long): String {
     if (ms <= 0) return "00:00"
@@ -477,8 +622,4 @@ private fun formatTime(ms: Long): String {
     return "%02d:%02d".format(minutes, seconds)
 }
 
-private fun formatFileSize(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes B"
-    bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-    else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
-}
+// endregion

@@ -128,7 +128,7 @@ class PlayerActivity : ComponentActivity() {
             CompositionLocalProvider(LocalUseMaterialYouControls provides (uiState.playerPreferences?.useMaterialYouControls == true)) {
                 val isAudioOnly = intent.getBooleanExtra("audio_only", false)
                 if (isAudioOnly) {
-                    NextPlayerTheme(darkTheme = false) {
+                    NextPlayerTheme(darkTheme = true) {
                         AudioPlaybackScreen(
                             player = player ?: return@NextPlayerTheme,
                             onBackClick = { finishAndStopPlayerSession() },
