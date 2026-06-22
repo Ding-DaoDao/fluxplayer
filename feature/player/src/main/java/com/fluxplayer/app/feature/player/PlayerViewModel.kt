@@ -374,6 +374,10 @@ class PlayerViewModel @Inject constructor(
      */
     fun onMediaItemTransition(indexStep: Int, context: Context) {
         if (isExiting) return
+        // 先清空旧弹幕状态，防止异步加载窗口期旧数据残留到 DanmakuController
+        _danmakuList.value = null
+        danmakuEnabled.value = false
+        danmakuForCurrentEpisode.value = false
         val ctx = danmakuContext ?: run {
             Log.d(TAG, "onMediaItemTransition: no danmaku context, clearing")
             clearDanmaku()
@@ -439,6 +443,9 @@ class PlayerViewModel @Inject constructor(
                 }
             } else {
                 Log.d(TAG, "silentLoadLocalDanmaku: failed to load ${file.name}")
+                // 加载失败时重置状态，避免旧弹幕残留
+                danmakuForCurrentEpisode.value = false
+                danmakuEnabled.value = false
             }
         }
     }
@@ -473,11 +480,25 @@ class PlayerViewModel @Inject constructor(
                             withContext(Dispatchers.Main) {
                                 notifier.success("已加载 ${list.size} 条弹幕")
                             }
+                        } else {
+                            Log.d(TAG, "silentLoadNetworkDanmaku: parsed empty list")
+                            danmakuForCurrentEpisode.value = false
+                            danmakuEnabled.value = false
                         }
+                    } else {
+                        Log.d(TAG, "silentLoadNetworkDanmaku: cache file not found")
+                        danmakuForCurrentEpisode.value = false
+                        danmakuEnabled.value = false
                     }
+                } else {
+                    Log.d(TAG, "silentLoadNetworkDanmaku: download failed (null uri)")
+                    danmakuForCurrentEpisode.value = false
+                    danmakuEnabled.value = false
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "silentLoadNetworkDanmaku failed", e)
+                danmakuForCurrentEpisode.value = false
+                danmakuEnabled.value = false
             }
         }
     }

@@ -91,6 +91,15 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 息屏/旋转后恢复正在播放的集数 URI
+        // onMediaItemTransition 会把当前集 URI 写入 intent.data（内存修改），
+        // 但 Activity 重建后 intent 是原始启动 Intent，需要通过 savedState 恢复
+        if (savedInstanceState != null) {
+            val savedUri = savedInstanceState.getString("current_media_uri")
+            if (savedUri != null) {
+                intent.data = Uri.parse(savedUri)
+            }
+        }
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -373,6 +382,13 @@ class PlayerActivity : ComponentActivity() {
                 startPlayback()
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        // 保存当前正在播放的媒体 URI，以便息屏/旋转重建后恢复
+        // intent.data 由 onMediaItemTransition 回调实时更新为当前集的 URI
+        intent.data?.toString()?.let { outState.putString("current_media_uri", it) }
     }
 
     private fun updateKeepScreenOnFlag() {

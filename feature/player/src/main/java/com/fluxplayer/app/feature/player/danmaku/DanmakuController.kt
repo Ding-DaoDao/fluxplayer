@@ -50,6 +50,9 @@ class DanmakuController(
     /** 标记弹幕数据是否已注入视图（防重复 reset） */
     private var danmakuLoaded = false
 
+    /** Player.Listener 注册标记（防止切集后 loadDanmaku 重复 addListener） */
+    private var listenerRegistered = false
+
     /** 标记控制器是否已释放（防止退出时误触发切集回调） */
     private var released = false
 
@@ -75,11 +78,13 @@ class DanmakuController(
         if (this.player !== player) {
             Log.d(TAG, "loadDanmaku: player changed ${this.player} -> ${player}")
             this.player?.removeListener(this)
+            listenerRegistered = false
             this.player = player
             player.addListener(this)
-        } else if (!danmakuLoaded) {
-            // 首次加载时才加监听（避免重复）
+            listenerRegistered = true
+        } else if (!listenerRegistered) {
             player.addListener(this)
+            listenerRegistered = true
         }
 
         // 2) 列表没变且已加载 → 跳过
@@ -111,6 +116,7 @@ class DanmakuController(
     fun release() {
         released = true
         player?.removeListener(this)
+        listenerRegistered = false
         stopPolling()
         pollHandler.removeCallbacksAndMessages(null)
         player = null
