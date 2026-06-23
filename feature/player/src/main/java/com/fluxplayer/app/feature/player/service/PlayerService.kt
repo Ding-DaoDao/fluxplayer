@@ -142,6 +142,7 @@ class PlayerService : MediaSessionService() {
 
     companion object {
         private const val TAG = "PlayerService"
+        private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", "wma", "opus")
     }
     private var currentVolumeGain: Int = 0
 
@@ -432,6 +433,18 @@ class PlayerService : MediaSessionService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = serviceScope.future(Dispatchers.Default) {
+            // 纯音频模式：跳过 DB 查询、字幕扫描、artwork 加载
+            // 仍需从 mediaId 重建 URI（localConfiguration 可能在 IPC 传输中丢失）
+            if (mediaItems.all { isAudioFile(it.mediaId) }) {
+                // 听书倍速独立于视频播放设置，从 DataStore 读取上次保存的倍速
+                sessionPlaybackSpeed = preferencesRepository.applicationPreferences.value.audiobookPlaybackSpeed
+                val updatedItems = mediaItems.map { item ->
+                    item.buildUpon()
+                        .setUri(Uri.fromFile(File(item.mediaId)))
+                        .build()
+                }
+                return@future MediaSession.MediaItemsWithStartPosition(updatedItems, startIndex, startPositionMs)
+            }
             val updatedMediaItems = updatedMediaItemsWithMetadata(mediaItems)
             return@future MediaSession.MediaItemsWithStartPosition(updatedMediaItems, startIndex, startPositionMs)
         }
@@ -441,6 +454,16 @@ class PlayerService : MediaSessionService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> = serviceScope.future(Dispatchers.Default) {
+            // 纯音频模式：跳过 metadata 增强，但仍需从 mediaId 重建 URI
+            if (mediaItems.all { isAudioFile(it.mediaId) }) {
+                sessionPlaybackSpeed = preferencesRepository.applicationPreferences.value.audiobookPlaybackSpeed
+                val updatedItems = mediaItems.map { item ->
+                    item.buildUpon()
+                        .setUri(Uri.fromFile(File(item.mediaId)))
+                        .build()
+                }
+                return@future updatedItems.toMutableList()
+            }
             val updatedMediaItems = updatedMediaItemsWithMetadata(mediaItems)
             return@future updatedMediaItems.toMutableList()
         }
@@ -825,6 +848,9 @@ class PlayerService : MediaSessionService() {
     
     private suspend fun recordPlaybackHistory(mediaItem: MediaItem, position: Long) {
         val uri = mediaItem.mediaId
+        // 纯音频文件（本地文件 + 音频扩展名）不记录到播放历史
+        if (isAudioFile(uri)) return
+
         val title = mediaItem.mediaMetadata.title?.toString()
             ?: getFilenameFromUri(uri.toUri())
         val duration = mediaItem.mediaMetadata.durationMs ?: 0L
@@ -843,6 +869,11 @@ class PlayerService : MediaSessionService() {
             thumbnailPath = preCapturedPath,
             parentPath = parentPath,
         )
+    }
+
+    private fun isAudioFile(uri: String): Boolean {
+        val ext = uri.substringAfterLast('.', "").lowercase()
+        return ext in AUDIO_EXTENSIONS
     }
 
     private fun computeParentPath(uriString: String, source: VideoSource): String? {

@@ -23,6 +23,7 @@
     <string name="navigate_up">Navigate up</string>
     <string name="browse">Browse</string>
     <string name="history">History</string>
+    <string name="audiobook">Audiobook</string>
     <string name="no_videos_found">No videos found</string>
     <string name="open_settings">Open Settings</string>
     <string name="permission_info">The Next Player app needs \"%1$s\" permission to access and play media. Without it, media access and playback won\'t work. To use the app fully, grant the permission.</string>
@@ -97,10 +98,12 @@
     <string name="show_videos_tab">Show Videos tab</string>
     <string name="show_browse_tab">Show Browse tab</string>
     <string name="show_history_tab">Show History tab</string>
+    <string name="show_audiobook_tab">Show Audiobook tab</string>
     <string name="startup_page">Default startup page</string>
     <string name="startup_page_videos">Videos</string>
     <string name="startup_page_browse">Browse</string>
     <string name="startup_page_history">History</string>
+    <string name="startup_page_audiobook">Audiobook</string>
     <string name="controls_lock">Lock controls</string>
     <string name="controls_unlock">Unlock controls</string>
     <string name="select_playback_speed">Select playback speed</string>

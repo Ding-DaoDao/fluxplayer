@@ -58,6 +58,7 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.androidx.palette)
     implementation(libs.accompanist.permissions)
     implementation(libs.reorderable)
     implementation(libs.haze)

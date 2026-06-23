@@ -56,9 +56,13 @@ class HistoryViewModel @Inject constructor(
     fun clearAll() {
         viewModelScope.launch {
             playbackHistoryRepository.clearAll()
-            // 同时清除所有足迹
+            // 同时清除所有足迹、听书续播状态、听书章节进度
             preferencesRepository.updateApplicationPreferences { prefs ->
-                prefs.copy(latestFootprintPerDir = emptyMap())
+                prefs.copy(
+                    latestFootprintPerDir = emptyMap(),
+                    audiobookResumeState = emptyMap(),
+                    audiobookChapterProgress = emptyMap(),
+                )
             }
             // 清除云盘目录缓存
             CloudDirectoryCache.clearAll(context)

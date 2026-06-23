@@ -16,6 +16,7 @@
     <string name="fast_seek_description">跳转到最近的关键帧而非精确帧</string>
     <string name="browse">浏览</string>
     <string name="history">历史</string>
+    <string name="audiobook">听书</string>
     <string name="no_videos_found">未找到视频</string>
     <string name="permission_info">Next Player 应用需要“%1$s”权限以访问和播放媒体。没有它，则无法访问和播放媒体。要使用应用的完整功能，请授予此权限。</string>
     <string name="permission_not_granted">未授予权限</string>
@@ -65,10 +66,12 @@
     <string name="show_videos_tab">显示视频标签页</string>
     <string name="show_browse_tab">显示浏览标签页</string>
     <string name="show_history_tab">显示历史标签页</string>
+    <string name="show_audiobook_tab">显示听书标签页</string>
     <string name="startup_page">默认启动页</string>
     <string name="startup_page_videos">视频</string>
     <string name="startup_page_browse">浏览</string>
     <string name="startup_page_history">历史</string>
+    <string name="startup_page_audiobook">听书</string>
     <string name="blur_effect">模糊效果</string>
     <string name="blur_effect_description">顶栏和底栏的毛玻璃效果</string>
     <string name="progressive_blur">渐变模糊</string>
