@@ -7,4 +7,5 @@ enum class StartupPage {
     VIDEOS,
     BROWSE,
     HISTORY,
+    AUDIOBOOK,
 }

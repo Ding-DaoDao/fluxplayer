@@ -11,6 +11,7 @@ fun StartupPage.name(): String {
         StartupPage.VIDEOS -> R.string.startup_page_videos
         StartupPage.BROWSE -> R.string.startup_page_browse
         StartupPage.HISTORY -> R.string.startup_page_history
+        StartupPage.AUDIOBOOK -> R.string.startup_page_audiobook
     }
 
     return stringResource(id = stringRes)

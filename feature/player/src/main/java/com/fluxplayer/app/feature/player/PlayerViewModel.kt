@@ -27,6 +27,7 @@ import android.util.Log
 import com.fluxplayer.app.core.common.FluxNotificationDelegate
 import com.fluxplayer.app.core.model.FluxMessageEvent
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +58,11 @@ class PlayerViewModel @Inject constructor(
 
 
     var playWhenReady: Boolean = true
+
+    /** 音频章节名称列表（播放器 UI 使用） */
+    var audioChapterNames: List<String> = emptyList()
+    /** 音频章节总数 */
+    var audioChapterCount: Int = 0
 
     private val internalUiState = MutableStateFlow(
         PlayerUiState(
@@ -596,6 +602,21 @@ class PlayerViewModel @Inject constructor(
 
     suspend fun getPlaylistFromUri(uri: Uri): List<Video> {
         return getSortedPlaylistUseCase.invoke(uri)
+    }
+
+    /**
+     * 读取制定书籍的片头片尾跳过设置，返回 flow<Pair<片头秒数, 片尾秒数>>。
+     */
+    fun audioSkipSettings(bookPath: String) = preferencesRepository.applicationPreferences.map { prefs ->
+        val entry = prefs.audiobookSkipSettings[bookPath]
+        if (entry != null) {
+            val parts = entry.split(",")
+            val intro = parts.getOrNull(0)?.toIntOrNull() ?: 0
+            val outro = parts.getOrNull(1)?.toIntOrNull() ?: 0
+            intro to outro
+        } else {
+            0 to 0
+        }
     }
 
     fun updateVideoZoom(uri: String, zoom: Float) {

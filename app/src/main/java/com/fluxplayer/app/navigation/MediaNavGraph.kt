@@ -47,6 +47,16 @@ fun NavGraphBuilder.mediaNavGraph(
             },
             onSettingsClick = navController::navigateToSettings,
             onSearchClick = navController::navigateToSearch,
+            onPlayAudioChapter = { uri, coverUri, startPositionMs, _, _ ->
+                val intent = Intent(context, PlayerActivity::class.java).apply {
+                    action = Intent.ACTION_VIEW
+                    data = uri
+                    putExtra("audio_only", true)
+                    if (coverUri != null) putExtra("cover_uri", coverUri.toString())
+                    if (startPositionMs > 0) putExtra("start_position_ms", startPositionMs)
+                }
+                context.startActivity(intent)
+            },
         )
 
         searchScreen(

@@ -132,6 +132,7 @@ import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
 import com.fluxplayer.app.feature.videopicker.composables.CenterCircularProgressBar
 import com.fluxplayer.app.feature.videopicker.openlist.OpenListBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.screens.history.HistoryTabContent
+import com.fluxplayer.app.feature.videopicker.screens.audiobook.AudiobookTabContent
 import com.fluxplayer.app.feature.videopicker.screens.mediapicker.BrowseTabs
 import com.fluxplayer.app.feature.videopicker.screens.webdav.WebDavBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.composables.MediaView
@@ -169,6 +170,7 @@ fun MediaPickerRoute(
     onSearchClick: () -> Unit,
     onNavigateUp: () -> Unit,
     onWebDavClick: () -> Unit = {},
+    onPlayAudioChapter: (Uri, Uri?, Long, List<Uri>, Int) -> Unit = { _, _, _, _, _ -> },
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val activeWebDavServers by viewModel.activeWebDavServers.collectAsStateWithLifecycle()
@@ -178,6 +180,7 @@ fun MediaPickerRoute(
             if (uiState.preferences.showVideosTab) add(0)
             if (uiState.preferences.showBrowseTab) add(1)
             if (uiState.preferences.showHistoryTab) add(2)
+            if (uiState.preferences.showAudiobookTab) add(3)
         }.ifEmpty { listOf(0) }
     }
 
@@ -188,6 +191,7 @@ fun MediaPickerRoute(
                     StartupPage.VIDEOS -> if (0 in visibleTabs) 0 else visibleTabs.first()
                     StartupPage.BROWSE -> if (1 in visibleTabs) 1 else visibleTabs.first()
                     StartupPage.HISTORY -> if (2 in visibleTabs) 2 else visibleTabs.first()
+                    StartupPage.AUDIOBOOK -> if (3 in visibleTabs) 3 else visibleTabs.first()
                 }
         )
     }
@@ -225,6 +229,7 @@ fun MediaPickerRoute(
         },
         onEvent = viewModel::onEvent,
         visibleTabs = visibleTabs,
+        onPlayAudioChapter = onPlayAudioChapter,
     )
 }
 
@@ -244,6 +249,7 @@ internal fun MediaPickerScreen(
     onWebDavClick: () -> Unit = {},
     onEvent: (MediaPickerUiEvent) -> Unit = {},
     visibleTabs: List<Int> = listOf(0, 1, 2),
+    onPlayAudioChapter: (Uri, Uri?, Long, List<Uri>, Int) -> Unit = { _, _, _, _, _ -> },
 ) {
     val selectionManager = rememberSelectionManager()
     val permissionState = rememberPermissionState(permission = storagePermission)
@@ -266,6 +272,8 @@ internal fun MediaPickerScreen(
     var showLogoutConfirmation by rememberSaveable { mutableStateOf(false) }
     // 从历史页面跳转到云盘目录的目标（fileId, label）
     var navigateToDirParam by rememberSaveable { mutableStateOf<Pair<String, String>?>(null) }
+    // 听书详情页是否正在展示（用于隐藏外层顶栏）
+    var audiobookInDetail by remember { mutableStateOf(false) }
 
 
 
@@ -286,10 +294,16 @@ internal fun MediaPickerScreen(
             val isMiuix = FluxTheme.engine == ComposeEngine.MIUIX
             if (selectedProvider != null && selectedTab == 1 && !selectionManager.isInSelectionMode) {
                 // 已进入 provider → 不显示 Scaffold 顶栏，由 TabContent 内部 ProviderTopBar 接管
-            } else if ((selectedTab == 1 || selectedTab == 2) && !selectionManager.isInSelectionMode) {
+            } else if (audiobookInDetail && selectedTab == 3 && !selectionManager.isInSelectionMode) {
+                // 听书详情页 → 不显示 Scaffold 顶栏，由 AudiobookDetailContent 内部顶栏接管
+            } else if ((selectedTab == 1 || selectedTab == 2 || selectedTab == 3) && !selectionManager.isInSelectionMode) {
                 if (isMiuix) {
                     MiuixSmallTopAppBar(
-                        title = if (selectedTab == 1) stringResource(R.string.browse) else stringResource(R.string.history),
+                        title = when (selectedTab) {
+                            1 -> stringResource(R.string.browse)
+                            2 -> stringResource(R.string.history)
+                            else -> stringResource(R.string.audiobook)
+                        },
                         actions = {
                             IconButton(onClick = onSettingsClick) {
                                 Icon(
@@ -301,7 +315,11 @@ internal fun MediaPickerScreen(
                     )
                 } else {
                     NextTopAppBar(
-                        title = if (selectedTab == 1) stringResource(R.string.browse) else stringResource(R.string.history),
+                        title = when (selectedTab) {
+                            1 -> stringResource(R.string.browse)
+                            2 -> stringResource(R.string.history)
+                            else -> stringResource(R.string.audiobook)
+                        },
                         fontWeight = FontWeight.Bold,
                         navigationIcon = {},
                         actions = {
@@ -520,7 +538,7 @@ internal fun MediaPickerScreen(
                         }
                     },
                 )
-            } else if (!useFloatingBottomBar) {
+            } else if (!useFloatingBottomBar && !audiobookInDetail) {
                 // 标准 NavigationBar
                 NavigationBar(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -562,6 +580,19 @@ internal fun MediaPickerScreen(
                                 )
                             },
                             label = { Text(stringResource(R.string.history)) },
+                        )
+                    }
+                    if (3 in visibleTabs) {
+                        NavigationBarItem(
+                            selected = selectedTab == 3,
+                            onClick = { onTabSelected(3) },
+                            icon = {
+                                Icon(
+                                    imageVector = NextIcons.Audio,
+                                    contentDescription = null,
+                                )
+                            },
+                            label = { Text(stringResource(R.string.audiobook)) },
                         )
                     }
                 }
@@ -753,12 +784,23 @@ internal fun MediaPickerScreen(
                             .padding(contentPadding),
                     )
                 }
+
+                3 -> {
+                    AudiobookTabContent(
+                        onBookClick = {},
+                        onPlayChapter = onPlayAudioChapter,
+                        onShowingDetailChanged = { audiobookInDetail = it },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(contentPadding),
+                    )
+                }
             }
         }
     }
 
         // Floating bar overlay
-        if (useFloatingBottomBar && !selectionManager.isInSelectionMode) {
+        if (useFloatingBottomBar && !selectionManager.isInSelectionMode && !audiobookInDetail) {
             Box(
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
             ) {
@@ -1276,6 +1318,7 @@ private fun FloatingBottomBar(
             if (0 in visibleTabs) add(Triple(NextIcons.Video, stringResource(R.string.videos), 0))
             if (1 in visibleTabs) add(Triple(NextIcons.Folder, stringResource(R.string.browse), 1))
             if (2 in visibleTabs) add(Triple(NextIcons.History, stringResource(R.string.history), 2))
+            if (3 in visibleTabs) add(Triple(NextIcons.Audio, stringResource(R.string.audiobook), 3))
         }
 
         Box(

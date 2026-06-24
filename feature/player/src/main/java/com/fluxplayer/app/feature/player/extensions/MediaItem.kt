@@ -105,7 +105,7 @@ fun MediaItem.copy(
     mediaMetadata.buildUpon()
         .setDurationMs(durationMs)
         .setExtras(
-            Bundle(mediaMetadata.extras).setExtras(
+            Bundle(mediaMetadata.extras ?: Bundle()).setExtras(
                 positionMs = positionMs,
                 videoScale = videoZoom,
                 playbackSpeed = playbackSpeed,
