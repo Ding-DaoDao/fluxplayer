@@ -325,16 +325,33 @@ class Pan123ApiClient(
     }
 
     suspend fun getFileDownloadUrl(item: Pan123FileItem): Result<String> = runCatching {
+        Log.d(TAG, "========== getFileDownloadUrl START ==========")
+        Log.d(TAG, "getFileDownloadUrl: fileId=${item.fileId}, fileName=${item.fileName}")
+        
         loadConfig().getOrThrow()
         val endpoint = apiEndpoint("fileDownloadInfo")
+        Log.d(TAG, "getFileDownloadUrl: endpoint=$endpoint")
+        
         val body = JSONObject().apply {
             put("fileId", item.fileId)
             put("etag", item.etag)
             put("size", item.size)
             put("s3keyFlag", item.s3keyFlag)
         }
+        Log.d(TAG, "getFileDownloadUrl: request body=$body")
+        
         val json = apiPost(endpoint, body)
+        Log.d(TAG, "getFileDownloadUrl: response code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
+        
         val url = json.optJSONObject("data")?.optString("DownloadUrl", "") ?: ""
+        Log.d(TAG, "getFileDownloadUrl: downloadUrl=${url.take(200)}...")
+        
+        if (url.isBlank()) {
+            Log.e(TAG, "getFileDownloadUrl: URL is BLANK! json=$json")
+            throw IllegalStateException("未获取到下载链接")
+        }
+        
+        Log.d(TAG, "========== getFileDownloadUrl END ==========")
         url
     }
 
@@ -343,21 +360,32 @@ class Pan123ApiClient(
      * 解析 video_play_info 数组获取不同清晰度的播放 URL
      */
     suspend fun getVideoPlayInfo(item: Pan123FileItem): Result<VideoPlayResult> = runCatching {
+        Log.d(TAG, "========== getVideoPlayInfo START ==========")
+        Log.d(TAG, "getVideoPlayInfo: fileId=${item.fileId}, fileName=${item.fileName}, etag=${item.etag}, size=${item.size}")
+        
         loadConfig().getOrThrow()
+        Log.d(TAG, "getVideoPlayInfo: loadConfig SUCCESS")
 
         // 使用 buildUrl + apiGet（与反编译代码一致）
         val baseEndpoint = apiEndpoint("getVideoPlayInfo")
+        Log.d(TAG, "getVideoPlayInfo: baseEndpoint=$baseEndpoint")
+        
         val params = mapOf(
             "etag" to item.etag,
             "size" to item.size.toString()
         )
         val fullUrl = buildUrl(baseEndpoint, params)
+        Log.d(TAG, "getVideoPlayInfo: fullUrl=$fullUrl")
 
+        Log.d(TAG, "getVideoPlayInfo: Calling apiGet...")
         val json = apiGet(fullUrl)
+        Log.d(TAG, "getVideoPlayInfo: apiGet response code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
+        Log.d(TAG, "getVideoPlayInfo: apiGet response data=${json.optJSONObject("data")?.toString()?.take(500)}")
 
         val data = json.optJSONObject("data")
         if (data == null) {
-            throw IllegalStateException("无视频信息")
+            Log.e(TAG, "getVideoPlayInfo: data is NULL! json=$json")
+            throw IllegalStateException("无视频信息: code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
         }
 
         val urls = mutableListOf<String>()
@@ -365,22 +393,29 @@ class Pan123ApiClient(
 
         // getVideoPlayInfo URL → 原画（默认播放用）
         val videoUrl = data.optString("url", "")
+        Log.d(TAG, "getVideoPlayInfo: original videoUrl=$videoUrl")
         if (videoUrl.isNotBlank()) {
             urls.add(videoUrl)
             names.add("原画")
+            Log.d(TAG, "getVideoPlayInfo: Added original video URL")
         }
 
         // 转码清晰度列表
         val playInfos = data.optJSONArray("video_play_info")
+        Log.d(TAG, "getVideoPlayInfo: video_play_info array size=${playInfos?.length() ?: 0}")
         if (playInfos != null) {
             for (i in 0 until playInfos.length()) {
                 val info = playInfos.getJSONObject(i)
                 val url = info.getString("url")
                 val resolution = info.optString("resolution", "转码${i + 1}")
+                Log.d(TAG, "getVideoPlayInfo: transcode[$i] resolution=$resolution, url=${url.take(100)}...")
                 urls.add(url)
                 names.add(resolution)
             }
         }
+        
+        Log.d(TAG, "getVideoPlayInfo: FINAL result - urls size=${urls.size}, names=$names")
+        Log.d(TAG, "========== getVideoPlayInfo END ==========")
 
         VideoPlayResult(urls, names)
     }
@@ -389,8 +424,13 @@ class Pan123ApiClient(
      * 获取文件下载信息（含 headers）— 与反编译代码一致
      */
     suspend fun getFileDownloadInfo(item: Pan123FileItem): Result<DownloadInfo> = runCatching {
+        Log.d(TAG, "========== getFileDownloadInfo START ==========")
+        Log.d(TAG, "getFileDownloadInfo: fileId=${item.fileId}, fileName=${item.fileName}, etag=${item.etag}")
+        
         loadConfig().getOrThrow()
         val endpoint = apiEndpoint("fileDownloadInfo")
+        Log.d(TAG, "getFileDownloadInfo: endpoint=$endpoint")
+        
         val body = JSONObject().apply {
             put("driveId", 0)
             put("etag", item.etag)
@@ -399,12 +439,22 @@ class Pan123ApiClient(
             put("FileName", item.fileName)
             put("Size", item.size)
         }
+        Log.d(TAG, "getFileDownloadInfo: request body=$body")
+        
         val json = apiPost(endpoint, body)
+        Log.d(TAG, "getFileDownloadInfo: response code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
+        Log.d(TAG, "getFileDownloadInfo: response data=${json.optJSONObject("data")?.toString()?.take(500)}")
+        
         val data = json.getJSONObject("data")
         val downloadUrl = data.optString("DownloadUrl", "")
+        Log.d(TAG, "getFileDownloadInfo: downloadUrl=${downloadUrl.take(200)}...")
+        
         if (downloadUrl.isBlank()) {
-            throw IllegalStateException("未获取到下载链接")
+            Log.e(TAG, "getFileDownloadInfo: DownloadUrl is BLANK! json=$json")
+            throw IllegalStateException("未获取到下载链接: code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
         }
+        
+        Log.d(TAG, "========== getFileDownloadInfo END ==========")
         DownloadInfo(
             url = downloadUrl,
             fileName = data.optString("fileName", item.fileName),
@@ -545,22 +595,31 @@ class Pan123ApiClient(
      * 从最终CDN URL提取ref参数，AES解密得到Referer值
      */
     fun buildDownloadHeaders(finalUrl: String): Map<String, String> {
+        Log.d(TAG, "buildDownloadHeaders: START, finalUrl=${finalUrl.take(200)}...")
         val ref = parseRefFromUrl(finalUrl)
+        Log.d(TAG, "buildDownloadHeaders: parsed ref=$ref")
+        
         val referer = if (ref != null) {
             try {
-                decryptRef(ref)
+                val decrypted = decryptRef(ref)
+                Log.d(TAG, "buildDownloadHeaders: decrypted referer=$decrypted")
+                decrypted
             } catch (e: Exception) {
-                Log.e(TAG, "decryptRef failed: ${e.message}, using fallback")
+                Log.e(TAG, "buildDownloadHeaders: decryptRef failed: ${e.message}, using fallback")
                 "https://yun.123pan.cn/"
             }
         } else {
+            Log.w(TAG, "buildDownloadHeaders: No ref parameter found in URL, using default referer")
             "https://yun.123pan.cn/"
         }
-        return mapOf(
+        
+        val headers = mapOf(
             "Referer" to referer,
             "X-MF-PAN-RANGE" to "1",
             "User-Agent" to "123pan/v3.1.3(Android 10;;Xiaomi 24031PN0DC)"
         )
+        Log.d(TAG, "buildDownloadHeaders: FINAL headers=$headers")
+        return headers
     }
 
     // endregion

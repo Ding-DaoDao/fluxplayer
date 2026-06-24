@@ -81,7 +81,10 @@ private class AuthAwareDataSource(
         val uri = dataSpec.uri
         val scheme = uri.scheme ?: ""
 
-        Log.d(TAG, "open: scheme=$scheme uri=$uri")
+        Log.d(TAG, "========== open START ==========")
+        Log.d(TAG, "open: scheme=$scheme")
+        Log.d(TAG, "open: uri=${uri.toString().take(200)}...")
+        Log.d(TAG, "open: position=${dataSpec.position}, length=${dataSpec.length}")
 
         val (delegate, effectiveSpec) = when (scheme) {
             "http", "https" -> {
@@ -132,27 +135,45 @@ private class AuthAwareDataSource(
     /** 注入云盘播放所需的 Cookie/Referer/User-Agent 等 header。 */
     private fun applyCloudPlayHeaders(http: HttpDataSource, uri: Uri) {
         val host = uri.host ?: return
-        if (CloudPlayHeaders.isSelfAuthenticatingUrl(uri.toString())) return
+        Log.d(TAG, "applyCloudPlayHeaders: host=$host, uri=${uri.toString().take(150)}...")
+        
+        if (CloudPlayHeaders.isSelfAuthenticatingUrl(uri.toString())) {
+            Log.d(TAG, "applyCloudPlayHeaders: URL is self-authenticating, skipping")
+            return
+        }
+        
         val headers = CloudPlayHeaders.getHeaders(host)
+        Log.d(TAG, "applyCloudPlayHeaders: Found ${headers.size} headers for host=$host")
+        
         for ((key, value) in headers) {
             http.setRequestProperty(key, value)
+            Log.d(TAG, "applyCloudPlayHeaders: Set header $key=${value.take(50)}...")
         }
     }
 
     /** 在 HTTP 请求上设置认证 header。 */
     private fun applyHttpAuth(http: HttpDataSource, uri: Uri) {
         val fragment = uri.fragment ?: ""
+        val host = uri.host ?: ""
+        val url = uri.toString().take(200)
+        
+        Log.d(TAG, "========== applyHttpAuth START ==========")
+        Log.d(TAG, "applyHttpAuth: host=$host, fragment=$fragment")
+        Log.d(TAG, "applyHttpAuth: url=${url}...")
 
         // 夸克/UC 播放认证：通过 URI fragment 检测
         if (("quarkPlay" in fragment || "ucPlay" in fragment) && QuarkAuthProvider.isActive) {
+            Log.d(TAG, "applyHttpAuth: Applying Quark/UC auth")
             http.setRequestProperty("Cookie", QuarkAuthProvider.cookie)
             http.setRequestProperty("Referer", QuarkAuthProvider.referer)
             http.setRequestProperty("User-Agent", QuarkAuthProvider.userAgent)
+            Log.d(TAG, "applyHttpAuth: Quark/UC headers set - Cookie=${QuarkAuthProvider.cookie.take(50)}..., Referer=${QuarkAuthProvider.referer}")
             return
         }
 
         // 阿里云盘播放认证
         if ("alipanPlay" in fragment && AliyunAuthProvider.isActive) {
+            Log.d(TAG, "applyHttpAuth: Applying Aliyun auth")
             http.setRequestProperty("Authorization", AliyunAuthProvider.authorization)
             http.setRequestProperty("Referer", "https://www.alipan.com/")
             http.setRequestProperty("User-Agent", AliyunAuthProvider.userAgent)
@@ -160,13 +181,25 @@ private class AuthAwareDataSource(
         }
 
         // 123 云盘播放认证：video CDN 自带签名，只需基础 Referer + UA
-        if ("pan123Play" in fragment && Pan123AuthProvider.isActive) {
-            Log.d(TAG, "pan123Play auth: domain=${uri.host}")
-            http.setRequestProperty("Referer", Pan123AuthProvider.referer)
-            http.setRequestProperty("User-Agent", Pan123AuthProvider.userAgent)
-            http.setRequestProperty("X-MF-PAN-RANGE", "1")
-            return
+        if ("pan123Play" in fragment) {
+            Log.d(TAG, "applyHttpAuth: pan123Play detected in fragment")
+            Log.d(TAG, "applyHttpAuth: Pan123AuthProvider.isActive=${Pan123AuthProvider.isActive}")
+            Log.d(TAG, "applyHttpAuth: Pan123AuthProvider.referer=${Pan123AuthProvider.referer}")
+            Log.d(TAG, "applyHttpAuth: Pan123AuthProvider.userAgent=${Pan123AuthProvider.userAgent}")
+            
+            if (Pan123AuthProvider.isActive) {
+                Log.d(TAG, "applyHttpAuth: Applying Pan123 auth - setting headers")
+                http.setRequestProperty("Referer", Pan123AuthProvider.referer)
+                http.setRequestProperty("User-Agent", Pan123AuthProvider.userAgent)
+                http.setRequestProperty("X-MF-PAN-RANGE", "1")
+                Log.d(TAG, "applyHttpAuth: Pan123 headers SET - Referer=${Pan123AuthProvider.referer}, User-Agent=${Pan123AuthProvider.userAgent}")
+                Log.d(TAG, "========== applyHttpAuth END (pan123) ==========")
+                return
+            } else {
+                Log.e(TAG, "applyHttpAuth: pan123Play detected but Pan123AuthProvider.isActive=FALSE!")
+            }
         }
+
         if ("pan123Play" in fragment && !Pan123AuthProvider.isActive) {
             Log.w(TAG, "pan123Play detected but Pan123AuthProvider.isActive=false!")
         }
@@ -207,9 +240,12 @@ private class AuthAwareDataSource(
                 http.setRequestProperty("Referer", "https://www.alipan.com/")
                 http.setRequestProperty("User-Agent", AliyunAuthProvider.userAgent)
             } else if (Pan123AuthProvider.isActive) {
+                Log.d(TAG, "applyHttpAuth: FALLBACK - Pan123AuthProvider.isActive, setting headers")
+                Log.d(TAG, "applyHttpAuth: FALLBACK - referer=${Pan123AuthProvider.referer}, ua=${Pan123AuthProvider.userAgent}")
                 http.setRequestProperty("Referer", Pan123AuthProvider.referer)
                 http.setRequestProperty("User-Agent", Pan123AuthProvider.userAgent)
                 http.setRequestProperty("X-MF-PAN-RANGE", "1")
+                Log.d(TAG, "applyHttpAuth: FALLBACK - Pan123 headers SET")
             } else if (C189AuthProvider.isActive) {
                 http.setRequestProperty("Cookie", "COOKIE_LOGIN_USER=${C189AuthProvider.accessToken}")
                 http.setRequestProperty("User-Agent", C189AuthProvider.userAgent)

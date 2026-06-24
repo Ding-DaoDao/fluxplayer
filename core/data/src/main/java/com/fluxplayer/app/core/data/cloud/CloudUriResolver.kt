@@ -94,9 +94,15 @@ class CloudUriResolver @Inject constructor(
     }
 
     private suspend fun resolvePan123(fileId: String): String? {
+        Log.d(TAG, "========== resolvePan123 START: fileId=$fileId ==========")
+        
         val prefs = context.getSharedPreferences("pan123", Context.MODE_PRIVATE)
         val token = prefs.getString("token", "") ?: ""
-        if (token.isBlank()) return null
+        if (token.isBlank()) {
+            Log.e(TAG, "resolvePan123: token is BLANK! Cannot proceed.")
+            return null
+        }
+        Log.d(TAG, "resolvePan123: token exists=${token.isNotBlank()}")
 
         val client = Pan123ApiClient()
         client.setToken("Bearer $token")
@@ -105,13 +111,25 @@ class CloudUriResolver @Inject constructor(
         clearOtherProviders("pan123")
         Pan123AuthProvider.authorization = "Bearer $token"
         Pan123AuthProvider.isActive = true
+        
+        // 注册所有 123 云盘 CDN 域名后缀（关键修复！）
+        // 123云盘的CDN域名是 *.123295.com，不是 *.123pan.cn
+        CloudPlayHeaders.registerSuffix(".123295.com") { Pan123AuthProvider.getPlayHeaders() }
         CloudPlayHeaders.registerSuffix(".123pan.cn") { Pan123AuthProvider.getPlayHeaders() }
+        Log.d(TAG, "resolvePan123: Pan123AuthProvider activated, registered CDN domains")
 
         // Try cached metadata first
         val fileMetadata = CloudPlaylistCache.getFileMetadata("pan123", fileId)
         if (fileMetadata != null) {
-            val etag = fileMetadata.etag ?: return null
-            val size = fileMetadata.size ?: return null
+            Log.d(TAG, "resolvePan123: fileMetadata found - fileName=${fileMetadata.fileName}, etag=${fileMetadata.etag}, size=${fileMetadata.size}")
+            val etag = fileMetadata.etag ?: run {
+                Log.e(TAG, "resolvePan123: etag is NULL!")
+                return null
+            }
+            val size = fileMetadata.size ?: run {
+                Log.e(TAG, "resolvePan123: size is NULL!")
+                return null
+            }
             val item = com.fluxplayer.app.core.data.pan123.Pan123FileItem(
                 fileId = fileId,
                 fileName = fileMetadata.fileName,
@@ -124,9 +142,22 @@ class CloudUriResolver @Inject constructor(
                 trashedAt = "",
                 starredStatus = 0
             )
+            
             // Try video play first
+            Log.d(TAG, "resolvePan123: Trying getVideoPlayInfo...")
             val playResult = client.getVideoPlayInfo(item).getOrNull()
             if (playResult != null && playResult.urls.isNotEmpty()) {
+                Log.d(TAG, "resolvePan123: getVideoPlayInfo SUCCESS - urls size=${playResult.urls.size}, names=${playResult.names}")
+                Log.d(TAG, "resolvePan123: Available URLs:")
+                playResult.urls.forEachIndexed { index, url ->
+                    Log.d(TAG, "  [$index] ${playResult.names.getOrNull(index)}: ${url.take(80)}...")
+                }
+                
+                // 优先使用 HLS URL（包含 .m3u8 或 /hls/）- 更可靠，避免 Range 请求 416 错误
+                val hlsUrl = playResult.urls.find { 
+                    it.contains(".m3u8") || it.contains("/hls/") 
+                }
+                
                 // 缓存所有清晰度选项，供播放器切换
                 if (playResult.urls.size > 1) {
                     val options = playResult.urls.zip(playResult.names).map { (u, n) ->
@@ -134,12 +165,37 @@ class CloudUriResolver @Inject constructor(
                     }
                     videoQualityCache.cacheQualityOptions("pan123", fileId, fileId, options)
                 }
-                return playResult.urls.first() + "#pan123Play=true#"
+                
+                val finalUrl = if (hlsUrl != null) {
+                    Log.d(TAG, "resolvePan123: Using HLS URL (avoid Range request issues)")
+                    hlsUrl
+                } else {
+                    Log.w(TAG, "resolvePan123: No HLS URL found, using first available URL (may cause 416 error)")
+                    playResult.urls.first()
+                } + "#pan123Play=true#"
+                
+                Log.d(TAG, "resolvePan123: Returning video URL: ${finalUrl.take(100)}...")
+                Log.d(TAG, "========== resolvePan123 END (video play) ==========")
+                return finalUrl
+            } else {
+                Log.w(TAG, "resolvePan123: getVideoPlayInfo FAILED or returned empty urls")
             }
+            
             // Fallback to download
+            Log.d(TAG, "resolvePan123: Trying getFileDownloadUrl as fallback...")
             val dlUrl = client.getFileDownloadUrl(item).getOrNull()
-            if (dlUrl != null) return dlUrl + "#pan123Play=true#"
+            if (dlUrl != null) {
+                Log.d(TAG, "resolvePan123: getFileDownloadUrl SUCCESS - url=${dlUrl.take(100)}...")
+                Log.d(TAG, "========== resolvePan123 END (download) ==========")
+                return dlUrl + "#pan123Play=true#"
+            } else {
+                Log.e(TAG, "resolvePan123: getFileDownloadUrl also FAILED!")
+            }
+        } else {
+            Log.e(TAG, "resolvePan123: fileMetadata is NULL for fileId=$fileId")
         }
+        
+        Log.e(TAG, "========== resolvePan123 FAILED: returning null ==========")
         return null
     }
 

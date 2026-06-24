@@ -13,6 +13,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION
@@ -395,6 +396,46 @@ class PlayerService : MediaSessionService() {
                 e.printStackTrace()
                 loudnessEnhancer = null
             }
+        }
+
+        /** 捕获播放错误并详细记录 */
+        override fun onPlayerError(error: PlaybackException) {
+            super.onPlayerError(error)
+            Log.e(TAG, "========== onPlayerError ==========")
+            Log.e(TAG, "onPlayerError: errorCode=${error.errorCode}, errorCodeName=${error.errorCodeName}")
+            Log.e(TAG, "onPlayerError: message=${error.message}")
+            Log.e(TAG, "onPlayerError: cause=${error.cause}")
+            
+            // 获取当前播放的媒体项信息
+            val currentMediaItem = mediaSession?.player?.currentMediaItem
+            Log.e(TAG, "onPlayerError: currentMediaItem=${currentMediaItem?.mediaId}")
+            Log.e(TAG, "onPlayerError: currentMediaItem URI=${currentMediaItem?.localConfiguration?.uri}")
+            
+            // 记录详细的错误信息
+            when (error.errorCode) {
+                PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> {
+                    Log.e(TAG, "onPlayerError: Network connection failed")
+                }
+                PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> {
+                    Log.e(TAG, "onPlayerError: File not found")
+                }
+                PlaybackException.ERROR_CODE_DECODER_INIT_FAILED -> {
+                    Log.e(TAG, "onPlayerError: Decoder init failed")
+                }
+                PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED -> {
+                    Log.e(TAG, "onPlayerError: Malformed container")
+                }
+                PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED -> {
+                    Log.e(TAG, "onPlayerError: Malformed manifest")
+                }
+                else -> {
+                    Log.e(TAG, "onPlayerError: Other error code=${error.errorCode}")
+                }
+            }
+            
+            // 打印完整的堆栈跟踪
+            Log.e(TAG, "onPlayerError: stack trace:", error)
+            Log.e(TAG, "========== onPlayerError END ==========")
         }
     }
 

@@ -18,9 +18,9 @@ object Pan123AuthProvider {
     fun getPlayHeaders(): Map<String, String> {
         return if (isActive) {
             mapOf(
-                "Authorization" to authorization,
                 "Referer" to referer,
-                "User-Agent" to userAgent
+                "User-Agent" to userAgent,
+                "X-MF-PAN-RANGE" to "1"
             )
         } else emptyMap()
     }
