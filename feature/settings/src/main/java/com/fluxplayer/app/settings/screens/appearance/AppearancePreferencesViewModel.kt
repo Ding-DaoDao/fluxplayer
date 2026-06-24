@@ -58,6 +58,7 @@ class AppearancePreferencesViewModel @Inject constructor(
             AppearancePreferencesEvent.ToggleShowVideosTab -> toggleShowVideosTab()
             AppearancePreferencesEvent.ToggleShowBrowseTab -> toggleShowBrowseTab()
             AppearancePreferencesEvent.ToggleShowHistoryTab -> toggleShowHistoryTab()
+            AppearancePreferencesEvent.ToggleShowAudiobookTab -> toggleShowAudiobookTab()
             is AppearancePreferencesEvent.UpdateStartupPage -> updateStartupPage(event.startupPage)
         }
     }
@@ -233,6 +234,14 @@ class AppearancePreferencesViewModel @Inject constructor(
         }
     }
 
+    private fun toggleShowAudiobookTab() {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(showAudiobookTab = !it.showAudiobookTab)
+            }
+        }
+    }
+
     private fun updateStartupPage(startupPage: StartupPage) {
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences {
@@ -270,6 +279,7 @@ sealed interface AppearancePreferencesEvent {
     data object ToggleShowVideosTab : AppearancePreferencesEvent
     data object ToggleShowBrowseTab : AppearancePreferencesEvent
     data object ToggleShowHistoryTab : AppearancePreferencesEvent
+    data object ToggleShowAudiobookTab : AppearancePreferencesEvent
     data class UpdateStartupPage(val startupPage: StartupPage) : AppearancePreferencesEvent
 }
 

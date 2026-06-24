@@ -9,9 +9,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -36,13 +34,15 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
@@ -82,29 +82,23 @@ import coil3.request.ImageRequest
 import coil3.toBitmap
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.R as coreUiR
+import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
 import com.fluxplayer.app.feature.videopicker.model.AudioChapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private val BgTop = Color(0xFFF0F4F8)
-private val BgMid = Color(0xFFE8EDF3)
-private val BgBottom = Color(0xFFDDE4EC)
-private val GoldBorder = Color(0xFF3B82F6)
-private val ActiveChapter = Color(0xFF2563EB)
+// 配色方案通过 FluxTheme.colorScheme 接入，自动适配 MD3 / MIUI X 两套引擎
 
 // ── 动画常量 ──
 /** 封面初始尺寸 */
-private val CoverInitW = 112.dp
-private val CoverInitH = 144.dp
+private val CoverInitW = 120.dp
+private val CoverInitH = 160.dp
 /** 封面收起后尺寸 */
 private val CoverCollapsedW = 48.dp
-private val CoverCollapsedH = 62.dp
-/** 信息区内边距（初始 → 收起） */
-private val InfoPaddingTop = 0.dp
-private val InfoPaddingCollapsed = 0.dp
-/** 收起动画作用的滚动距离（越大越平滑） */
-private val CollapseRangeDp = 260.dp
+private val CoverCollapsedH = 64.dp
+/** 收起动画作用的滚动距离 */
+private val CollapseRangeDp = 240.dp
 
 @Composable
 fun AudiobookDetailContent(
@@ -119,10 +113,13 @@ fun AudiobookDetailContent(
     var reversed by remember { mutableStateOf(false) }
     val chapters = if (reversed) book.chapters.reversed() else book.chapters
 
-    // ── 从封面提取主色调 ──
+    // 当前主题颜色（从 CompositionLocal 读取，自动适配 MD3 / MIUI X）
+    val fluxColors = FluxTheme.colorScheme
+
+    // ── 从封面提取主色调（作为背景渐变的基准色） ──
     val context = LocalContext.current
     val imageLoader = context.imageLoader
-    var paletteColor by remember { mutableStateOf(Color(0xFF1C1C1E)) }
+    var paletteColor by remember { mutableStateOf<Color?>(null) }
     LaunchedEffect(book.coverUri) {
         val coverUri = book.coverUri ?: return@LaunchedEffect
         val bitmap = withContext(Dispatchers.IO) {
@@ -134,26 +131,27 @@ fun AudiobookDetailContent(
             } catch (_: Exception) { null }
         }
         bitmap?.let { bmp ->
-            // Coil 可能返回硬件加速位图 (Config#HARDWARE)，Palette 无法读取像素，需转为 ARGB_8888
             val safeBmp = if (bmp.config == Bitmap.Config.HARDWARE) {
                 bmp.copy(Bitmap.Config.ARGB_8888, false)
             } else bmp
             val palette = Palette.from(safeBmp).generate()
-            val dominant = palette.getDominantColor(paletteColor.toArgb())
-            paletteColor = Color(dominant)
+            val dominant = palette.getDominantColor(0)
+            if (dominant != 0) {
+                paletteColor = Color(dominant)
+            }
         }
     }
 
     // 拦截系统返回键，统一走 onBackClick 正确清掉状态
     BackHandler(onBack = onBackClick)
 
-    // 强制深色状态栏（白色图标）
+    // 状态栏图标颜色：详情页头部为彩色，始终使用白色图标
     val view = LocalView.current
     SideEffect {
         if (!view.isInEditMode) {
             val window = (view.context as Activity).window
             window.statusBarColor = Color.Transparent.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = true
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
         }
     }
 
@@ -176,7 +174,7 @@ fun AudiobookDetailContent(
         }
     }
 
-    // ── 目录卡片可见比例（0=不可见, 1=完全进入白底区域） ──
+    // ── 目录区域可见比例（控制顶栏背景变化） ──
     val catalogVisibleFraction by remember {
         derivedStateOf {
             if (listState.firstVisibleItemIndex >= 1) {
@@ -189,7 +187,7 @@ fun AudiobookDetailContent(
         }
     }
 
-    // ── 封面动画：用 spring 保留轻微物理感 ──
+    // ── 封面动画 ──
     val animatedCoverW by animateDpAsState(
         targetValue = lerp(CoverInitW, CoverCollapsedW, collapseFraction),
         animationSpec = spring(stiffness = 200f, dampingRatio = 0.85f),
@@ -201,47 +199,38 @@ fun AudiobookDetailContent(
         label = "coverH",
     )
 
-    // ── 其他动画：用 tween 保持克制线性 ──
+    // ── 其他动画 ──
     val infoAlpha by animateFloatAsState(
         targetValue = 1f - collapseFraction,
         animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "infoAlpha",
-    )
-    val darkBgAlpha by animateFloatAsState(
-        targetValue = collapseFraction * 0.6f + 0.05f,
-        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-        label = "barBg",
     )
     val topBarTitleAlpha by animateFloatAsState(
         targetValue = collapseFraction,
         animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "barTitle",
     )
-    val borderAlpha by animateFloatAsState(
-        targetValue = 1f - collapseFraction,
-        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-        label = "borderAlpha",
-    )
 
-    // ── 目录卡片颜色：从封面主色提取，混合暗色底色 ──
-    val catalogBg = paletteColor.copy(alpha = 0.15f).compositeOver(BgMid)
-    // ── 顶栏颜色：始终白色半透明 ──
+    // ── 顶栏颜色动画 ──
+    // 未滚动时完全透明（融入头部渐变），滚动到目录区域后渐变为毛玻璃感的表面色
+    val topBarBgAlpha = (catalogVisibleFraction * 1.15f).coerceIn(0f, 0.94f)
     val topBarBgColor by animateColorAsState(
-        targetValue = if (catalogVisibleFraction > 0.5f) {
-            Color.White.copy(alpha = 0.85f)
+        targetValue = if (topBarBgAlpha > 0.02f) {
+            fluxColors.surface.copy(alpha = topBarBgAlpha)
         } else {
-            Color.White.copy(alpha = darkBgAlpha)
+            Color.Transparent
         },
-        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
         label = "topBarBg",
     )
+    val topBarDividerAlpha = ((catalogVisibleFraction - 0.4f) * 3f).coerceIn(0f, 0.35f)
     val topBarIconTint by animateColorAsState(
-        targetValue = Color(0xFF2563EB),
+        targetValue = if (catalogVisibleFraction > 0.35f) fluxColors.onSurface else Color(0xFFFFFFFF),
         animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
         label = "topBarIcon",
     )
     val topBarTitleColor by animateColorAsState(
-        targetValue = Color(0xFF1E293B),
+        targetValue = if (catalogVisibleFraction > 0.35f) fluxColors.onSurface else Color(0xFFFFFFFF),
         animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
         label = "topBarTitleColor",
     )
@@ -255,16 +244,15 @@ fun AudiobookDetailContent(
         label = "favScale",
     )
 
+    // 背景渐变使用的主色：优先使用封面提取色，否则使用主题 primary
+    val gradientPrimary = paletteColor ?: fluxColors.primary
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(BgTop, BgMid, BgBottom),
-                ),
-            ),
+            .background(fluxColors.background),
     ) {
-        // ── 模糊封面背景层（蓝调滤镜） ──
+        // ── 模糊封面背景层 ──
         if (book.coverUri != null) {
             AsyncImage(
                 model = book.coverUri,
@@ -272,23 +260,24 @@ fun AudiobookDetailContent(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(40.dp)
-                    .graphicsLayer { alpha = 0.25f },
+                    .blur(60.dp)
+                    .graphicsLayer { alpha = 0.12f },
             )
         }
-        // ── 渐变遮罩层（蓝白） ──
+        // ── 渐变遮罩层：从页面顶部到底部自然过渡 ──
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFFE8EDF3).copy(alpha = 0.1f),
+                            gradientPrimary.copy(alpha = 0.18f),
+                            gradientPrimary.copy(alpha = 0.06f),
                             Color.Transparent,
-                            Color(0xFFDDE4EC).copy(alpha = 0.3f),
+                            fluxColors.background,
                         ),
                         startY = 0f,
-                        endY = Float.POSITIVE_INFINITY,
+                        endY = 3000f,
                     ),
                 ),
         )
@@ -305,116 +294,120 @@ fun AudiobookDetailContent(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = statusBarTop + topBarHeight + 12.dp),
+                        .padding(top = statusBarTop + topBarHeight + 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    // 封面 + 文字信息
-                    Row(
+                    // 封面
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                            .size(width = animatedCoverW, height = animatedCoverH)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(fluxColors.surfaceVariant)
+                            .graphicsLayer { shadowElevation = 16f },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        // 封面（金色边框 + 缩放动画）
-                        Box(
-                            modifier = Modifier
-                                .size(width = animatedCoverW, height = animatedCoverH)
-                                .clip(RoundedCornerShape(8.dp))
-                                .border(
-                                    width = if (collapseFraction < 0.5f) 2.dp else 0.dp,
-                                    color = GoldBorder.copy(alpha = borderAlpha),
-                                    shape = RoundedCornerShape(8.dp),
-                                )
-                                .background(Color(0xFFE2E8F0)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (book.coverUri != null) {
-                                AsyncImage(
-                                    model = book.coverUri,
-                                    contentDescription = book.title,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = NextIcons.Audio,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(28.dp),
-                                    tint = Color(0xFF94A3B8),
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(16.dp))
-
-                        // 文字信息（随滚动淡出）
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .alpha(infoAlpha),
-                            verticalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(
-                                text = book.title,
-                                color = Color(0xFF1E293B),
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
+                        if (book.coverUri != null) {
+                            AsyncImage(
+                                model = book.coverUri,
+                                contentDescription = book.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "共 ${book.chapterCount} 集",
-                                color = Color(0xFF64748B),
-                                fontSize = 14.sp,
+                        } else {
+                            Icon(
+                                imageVector = NextIcons.Audio,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = fluxColors.onSurfaceVariant.copy(alpha = 0.5f),
                             )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // ── 操作区 ──
+                    // 书名（随滚动淡出）
+                    Text(
+                        text = book.title,
+                        color = fluxColors.onSurface,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .alpha(infoAlpha)
+                            .padding(horizontal = 32.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 章节数
+                    Text(
+                        text = "共 ${book.chapterCount} 章节",
+                        color = fluxColors.onSurfaceVariant,
+                        fontSize = 14.sp,
+                        modifier = Modifier.alpha(infoAlpha),
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // ── 操作区：继续播放按钮（显示续播集数） ──
                     val hasResume = resumeChapterIndex != null && resumeChapterIndex < chapters.size
                     val resumeChapter = if (hasResume) book.chapters.getOrNull(resumeChapterIndex!!) else null
-                    Row(
+                    val resumeChapterNum = if (hasResume) resumeChapterIndex!! + 1 else 1
+
+                    // 主操作按钮
+                    Card(
+                        onClick = {
+                            if (hasResume && resumeChapter != null) {
+                                onChapterClick(resumeChapter, resumePositionMs)
+                            } else if (chapters.isNotEmpty()) {
+                                onChapterClick(chapters.first(), 0L)
+                            }
+                        },
+                        shape = RoundedCornerShape(28.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = fluxColors.primary,
+                        ),
+                        elevation = CardDefaults.cardElevation(
+                            defaultElevation = 4.dp,
+                            pressedElevation = 8.dp,
+                        ),
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                            .fillMaxWidth(0.7f)
+                            .height(60.dp),
                     ) {
-                        Text(
-                            text = if (hasResume) "继续播放 第${resumeChapterIndex!! + 1}集" else "还未有播放记录",
-                            color = Color(0xFF64748B),
-                            fontSize = 14.sp,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (chapters.isNotEmpty()) {
-                            Button(
-                                onClick = {
-                                    if (hasResume && resumeChapter != null) {
-                                        onChapterClick(resumeChapter, resumePositionMs)
-                                    } else {
-                                        onChapterClick(chapters.first(), 0L)
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = ActiveChapter,
-                                ),
-                                shape = RoundedCornerShape(50),
-                            ) {
-                                Icon(
-                                    painter = painterResource(coreUiR.drawable.ic_play),
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                painter = painterResource(coreUiR.drawable.ic_play),
+                                contentDescription = null,
+                                tint = fluxColors.onPrimary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
                                 Text(
-                                    text = if (hasResume && resumeChapter != null) resumeChapter.title else chapters.first().title,
-                                    color = Color.White,
+                                    text = if (hasResume && resumeChapter != null) "继续播放" else "开始播放",
+                                    color = fluxColors.onPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    lineHeight = 14.sp,
+                                )
+                                Text(
+                                    text = if (hasResume && resumeChapter != null) {
+                                        "第 ${resumeChapterNum} 集 · ${resumeChapter.title}"
+                                    } else {
+                                        "${book.chapterCount} 集 · 从头开始"
+                                    },
+                                    color = fluxColors.onPrimary.copy(alpha = 0.85f),
                                     fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.widthIn(max = 160.dp),
                                 )
                             }
                         }
@@ -427,43 +420,50 @@ fun AudiobookDetailContent(
             // ── Item 1: 目录区 ──
             item(key = "catalog") {
                 Column {
-                    // 目录切换栏（轻量横条）
+                    // 目录切换栏
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 4.dp),
+                            .padding(horizontal = 20.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "目录 · ${book.chapterCount}章",
-                            color = Color(0xFF475569),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
+                            text = "目录",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = fluxColors.onSurface,
+                            fontWeight = FontWeight.SemiBold,
                         )
                         Spacer(modifier = Modifier.weight(1f))
                         Text(
-                            text = if (reversed) "倒序" else "正序",
-                            color = Color(0xFF64748B),
+                            text = "${book.chapterCount} 章节",
+                            color = fluxColors.onSurfaceVariant,
                             fontSize = 13.sp,
-                            modifier = Modifier
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = ripple(),
-                                    onClick = { reversed = !reversed },
-                                )
-                                .padding(4.dp),
                         )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (reversed) fluxColors.primary.copy(alpha = 0.1f) else fluxColors.surfaceVariant,
+                            modifier = Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = ripple(),
+                                onClick = { reversed = !reversed },
+                            ),
+                        ) {
+                            Text(
+                                text = if (reversed) "倒序" else "正序",
+                                color = if (reversed) fluxColors.primary else fluxColors.onSurfaceVariant,
+                                fontSize = 13.sp,
+                                fontWeight = if (reversed) FontWeight.Medium else FontWeight.Normal,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
 
-            // ── Items 2+: 章节列表（卡片式） ──
-            val cardBg = Color(0xFFF5F7FA)
-            val progressBrush = Brush.horizontalGradient(
-                colors = listOf(Color(0xFF2563EB), Color(0xFF60A5FA)),
-            )
+            // ── Items 2+: 章节列表 ──
             itemsIndexed(
                 items = chapters,
                 key = { _, ch -> ch.uri.toString() },
@@ -475,91 +475,117 @@ fun AudiobookDetailContent(
                 val savedDurMs = savedProgress?.second?.coerceAtLeast(0L) ?: 0L
                 val hasProgress = savedDurMs > 0 && savedPosMs > 0
                 val isPlayed = hasProgress
-                val rawProgress = if (hasProgress) (savedPosMs.toFloat() / savedDurMs).coerceIn(0f, 1f) else 0f
-                val animatedProgress by animateFloatAsState(
-                    targetValue = rawProgress,
-                    animationSpec = spring(dampingRatio = 0.7f, stiffness = 80f),
-                    label = "progress",
-                )
+                val progress = if (hasProgress) (savedPosMs.toFloat() / savedDurMs).coerceIn(0f, 1f) else 0f
 
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = cardBg,
+                Card(
+                    onClick = { onChapterClick(chapter, savedPosMs) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isPlayed) fluxColors.surfaceVariant else fluxColors.surfaceContainer,
+                    ),
+                    elevation = CardDefaults.cardElevation(
+                        defaultElevation = 0.dp,
+                        pressedElevation = 2.dp,
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 3.dp)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(),
-                            onClick = { onChapterClick(chapter, savedPosMs) },
-                        ),
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
                 ) {
                     Row(
-                        modifier = Modifier.padding(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // 序号
-                        Text(
-                            text = realIndex.toString().padStart(3, '0'),
-                            color = if (isPlayed) ActiveChapter else Color(0xFF94A3B8),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.width(40.dp),
-                        )
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            // 标题 + 播放按钮
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
+                        // 序号圆圈
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isPlayed) fluxColors.primary.copy(alpha = 0.1f) else fluxColors.surfaceVariant,
+                            modifier = Modifier.size(36.dp),
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.fillMaxSize(),
                             ) {
                                 Text(
-                                    text = chapter.title,
-                                    color = if (isPlayed) ActiveChapter else Color(0xFF334155),
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Icon(
-                                    painter = painterResource(coreUiR.drawable.ic_play),
-                                    contentDescription = "播放",
-                                    tint = if (isPlayed) ActiveChapter else Color(0xFF94A3B8),
-                                    modifier = Modifier.size(22.dp),
+                                    text = realIndex.toString(),
+                                    color = if (isPlayed) fluxColors.primary else fluxColors.onSurfaceVariant,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
                                 )
                             }
+                        }
 
-                            Spacer(modifier = Modifier.height(if (hasProgress) 8.dp else 0.dp))
+                        Spacer(modifier = Modifier.width(14.dp))
 
-                            // 进度条（仅已播放）
+                        // 章节信息
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = chapter.title,
+                                color = if (isPlayed) fluxColors.primary else fluxColors.onSurface,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+
+                            // 进度条（已播放的章节显示）
                             if (hasProgress) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
                                             .height(4.dp)
                                             .clip(RoundedCornerShape(2.dp))
-                                            .background(Color(0xFFE2E8F0)),
+                                            .background(fluxColors.primary.copy(alpha = 0.1f)),
                                     ) {
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxHeight()
-                                                .fillMaxWidth(animatedProgress)
+                                                .fillMaxWidth(progress)
                                                 .clip(RoundedCornerShape(2.dp))
-                                                .background(progressBrush),
+                                                .background(
+                                                    Brush.horizontalGradient(
+                                                        colors = listOf(
+                                                            fluxColors.primary.copy(alpha = 0.5f),
+                                                            fluxColors.primary,
+                                                        ),
+                                                    ),
+                                                ),
                                         )
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "已听 ${formatChapterProgress(savedPosMs, savedDurMs)}",
-                                        color = ActiveChapter.copy(alpha = 0.8f),
+                                        text = "${(progress * 100).toInt()}%",
+                                        color = fluxColors.primary.copy(alpha = 0.7f),
                                         fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
                                     )
                                 }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        // 播放图标
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isPlayed) fluxColors.primary.copy(alpha = 0.1f) else fluxColors.surfaceVariant,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                Icon(
+                                    painter = painterResource(coreUiR.drawable.ic_play),
+                                    contentDescription = "播放",
+                                    tint = if (isPlayed) fluxColors.primary else fluxColors.onSurfaceVariant,
+                                    modifier = Modifier.size(14.dp),
+                                )
                             }
                         }
                     }
@@ -567,17 +593,31 @@ fun AudiobookDetailContent(
             }
         }
 
-        // ── 悬浮顶栏：白色毛玻璃效果 ──
+        // ── 悬浮顶栏 — 融入式设计：未滚动时透明融入渐变背景，滚动后渐变出毛玻璃表面 ──
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(topBarHeight + statusBarTop)
-                .background(topBarBgColor),
+                .height(topBarHeight + statusBarTop),
         ) {
+            // 顶栏背景
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(topBarBgColor),
+            )
+            // 底部分隔线（仅在滚动到目录区域后显示，视觉上连接顶栏与下方内容）
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(fluxColors.outlineVariant.copy(alpha = topBarDividerAlpha)),
+            )
+
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = statusBarTop, start = 12.dp, end = 12.dp),
+                    .padding(top = statusBarTop, start = 4.dp, end = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -594,13 +634,14 @@ fun AudiobookDetailContent(
                 Text(
                     text = book.title,
                     color = topBarTitleColor.copy(alpha = topBarTitleAlpha),
-                    fontSize = 18.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .weight(1f, fill = false)
                         .padding(horizontal = 8.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
 
                 // 右侧收藏（带点击微交互）
@@ -625,11 +666,4 @@ fun AudiobookDetailContent(
 // ── 工具：Dp 线性插值 ──
 private fun lerp(start: Dp, stop: Dp, fraction: Float): Dp {
     return start + (stop - start) * fraction.coerceIn(0f, 1f)
-}
-
-// ── 工具：章节进度格式化 ──
-private fun formatChapterProgress(posMs: Long, durMs: Long): String {
-    if (durMs <= 0) return "0%"
-    val pct = (posMs.toFloat() / durMs * 100).toInt().coerceIn(0, 100)
-    return "$pct%"
 }

@@ -17,6 +17,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
 import androidx.activity.viewModels
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -48,6 +50,8 @@ import com.fluxplayer.app.feature.player.service.stopPlayerSession
 import com.fluxplayer.app.feature.player.utils.PlayerApi
 import com.fluxplayer.app.core.data.extractor.ThumbnailExtractor
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.model.ComposeEngine
+import com.fluxplayer.app.core.model.ThemeConfig
 import com.fluxplayer.app.core.model.VideoSource
 import android.util.Log
 import java.io.File
@@ -123,7 +127,17 @@ class PlayerActivity : ComponentActivity() {
 
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val appPrefs by preferencesRepository.applicationPreferences
+                .collectAsStateWithLifecycle(initialValue = null)
             var player by remember { mutableStateOf<MediaController?>(null) }
+
+            // 跟随用户主题偏好（亮/暗/跟随系统），听书页不再强制暗色
+            val shouldUseDarkTheme: Boolean = when (appPrefs?.themeConfig) {
+                ThemeConfig.SYSTEM -> isSystemInDarkTheme()
+                ThemeConfig.OFF -> false
+                ThemeConfig.ON -> true
+                null -> isSystemInDarkTheme()
+            }
 
             LifecycleStartEffect(Unit) {
                 maybeInitControllerFuture()
@@ -166,7 +180,11 @@ class PlayerActivity : ComponentActivity() {
                         finishAndStopPlayerSession()
                     }
 
-                    NextPlayerTheme(darkTheme = true) {
+                    NextPlayerTheme(
+                        darkTheme = shouldUseDarkTheme,
+                        dynamicColor = appPrefs?.useDynamicColors ?: true,
+                        composeEngine = appPrefs?.composeEngine ?: ComposeEngine.MATERIAL,
+                    ) {
                         val mp = player
                         // 从路径提取书名，供 loading 界面使用
                         val bookTitle = bookPath.substringAfterLast('/').takeIf { it.isNotEmpty() }

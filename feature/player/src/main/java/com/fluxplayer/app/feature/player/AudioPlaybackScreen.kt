@@ -2,7 +2,9 @@ package com.fluxplayer.app.feature.player
 
 import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,15 +27,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.outlined.AccessTime
+import androidx.compose.material3.ripple
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,12 +57,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -78,19 +76,55 @@ import com.fluxplayer.app.core.ui.components.FluxNotificationState
 import com.fluxplayer.app.feature.player.state.rememberMediaPresentationState
 import com.fluxplayer.app.feature.player.state.rememberMetadataState
 import com.fluxplayer.app.core.ui.R as coreUiR
+import com.fluxplayer.app.core.ui.theme.FluxTheme
 import androidx.compose.material.icons.Icons.AutoMirrored
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// region ── 颜色常量 ──
+// region ── 播放器主题颜色（如 FluxTheme.colorScheme 获取，自动适配 MD3 / MIUIX 双引擎） ──
+// 播放器始终使用暗色模式（NextPlayerTheme(darkTheme = true)），但具体暗色值由引擎决定
 
-private val PlayerBg = Color(0xFF111111)
-private val TagBg = Color(0x2DFFFFFF)
-private val TrackBg = Color(0x40FFFFFF)
-private val SubtleWhite = Color(0xCCFFFFFF)
-private val BlueAccent = Color(0xFF3B82F6)
-private val White = Color.White
+/** 播放器背景色 如 从主题引擎获取暗如 background */
+@Composable
+private fun playerBg() = FluxTheme.colorScheme.background
+
+/** 主文字色（暗色背景上的白�?/浅色文字如 */
+@Composable
+private fun playerOnSurface() = FluxTheme.colorScheme.onSurface
+
+/** 次要文字如 */
+@Composable
+private fun playerOnSurfaceVariant() = FluxTheme.colorScheme.onSurfaceVariant
+
+/** 进度条轨道色 如 主文字色低透明 */
+@Composable
+private fun playerTrackColor() = FluxTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+
+/** 弹窗/卡片表面如 */
+@Composable
+private fun playerSurface() = FluxTheme.colorScheme.surface
+
+/** 弹窗表面容器如 */
+@Composable
+private fun playerSurfaceContainer() = FluxTheme.colorScheme.surfaceContainer
+
+/** 输入�?/次要表面如 */
+@Composable
+private fun playerSurfaceVariant() = FluxTheme.colorScheme.surfaceVariant
+
+/** 主色如 */
+@Composable
+private fun playerPrimary() = FluxTheme.colorScheme.primary
+
+/** 主色上的文字如 */
+@Composable
+private fun playerOnPrimary() = FluxTheme.colorScheme.onPrimary
+
+/** 边框如 */
+@Composable
+private fun playerOutline() = FluxTheme.colorScheme.outline
 
 // endregion
 
@@ -119,13 +153,13 @@ fun AudioPlaybackScreen(
     val artworkUri: Uri? = coverArtworkUri
         ?: player.currentMediaItem?.mediaMetadata?.artworkUri
 
-    // ── 拖拽状态 ──
+    // ── 拖拽状如 ──
     var isScrubbing by remember { mutableStateOf(false) }
     var scrubPosition by remember { mutableFloatStateOf(0f) }
     val displayPosition = if (isScrubbing) scrubPosition else mediaState.position.toFloat()
 
     // ── 速度菜单 ──
-    var showSpeedMenu by remember { mutableStateOf(false) }
+    var showSpeedSheet by remember { mutableStateOf(false) }
     var currentSpeed by remember { mutableStateOf(player.playbackParameters.speed) }
     LaunchedEffect(player.playbackParameters) { currentSpeed = player.playbackParameters.speed }
 
@@ -134,7 +168,7 @@ fun AudioPlaybackScreen(
     var customSpeedText by remember { mutableStateOf("") }
 
     // ── 定时关闭 ──
-    var sleepRemaining by remember { mutableIntStateOf(0) }  // 剩余秒数，0=未激活
+    var sleepRemaining by remember { mutableIntStateOf(0) }  // 剩余秒数�?0=未激�?
     var sleepCustomMins by remember { mutableIntStateOf(0) }  // 自定义分钟数
     var showSleepSheet by remember { mutableStateOf(false) }
     LaunchedEffect(sleepRemaining) {
@@ -154,7 +188,7 @@ fun AudioPlaybackScreen(
         while (true) {
             delay(5000)
             val mediaId = player.currentMediaItem?.mediaId
-            // 用 mediaId 在 chapterPaths 中反查真实章节索引，兜底 currentMediaItemIndex
+            // 如 mediaId 如 chapterPaths 中反查真实章节索引，兜底 currentMediaItemIndex
             val idx = if (mediaId != null && chapterPaths.isNotEmpty()) {
                 chapterPaths.indexOf(mediaId).coerceAtLeast(0)
             } else {
@@ -162,10 +196,10 @@ fun AudioPlaybackScreen(
             }
             val pos = player.currentPosition
             val dur = player.duration
-            // duration 未就绪（C.TIME_UNSET）时跳过，避免存入无效数据
+            // duration 未就绪（C.TIME_UNSET）时跳过，避免存入无效数�?
             if (dur > 0) {
                 onSaveResume(idx, pos, dur)
-                // 立即更新本地进度（不等 DataStore 回流）
+                // 立即更新本地进度（不如 DataStore 回流�?
                 localProgress = localProgress + (idx to (pos to dur))
             }
         }
@@ -174,12 +208,96 @@ fun AudioPlaybackScreen(
     // ── 播放列表弹窗 ──
     var showPlaylistSheet by remember { mutableStateOf(false) }
 
+    // 倍速弹窗
+    if (showSpeedSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSpeedSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+            containerColor = playerSurfaceContainer(),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 40.dp),
+            ) {
+                Text("播放速度", color = playerOnSurface(), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(20.dp))
+                // Pill 按钮网格
+                val allSpeeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // 两行网格
+                    allSpeeds.chunked(4).forEach { row ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            row.forEach { speed ->
+                                val isActive = (currentSpeed - speed) in -0.05f..0.05f
+                                Surface(
+                                    onClick = {
+                                        player.setPlaybackSpeed(speed)
+                                        currentSpeed = speed
+                                        onSpeedChanged(speed)
+                                        showSpeedSheet = false
+                                    },
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (isActive) playerPrimary() else playerSurface(),
+                                    border = if (isActive) null else BorderStroke(0.5.dp, playerOutline()),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text(
+                                        text = "${speed}x",
+                                        color = if (isActive) playerOnPrimary() else playerOnSurface(),
+                                        fontSize = 14.sp,
+                                        fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Medium,
+                                        modifier = Modifier.padding(vertical = 10.dp),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                // 自定义倍速
+                Surface(
+                    onClick = {
+                        customSpeedText = "${currentSpeed}"
+                        showSpeedSheet = false
+                        showCustomSpeed = true
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    color = playerSurface(),
+                    border = BorderStroke(0.5.dp, playerOutline()),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("自定义倍速", color = playerOnSurface(), fontSize = 14.sp)
+                        Spacer(modifier = Modifier.weight(1f))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = playerOnSurfaceVariant(),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // 鈹€鈹€ 閫熷害鑿滃崟 鈹€鈹€
+
     // ── 片头跳过 ──
     var introApplied by remember { mutableStateOf(false) }
     LaunchedEffect(mediaState.isPlaying) {
         if (!introApplied && mediaState.isPlaying && introSkipSeconds > 0) {
-            delay(400) // 等 ExoPlayer 缓冲就绪（含续播 seek 完成）
-            // 当前已在片头之后（续播/拖拽等场景）→ 不跳
+            delay(400) // 如 ExoPlayer 缓冲就绪（含续播 seek 完成�?
+            // 当前已在片头之后（续�?/拖拽等场景）如 不跳
             if (player.currentPosition < introSkipSeconds * 1000L) {
                 player.seekTo(introSkipSeconds * 1000L)
             }
@@ -202,11 +320,11 @@ fun AudioPlaybackScreen(
     var showSkipSheet by remember { mutableStateOf(false) }
     var editIntro by remember { mutableIntStateOf(introSkipSeconds) }
     var editOutro by remember { mutableIntStateOf(outroSkipSeconds) }
-    if (showSkipSheet) {
+        if (showSkipSheet) {
         ModalBottomSheet(
             onDismissRequest = { showSkipSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
-            containerColor = Color(0xFF1C1C1E),
+            containerColor = playerSurfaceContainer(),
         ) {
             Column(
                 modifier = Modifier
@@ -216,58 +334,97 @@ fun AudioPlaybackScreen(
             ) {
                 Text(
                     text = "片头片尾跳过",
-                    color = White,
+                    color = playerOnSurface(),
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                 )
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Text("片头跳过（秒）", color = Color(0xFFBBBBBB), fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = if (editIntro == 0) "" else editIntro.toString(),
-                    onValueChange = { value ->
-                        val digits = value.filter(Char::isDigit).take(5)
-                        editIntro = digits.toIntOrNull() ?: 0
-                    },
-                    placeholder = { Text("跳过片头 N 秒", color = Color(0xFF666666)) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = White,
-                        unfocusedTextColor = White,
-                        focusedContainerColor = Color(0xFF2A2A2A),
-                        unfocusedContainerColor = Color(0xFF2A2A2A),
-                        focusedBorderColor = BlueAccent,
-                        unfocusedBorderColor = Color(0xFF555555),
-                    ),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
                 Spacer(modifier = Modifier.height(16.dp))
-
-                Text("片尾跳过（秒）", color = Color(0xFFBBBBBB), fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = if (editOutro == 0) "" else editOutro.toString(),
-                    onValueChange = { value ->
-                        val digits = value.filter(Char::isDigit).take(5)
-                        editOutro = digits.toIntOrNull() ?: 0
-                    },
-                    placeholder = { Text("跳过片尾 N 秒", color = Color(0xFF666666)) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = White,
-                        unfocusedTextColor = White,
-                        focusedContainerColor = Color(0xFF2A2A2A),
-                        unfocusedContainerColor = Color(0xFF2A2A2A),
-                        focusedBorderColor = BlueAccent,
-                        unfocusedBorderColor = Color(0xFF555555),
-                    ),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
+                // 内容区用 weight 撑开，确保保存按钮在底部
+                Column(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    // 片头
+                    Column {
+                        Text("片头跳过", color = playerOnSurfaceVariant(), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(3, 5, 10, 15, 30).forEach { sec ->
+                                Surface(
+                                    onClick = { editIntro = sec },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (editIntro == sec) playerPrimary() else playerSurface(),
+                                    border = if (editIntro == sec) null else BorderStroke(0.5.dp, playerOutline()),
+                                ) {
+                                    Text(
+                                        text = "${sec}s",
+                                        color = if (editIntro == sec) playerOnPrimary() else playerOnSurfaceVariant(),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = if (editIntro == 0) "" else editIntro.toString(),
+                            onValueChange = { v -> editIntro = v.filter(Char::isDigit).take(4).toIntOrNull() ?: 0 },
+                            placeholder = { Text("自定义秒数", color = playerOnSurfaceVariant().copy(alpha = 0.5f)) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = playerOnSurface(),
+                                unfocusedTextColor = playerOnSurface(),
+                                focusedContainerColor = playerSurfaceVariant(),
+                                unfocusedContainerColor = playerSurfaceVariant(),
+                                focusedBorderColor = playerPrimary(),
+                                unfocusedBorderColor = playerOutline(),
+                            ),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    // 片尾
+                    Column {
+                        Text("片尾跳过", color = playerOnSurfaceVariant(), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(3, 5, 10, 15, 30).forEach { sec ->
+                                Surface(
+                                    onClick = { editOutro = sec },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (editOutro == sec) playerPrimary() else playerSurface(),
+                                    border = if (editOutro == sec) null else BorderStroke(0.5.dp, playerOutline()),
+                                ) {
+                                    Text(
+                                        text = "${sec}s",
+                                        color = if (editOutro == sec) playerOnPrimary() else playerOnSurfaceVariant(),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = if (editOutro == 0) "" else editOutro.toString(),
+                            onValueChange = { v -> editOutro = v.filter(Char::isDigit).take(4).toIntOrNull() ?: 0 },
+                            placeholder = { Text("自定义秒数", color = playerOnSurfaceVariant().copy(alpha = 0.5f)) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = playerOnSurface(),
+                                unfocusedTextColor = playerOnSurface(),
+                                focusedContainerColor = playerSurfaceVariant(),
+                                unfocusedContainerColor = playerSurfaceVariant(),
+                                focusedBorderColor = playerPrimary(),
+                                unfocusedBorderColor = playerOutline(),
+                            ),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(24.dp))
                 Button(
                     onClick = {
@@ -275,21 +432,21 @@ fun AudioPlaybackScreen(
                         showSkipSheet = false
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = BlueAccent),
+                    colors = ButtonDefaults.buttonColors(containerColor = playerPrimary()),
                     shape = RoundedCornerShape(12.dp),
                 ) {
-                    Text("保存", color = White, fontSize = 16.sp)
+                    Text("保存", color = playerOnPrimary(), fontSize = 16.sp)
                 }
             }
         }
     }
 
     // ── 定时关闭弹窗 ──
-    if (showSleepSheet) {
+        if (showSleepSheet) {
         ModalBottomSheet(
             onDismissRequest = { showSleepSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
-            containerColor = Color(0xFF1C1C1E),
+            containerColor = playerSurfaceContainer(),
         ) {
             Column(
                 modifier = Modifier
@@ -297,31 +454,69 @@ fun AudioPlaybackScreen(
                     .padding(horizontal = 24.dp)
                     .padding(bottom = 40.dp),
             ) {
-                Text("定时关闭", color = White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("定时关闭", color = playerOnSurface(), fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(20.dp))
-                listOf(15 to "15 分钟", 30 to "30 分钟", 45 to "45 分钟", 60 to "60 分钟").forEach { (mins, label) ->
-                    Surface(
-                        onClick = {
-                            sleepRemaining = mins * 60
-                            showSleepSheet = false
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF2A2A2A),
-                    ) {
-                        Text(
-                            text = label,
-                            color = White,
-                            fontSize = 16.sp,
-                            modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Radio 样式选项
+                    val sleepOption = when {
+                        sleepCustomMins > 0 -> -1
+                        sleepRemaining == 15 * 60 -> 15
+                        sleepRemaining == 30 * 60 -> 30
+                        sleepRemaining == 45 * 60 -> 45
+                        sleepRemaining == 60 * 60 -> 60
+                        else -> -1
+                    }
+                    val timerOptions = listOf(15 to "15 分钟", 30 to "30 分钟", 45 to "45 分钟", 60 to "60 分钟")
+                    timerOptions.forEach { (mins, label) ->
+                        val selected = sleepOption == mins
+                        Surface(
+                            onClick = {
+                                sleepRemaining = mins * 60
+                                sleepCustomMins = 0
+                                showSleepSheet = false
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (selected) playerPrimary().copy(alpha = 0.08f) else playerSurface(),
+                            border = BorderStroke(
+                                if (selected) 1.dp else 0.5.dp,
+                                if (selected) playerPrimary() else playerOutline(),
+                            ),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (selected) playerPrimary() else playerOnSurface(),
+                                    fontSize = 15.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                // Radio circle
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (selected) playerPrimary() else Color.Transparent,
+                                    border = if (!selected) BorderStroke(1.5.dp, playerOutline()) else null,
+                                    modifier = Modifier.size(20.dp),
+                                ) {
+                                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                        if (selected) {
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = playerOnPrimary(),
+                                                modifier = Modifier.size(8.dp),
+                                            ) {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("自定义（分钟）", color = Color(0xFFBBBBBB), fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(8.dp))
+                Text("自定义（分钟）", color = playerOnSurfaceVariant(), fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -331,14 +526,14 @@ fun AudioPlaybackScreen(
                         onValueChange = { value ->
                             sleepCustomMins = value.filter(Char::isDigit).take(4).toIntOrNull() ?: 0
                         },
-                        placeholder = { Text("输入分钟数", color = Color(0xFF666666)) },
+                        placeholder = { Text("输入分钟数", color = playerOnSurfaceVariant().copy(alpha = 0.5f)) },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = White,
-                            unfocusedTextColor = White,
-                            focusedContainerColor = Color(0xFF2A2A2A),
-                            unfocusedContainerColor = Color(0xFF2A2A2A),
-                            focusedBorderColor = BlueAccent,
-                            unfocusedBorderColor = Color(0xFF555555),
+                            focusedTextColor = playerOnSurface(),
+                            unfocusedTextColor = playerOnSurface(),
+                            focusedContainerColor = playerSurface(),
+                            unfocusedContainerColor = playerSurface(),
+                            focusedBorderColor = playerPrimary(),
+                            unfocusedBorderColor = playerOutline(),
                         ),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -353,10 +548,10 @@ fun AudioPlaybackScreen(
                             }
                         },
                         enabled = sleepCustomMins > 0,
-                        colors = ButtonDefaults.buttonColors(containerColor = BlueAccent),
+                        colors = ButtonDefaults.buttonColors(containerColor = playerPrimary()),
                         shape = RoundedCornerShape(10.dp),
                     ) {
-                        Text("开始", color = White, fontSize = 14.sp)
+                        Text("开始", color = playerOnPrimary(), fontSize = 14.sp)
                     }
                 }
                 if (sleepRemaining > 0) {
@@ -364,14 +559,16 @@ fun AudioPlaybackScreen(
                     Surface(
                         onClick = { sleepRemaining = 0; showSleepSheet = false },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF661111),
+                        shape = RoundedCornerShape(10.dp),
+                        color = FluxTheme.colorScheme.error.copy(alpha = 0.15f),
+                        border = BorderStroke(0.5.dp, FluxTheme.colorScheme.error.copy(alpha = 0.3f)),
                     ) {
                         Text(
                             text = "取消定时",
-                            color = White,
-                            fontSize = 16.sp,
-                            modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
+                            color = FluxTheme.colorScheme.error,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
                         )
                     }
                 }
@@ -379,11 +576,11 @@ fun AudioPlaybackScreen(
         }
     }
 
-    // ── 自定义倍速弹窗 ──
+    // ── 自定义倍速弹如 ──
     if (showCustomSpeed) {
         AlertDialog(
             onDismissRequest = { showCustomSpeed = false },
-            title = { Text("自定义倍速", color = White) },
+            title = { Text("自定义倍速", color = playerOnSurface()) },
             text = {
                 OutlinedTextField(
                     value = customSpeedText,
@@ -393,12 +590,12 @@ fun AudioPlaybackScreen(
                             customSpeedText = filtered
                         }
                     },
-                    placeholder = { Text("输入倍速，如 1.75", color = Color(0xFF666666)) },
+                    placeholder = { Text("输入倍速，如 1.75", color = playerOnSurfaceVariant().copy(alpha = 0.4f)) },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = White,
-                        unfocusedTextColor = White,
-                        focusedBorderColor = BlueAccent,
-                        unfocusedBorderColor = Color(0xFF555555),
+                        focusedTextColor = playerOnSurface(),
+                        unfocusedTextColor = playerOnSurface(),
+                        focusedBorderColor = playerPrimary(),
+                        unfocusedBorderColor = playerOutline(),
                     ),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
@@ -416,21 +613,21 @@ fun AudioPlaybackScreen(
                             showCustomSpeed = false
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = BlueAccent),
+                    colors = ButtonDefaults.buttonColors(containerColor = playerPrimary()),
                     enabled = customSpeedText.toFloatOrNull()?.let { it in 0.25f..16f } == true,
                 ) {
-                    Text("确定", color = White)
+                    Text("确定", color = playerOnPrimary())
                 }
             },
             dismissButton = {
                 Button(
                     onClick = { showCustomSpeed = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF555555)),
+                    colors = ButtonDefaults.buttonColors(containerColor = playerSurfaceVariant()),
                 ) {
-                    Text("取消", color = White)
+                    Text("取消", color = playerOnSurface())
                 }
             },
-            containerColor = Color(0xFF1C1C1E),
+            containerColor = playerSurfaceContainer(),
         )
     }
 
@@ -439,11 +636,11 @@ fun AudioPlaybackScreen(
         ModalBottomSheet(
             onDismissRequest = { showPlaylistSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
-            containerColor = Color(0xFF1C1C1E),
+            containerColor = playerSurfaceContainer(),
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    "播放列表", color = White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                    "播放列表", color = playerOnSurface(), fontSize = 20.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 24.dp),
                 )
                 Spacer(modifier = Modifier.height(20.dp))
@@ -469,7 +666,7 @@ fun AudioPlaybackScreen(
                                 .fillMaxWidth()
                                 .padding(vertical = 2.dp),
                             shape = RoundedCornerShape(10.dp),
-                            color = if (isActive) BlueAccent.copy(alpha = 0.3f) else Color.Transparent,
+                            color = if (isActive) playerPrimary().copy(alpha = 0.3f) else Color.Transparent,
                         ) {
                             Row(
                                 modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
@@ -477,14 +674,14 @@ fun AudioPlaybackScreen(
                             ) {
                                 Text(
                                     text = "${index + 1}",
-                                    color = if (isActive) BlueAccent else Color(0xFF888888),
+                                    color = if (isActive) playerPrimary() else playerOnSurfaceVariant(),
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier.width(28.dp),
                                 )
                                 Text(
                                     text = name,
-                                    color = if (isActive) White else Color(0xFFCCCCCC),
+                                    color = if (isActive) playerOnSurface() else playerOnSurfaceVariant(),
                                     fontSize = 15.sp,
                                     fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
                                     maxLines = 1,
@@ -494,7 +691,7 @@ fun AudioPlaybackScreen(
                                 if (progressText != null) {
                                     Text(
                                         text = progressText,
-                                        color = if (isActive) BlueAccent else Color(0xFF888888),
+                                        color = if (isActive) playerPrimary() else playerOnSurfaceVariant(),
                                         fontSize = 12.sp,
                                         modifier = Modifier.padding(start = 8.dp),
                                     )
@@ -514,33 +711,14 @@ fun AudioPlaybackScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(PlayerBg),
+            .background(playerBg()),
     ) {
-        if (artworkUri != null) {
-            AsyncImage(
-                model = artworkUri,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(30.dp)
-                    .graphicsLayer { alpha = 0.85f },
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Black.copy(alpha = 0.2f),
-                            Color.Black.copy(alpha = 0.6f),
-                            Color.Black.copy(alpha = 0.85f),
-                        ),
-                    ),
-                ),
-        )
+        // 当前章节索引
+        val currentIndex = player.currentMediaItemIndex.coerceAtLeast(0)
+        val chapterTitle = chapterNames.getOrElse(currentIndex) { "" }
+        val hasChapters = chapterNames.isNotEmpty()
+        // 书名和章节名相同时只显示一次，避免重复
+        val showChapterName = hasChapters && chapterTitle.isNotEmpty() && chapterTitle != title
 
         Column(
             modifier = Modifier
@@ -550,30 +728,49 @@ fun AudioPlaybackScreen(
         ) {
             TopBar(onBackClick = onBackClick)
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.weight(0.2f))
 
+            // ── 封面（缩如 + 加强阴影，形成悬浮感如 ──
             AlbumCover(
                 artworkUri = artworkUri,
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
+            // ── 书名 ──
             Text(
                 text = title,
-                color = White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
+                color = playerOnSurface(),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .basicMarquee(),
+                modifier = Modifier.fillMaxWidth(),
             )
 
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(6.dp))
 
+            // ── 章节如 ──
+            if (showChapterName) {
+                Text(
+                    text = chapterTitle,
+                    color = playerOnSurfaceVariant(),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Normal,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                )
+            }
+
+            Spacer(modifier = Modifier.weight(0.25f))
+
+            // ── 底部控件如 ──
             AudioSeekbar(
                 position = displayPosition,
                 duration = mediaState.duration.toFloat(),
@@ -592,18 +789,7 @@ fun AudioPlaybackScreen(
 
             BottomFunctionRow(
                 currentSpeed = currentSpeed,
-                showSpeedMenu = showSpeedMenu,
-                onSpeedMenuChange = { showSpeedMenu = it },
-                onSpeedSelected = {
-                    player.setPlaybackSpeed(it)
-                    currentSpeed = it
-                    onSpeedChanged(it)
-                },
-                onCustomSpeedClick = {
-                    showSpeedMenu = false
-                    customSpeedText = "${currentSpeed}"
-                    showCustomSpeed = true
-                },
+                onSpeedClick = { showSpeedSheet = true },
                 onSkipClick = { showSkipSheet = true },
                 onSleepClick = { showSleepSheet = true },
                 onPlaylistClick = { showPlaylistSheet = true },
@@ -618,7 +804,7 @@ fun AudioPlaybackScreen(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(48.dp),
-                color = White,
+                color = playerOnSurface(),
                 strokeWidth = 3.dp,
             )
         }
@@ -631,7 +817,7 @@ fun AudioPlaybackScreen(
     }
 }
 
-// region ── 子组件 ──
+// region ── 子组如 ──
 
 @Composable
 private fun TopBar(onBackClick: () -> Unit) {
@@ -645,15 +831,9 @@ private fun TopBar(onBackClick: () -> Unit) {
             Icon(
                 painter = painterResource(coreUiR.drawable.ic_arrow_left),
                 contentDescription = "返回",
-                tint = White,
+                tint = FluxTheme.colorScheme.onSurface.copy(alpha = 0.8f),
             )
         }
-        Text(
-            text = "正在播放",
-            color = White,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Medium,
-        )
     }
 }
 
@@ -661,10 +841,10 @@ private fun TopBar(onBackClick: () -> Unit) {
 private fun AlbumCover(artworkUri: Uri?, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .size(300.dp)
-            .shadow(12.dp, RoundedCornerShape(24.dp))
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color(0xFF2A2A2A)),
+            .size(280.dp)
+            .shadow(20.dp, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(FluxTheme.colorScheme.surface),
         contentAlignment = Alignment.Center,
     ) {
         if (artworkUri != null) {
@@ -678,8 +858,8 @@ private fun AlbumCover(artworkUri: Uri?, modifier: Modifier = Modifier) {
             Icon(
                 painter = painterResource(coreUiR.drawable.ic_file_audio),
                 contentDescription = null,
-                tint = Color(0xFF666666),
-                modifier = Modifier.size(64.dp),
+                tint = FluxTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.size(56.dp),
             )
         }
     }
@@ -689,11 +869,11 @@ private fun AlbumCover(artworkUri: Uri?, modifier: Modifier = Modifier) {
 private fun InfoTag(text: String) {
     Surface(
         shape = RoundedCornerShape(50),
-        color = TagBg,
+        color = FluxTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
     ) {
         Text(
             text = text,
-            color = White,
+            color = FluxTheme.colorScheme.onSurfaceVariant,
             fontSize = 14.sp,
             modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp),
         )
@@ -707,6 +887,8 @@ private fun AudioSeekbar(
     onSeek: (Float) -> Unit,
     onSeekFinished: () -> Unit,
 ) {
+    val primary = FluxTheme.colorScheme.primary
+    val onSurface = FluxTheme.colorScheme.onSurface
     Column(modifier = Modifier.fillMaxWidth()) {
         Slider(
             value = if (duration > 0f) (position / duration).coerceIn(0f, 1f) else 0f,
@@ -714,9 +896,9 @@ private fun AudioSeekbar(
             onValueChangeFinished = onSeekFinished,
             modifier = Modifier.fillMaxWidth(),
             colors = SliderDefaults.colors(
-                thumbColor = White,
-                activeTrackColor = White,
-                inactiveTrackColor = TrackBg,
+                thumbColor = primary,
+                activeTrackColor = primary,
+                inactiveTrackColor = onSurface.copy(alpha = 0.15f),
             ),
         )
         Row(
@@ -728,12 +910,12 @@ private fun AudioSeekbar(
             Text(
                 text = formatTime(position.toLong()),
                 fontSize = 12.sp,
-                color = SubtleWhite,
+                color = FluxTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
             Text(
                 text = formatTime(duration.toLong()),
                 fontSize = 12.sp,
-                color = SubtleWhite,
+                color = FluxTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
         }
     }
@@ -742,13 +924,15 @@ private fun AudioSeekbar(
 @Composable
 private fun TransportRow(player: Player, isPlaying: Boolean) {
     val playPauseState = androidx.media3.ui.compose.state.rememberPlayPauseButtonState(player)
+    val onSurface = FluxTheme.colorScheme.onSurface
+    val primary = FluxTheme.colorScheme.primary
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 上一集
+        // 上一集（轻量级：细边框小圆）
         IconButton(onClick = {
             val idx = player.currentMediaItemIndex
             if (idx > 0) player.seekToDefaultPosition(idx - 1)
@@ -756,30 +940,40 @@ private fun TransportRow(player: Player, isPlaying: Boolean) {
         }) {
             Icon(
                 painter = painterResource(coreUiR.drawable.ic_skip_prev),
-                contentDescription = "上一集",
-                tint = SubtleWhite,
-                modifier = Modifier.size(36.dp),
+                contentDescription = "上一集?",
+                tint = onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.size(28.dp),
             )
         }
 
-        // 快退 15s
-        IconButton(onClick = {
-            player.seekTo((player.currentPosition - 15_000L).coerceAtLeast(0L))
-        }) {
+        // 快退 10s（中级强调：主题色浅如 + 数字标签�?
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(primary.copy(alpha = 0.1f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = ripple(bounded = true),
+                ) {
+                    player.seekTo((player.currentPosition - 10_000L).coerceAtLeast(0L))
+                },
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(
-                imageVector = Icons.Filled.Replay,
-                contentDescription = "快退15秒",
-                tint = SubtleWhite,
-                modifier = Modifier.size(36.dp),
+                imageVector = Icons.Filled.Replay10,
+                contentDescription = "快退10秒?",
+                tint = primary,
+                modifier = Modifier.size(18.dp),
             )
         }
 
-        // 播放 / 暂停
+        // 播放 / 暂停（最高优先级：白色圆形按钮，视觉锚点�?
         Box(
             modifier = Modifier
                 .size(96.dp)
                 .shadow(6.dp, CircleShape)
-                .background(White, CircleShape),
+                .background(FluxTheme.colorScheme.primary, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             IconButton(
@@ -792,34 +986,44 @@ private fun TransportRow(player: Player, isPlaying: Boolean) {
                         else coreUiR.drawable.ic_pause,
                     ),
                     contentDescription = if (playPauseState.showPlay) "播放" else "暂停",
-                    tint = Color(0xFF111111),
+                    tint = FluxTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(56.dp),
                 )
             }
         }
 
-        // 快进 15s
-        IconButton(onClick = {
-            player.seekTo((player.currentPosition + 15_000L).coerceAtMost(player.duration))
-        }) {
+        // 快进 10s（中级强调：主题色浅如 + 数字标签�?
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(primary.copy(alpha = 0.1f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = ripple(bounded = true),
+                ) {
+                    player.seekTo((player.currentPosition + 10_000L).coerceAtMost(player.duration))
+                },
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(
                 imageVector = Icons.Filled.Forward10,
-                contentDescription = "快进15秒",
-                tint = SubtleWhite,
-                modifier = Modifier.size(36.dp),
+                contentDescription = "快进10秒?",
+                tint = primary,
+                modifier = Modifier.size(18.dp),
             )
         }
 
-        // 下一集
+        // 下一集（轻量级：细边框小圆）
         IconButton(onClick = {
             val idx = player.currentMediaItemIndex
             if (idx < player.mediaItemCount - 1) player.seekToDefaultPosition(idx + 1)
         }) {
             Icon(
                 painter = painterResource(coreUiR.drawable.ic_skip_next),
-                contentDescription = "下一集",
-                tint = SubtleWhite,
-                modifier = Modifier.size(36.dp),
+                contentDescription = "下一集?",
+                tint = onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.size(28.dp),
             )
         }
     }
@@ -828,10 +1032,7 @@ private fun TransportRow(player: Player, isPlaying: Boolean) {
 @Composable
 private fun BottomFunctionRow(
     currentSpeed: Float,
-    showSpeedMenu: Boolean,
-    onSpeedMenuChange: (Boolean) -> Unit,
-    onSpeedSelected: (Float) -> Unit,
-    onCustomSpeedClick: () -> Unit,
+    onSpeedClick: () -> Unit,
     onSkipClick: () -> Unit,
     onSleepClick: () -> Unit,
     onPlaylistClick: () -> Unit,
@@ -842,6 +1043,7 @@ private fun BottomFunctionRow(
         val secs = sleepRemaining % 60
         "${mins}:%02d".format(secs)
     } else "定时"
+    val onSurfaceAlpha = FluxTheme.colorScheme.onSurface.copy(alpha = 0.8f)
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -854,7 +1056,7 @@ private fun BottomFunctionRow(
                 Icon(
                     imageVector = AutoMirrored.Filled.List,
                     contentDescription = null,
-                    tint = SubtleWhite,
+                    tint = onSurfaceAlpha,
                     modifier = Modifier.size(24.dp),
                 )
             },
@@ -868,7 +1070,7 @@ private fun BottomFunctionRow(
                 Icon(
                     imageVector = Icons.Outlined.AccessTime,
                     contentDescription = null,
-                    tint = if (sleepRemaining > 0) BlueAccent else SubtleWhite,
+                    tint = if (sleepRemaining > 0) FluxTheme.colorScheme.primary else onSurfaceAlpha,
                     modifier = Modifier.size(24.dp),
                 )
             },
@@ -876,36 +1078,19 @@ private fun BottomFunctionRow(
             onClick = onSleepClick,
         )
 
-        // 倍速
-        Box {
-            FunctionButton(
-                icon = {
-                    Icon(
-                        painter = painterResource(coreUiR.drawable.ic_speed),
-                        contentDescription = null,
-                        tint = SubtleWhite,
-                        modifier = Modifier.size(24.dp),
-                    )
-                },
-                label = "${currentSpeed}x",
-                onClick = { onSpeedMenuChange(true) },
-            )
-            DropdownMenu(
-                expanded = showSpeedMenu,
-                onDismissRequest = { onSpeedMenuChange(false) },
-            ) {
-                listOf(0.5f to "0.5x", 1.0f to "1x", 1.5f to "1.5x", 2.0f to "2x", 2.5f to "2.5x", 3.0f to "3x").forEach { (speed, label) ->
-                    DropdownMenuItem(
-                        text = { Text(label) },
-                        onClick = { onSpeedSelected(speed); onSpeedMenuChange(false) },
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text("自定义") },
-                    onClick = { onCustomSpeedClick() },
+        // 倍�?
+        FunctionButton(
+            icon = {
+                Icon(
+                    painter = painterResource(coreUiR.drawable.ic_speed),
+                    contentDescription = null,
+                    tint = onSurfaceAlpha,
+                    modifier = Modifier.size(24.dp),
                 )
-            }
-        }
+            },
+            label = "${currentSpeed}x",
+            onClick = onSpeedClick,
+        )
 
         // 片头片尾
         FunctionButton(
@@ -913,7 +1098,7 @@ private fun BottomFunctionRow(
                 Icon(
                     painter = painterResource(coreUiR.drawable.ic_settings),
                     contentDescription = null,
-                    tint = SubtleWhite,
+                    tint = onSurfaceAlpha,
                     modifier = Modifier.size(24.dp),
                 )
             },
@@ -938,7 +1123,7 @@ private fun FunctionButton(
         Text(
             text = label,
             fontSize = 12.sp,
-            color = SubtleWhite,
+            color = FluxTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -960,52 +1145,27 @@ private fun formatTime(ms: Long): String {
 // region ── Loading 界面 ──
 
 /**
- * player 未就绪时的 loading 界面，避免黑屏。
- * 显示模糊封面背景 + 居中进度指示器。
+ * player 未就绪时如 loading 界面，避免黑屏�?
+ * 显示模糊封面背景 + 居中进度指示器�?
  */
 @Composable
 fun AudioLoadingScreen(coverArtworkUri: Uri? = null, title: String? = null) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(PlayerBg),
+            .background(FluxTheme.colorScheme.background),
+        contentAlignment = Alignment.Center,
     ) {
-        if (coverArtworkUri != null) {
-            AsyncImage(
-                model = coverArtworkUri,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(30.dp)
-                    .graphicsLayer { alpha = 0.6f },
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Black.copy(alpha = 0.3f),
-                            Color.Black.copy(alpha = 0.7f),
-                            Color.Black.copy(alpha = 0.9f),
-                        ),
-                    ),
-                ),
-        )
         Column(
-            modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
         ) {
             if (coverArtworkUri != null) {
                 Box(
                     modifier = Modifier
-                        .size(200.dp)
-                        .shadow(12.dp, RoundedCornerShape(24.dp))
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xFF2A2A2A)),
+                        .size(width = 150.dp, height = 200.dp)
+                        .shadow(20.dp, RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(FluxTheme.colorScheme.surface),
                 ) {
                     AsyncImage(
                         model = coverArtworkUri,
@@ -1014,13 +1174,12 @@ fun AudioLoadingScreen(coverArtworkUri: Uri? = null, title: String? = null) {
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(28.dp))
             }
-            // 书名
             if (title != null) {
                 Text(
                     text = title,
-                    color = Color.White,
+                    color = FluxTheme.colorScheme.onSurface,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -1031,7 +1190,7 @@ fun AudioLoadingScreen(coverArtworkUri: Uri? = null, title: String? = null) {
             }
             CircularProgressIndicator(
                 modifier = Modifier.size(40.dp),
-                color = White,
+                color = FluxTheme.colorScheme.primary,
                 strokeWidth = 3.dp,
             )
         }

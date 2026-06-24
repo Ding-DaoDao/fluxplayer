@@ -188,6 +188,14 @@ private fun AppearancePreferencesContent(
                     icon = NextIcons.Appearance,
                     isChecked = uiState.preferences.showHistoryTab,
                     onClick = { onEvent(AppearancePreferencesEvent.ToggleShowHistoryTab) },
+                    isLastItem = false
+                )
+                HorizontalDivider()
+                PreferenceSwitch(
+                    title = stringResource(R.string.show_audiobook_tab),
+                    icon = NextIcons.Appearance,
+                    isChecked = uiState.preferences.showAudiobookTab,
+                    onClick = { onEvent(AppearancePreferencesEvent.ToggleShowAudiobookTab) },
                     isLastItem = true
                 )
             }

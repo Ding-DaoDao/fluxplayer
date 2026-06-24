@@ -23,10 +23,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +55,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
+import com.fluxplayer.app.core.ui.R as coreUiR
+import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
 
 @Composable
@@ -147,8 +155,8 @@ fun AudiobookTabContent(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = "扫描失败",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.error,
+                            style = FluxTheme.typography.bodyLarge,
+                            color = FluxTheme.colorScheme.error,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(onClick = viewModel::refresh) {
@@ -189,29 +197,63 @@ private fun EmptySelectionView(
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(32.dp),
         ) {
-            Icon(
-                imageVector = NextIcons.Audio,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+            // 图标
+            Surface(
+                shape = RoundedCornerShape(32.dp),
+                color = FluxTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                modifier = Modifier.size(120.dp),
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    Icon(
+                        imageVector = NextIcons.Audio,
+                        contentDescription = null,
+                        modifier = Modifier.size(56.dp),
+                        tint = FluxTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
             Text(
-                text = "选择听书文件夹",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                text = "开始你的听书之旅",
+                style = FluxTheme.typography.headlineSmall,
+                color = FluxTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Bold,
             )
-            Spacer(modifier = Modifier.height(8.dp))
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             Text(
-                text = "选择包含多本书籍的顶层文件夹",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = "选择包含有声书的文件夹，系统将自动扫描并整理你的书籍",
+                style = FluxTheme.typography.bodyMedium,
+                color = FluxTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
+                lineHeight = 22.sp,
             )
-            Spacer(modifier = Modifier.height(24.dp))
-            Button(onClick = onSelectDirectory) {
-                Text("选择目录")
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Button(
+                onClick = onSelectDirectory,
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = FluxTheme.colorScheme.primary,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth(0.6f)
+                    .height(52.dp),
+            ) {
+                Text(
+                    text = "选择文件夹",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
     }
@@ -231,14 +273,14 @@ private fun EmptyBooksView(
         ) {
             Text(
                 text = "该目录下未找到书籍",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = FluxTheme.typography.bodyLarge,
+                color = FluxTheme.colorScheme.onSurface,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "请确保每本书都在独立的子文件夹中",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = FluxTheme.typography.bodySmall,
+                color = FluxTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(16.dp))
             Button(onClick = onChangeDirectory) {
@@ -256,10 +298,11 @@ private fun BookshelfList(
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(12.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(books, key = { it.folderPath }) { book ->
-            BookRow(
+            BookListItem(
                 book = book,
                 onClick = { onBookClick(book) },
             )
@@ -268,65 +311,90 @@ private fun BookshelfList(
 }
 
 @Composable
-private fun BookRow(
+private fun BookListItem(
     book: AudioBook,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val colors = FluxTheme.colorScheme
+
+    Card(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp, pressedElevation = 4.dp),
     ) {
-        // 封面
-        Box(
+        Row(
             modifier = Modifier
-                .size(width = 80.dp, height = 105.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (book.coverUri != null) {
-                AsyncImage(
-                    model = book.coverUri,
-                    contentDescription = book.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Icon(
-                    imageVector = NextIcons.Audio,
-                    contentDescription = null,
-                    modifier = Modifier.size(32.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.width(14.dp))
-
-        // 右侧信息
-        Column(modifier = Modifier.weight(1f)) {
-            // 书名 - 跑马灯
-            Text(
-                text = book.title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Clip,
+            // ── 封面缩略图 ──
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .basicMarquee(),
-            )
+                    .size(width = 72.dp, height = 96.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(colors.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (book.coverUri != null) {
+                    AsyncImage(
+                        model = book.coverUri,
+                        contentDescription = book.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Icon(
+                        imageVector = NextIcons.Audio,
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp),
+                        tint = colors.onSurfaceVariant.copy(alpha = 0.4f),
+                    )
+                }
+            }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.width(14.dp))
 
-            // 共X集
-            Text(
-                text = "共 ${book.chapterCount} 集",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // ── 书籍信息 ──
+            Column(
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    text = book.title,
+                    style = FluxTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 20.sp,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 章节数标签
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = colors.primary.copy(alpha = 0.1f),
+                    ) {
+                        Text(
+                            text = "${book.chapterCount} 章节",
+                            color = colors.primary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
+                }
+            }
+
+            // ── 右箭头 ──
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = colors.onSurfaceVariant.copy(alpha = 0.3f),
+                modifier = Modifier.size(22.dp),
             )
         }
     }
