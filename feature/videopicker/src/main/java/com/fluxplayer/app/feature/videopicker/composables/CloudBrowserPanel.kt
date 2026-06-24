@@ -92,6 +92,15 @@ fun <T> CloudBrowserPanel(
     var showExitConfirm by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
 
+    // 缓存每层目录的 LazyListState，使得返回时滚动位置保持不变
+    val listStateCache = remember { mutableStateMapOf<String, androidx.compose.foundation.lazy.LazyListState>() }
+
+    // 当栈缩小时，清理已不在栈中的 listState，避免内存泄漏
+    LaunchedEffect(navigationStack.map { it.key }) {
+        val currentKeys = navigationStack.map { it.key }.toSet()
+        listStateCache.keys.filter { it !in currentKeys }.forEach { listStateCache.remove(it) }
+    }
+
     SideEffect {
         if (cloudProviderKey == "webdav" || cloudProviderKey == "openlist") {
             val videoItems = curItems.filter { it.isVideo }
@@ -201,7 +210,7 @@ fun <T> CloudBrowserPanel(
                         } else null
                         if (targetKey != null && entry != null) {
                             key(entry.key) {
-                                val listState = rememberLazyListState()
+                                val listState = listStateCache.getOrPut(entry.key) { rememberLazyListState() }
                                 DirectoryStackContent(
                                     entry = entry,
                                     listState = listState,
