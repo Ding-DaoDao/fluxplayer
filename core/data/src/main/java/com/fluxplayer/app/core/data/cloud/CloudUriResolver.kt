@@ -6,6 +6,7 @@ import android.util.Log
 import com.fluxplayer.app.core.common.CloudPlayHeaders
 import com.fluxplayer.app.core.common.CloudPlaylistCache
 import com.fluxplayer.app.core.common.CloudUriScheme
+import com.fluxplayer.app.core.common.Pan123FallbackCache
 import com.fluxplayer.app.core.common.VideoQualityCache
 import com.fluxplayer.app.core.data.aliyun.AliyunApiClient
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
@@ -143,62 +144,45 @@ class CloudUriResolver @Inject constructor(
                 starredStatus = 0
             )
             
-            // Try video play first
-            Log.d(TAG, "resolvePan123: Trying getVideoPlayInfo...")
+            // Step 1: getVideoPlayInfo → 优先 MP4 直链，HLS 兜底
+            Log.d(TAG, "resolvePan123: Step1 getVideoPlayInfo...")
             val playResult = client.getVideoPlayInfo(item).getOrNull()
             if (playResult != null && playResult.urls.isNotEmpty()) {
-                Log.d(TAG, "resolvePan123: getVideoPlayInfo SUCCESS - urls size=${playResult.urls.size}, names=${playResult.names}")
-                Log.d(TAG, "resolvePan123: Available URLs:")
+                Log.d(TAG, "resolvePan123: getVideoPlayInfo SUCCESS - urls size=${playResult.urls.size}")
                 playResult.urls.forEachIndexed { index, url ->
-                    Log.d(TAG, "  [$index] ${playResult.names.getOrNull(index)}: ${url.take(80)}...")
+                    val isHls = url.contains(".m3u8") || url.contains("/hls/")
+                    Log.d(TAG, "  [$index] isHls=$isHls url=${url.take(150)}")
                 }
-                
-                // 优先非 HLS URL（MP4/MKV 直链保留内嵌字幕）
-                // 海阔视界 JS 逻辑：DownloadUrl（直链）排第一位, video.url 排第二位
-                // 123pan CDN 的 HLS (.m3u8) 流不带字幕轨，仅在没有 MP4 可用时才退用 HLS
-                val mp4Url = playResult.urls.find {
-                    !it.contains(".m3u8") && !it.contains("/hls/")
-                }
-                val hlsUrl = playResult.urls.find {
-                    it.contains(".m3u8") || it.contains("/hls/")
-                }
-
-                // 缓存所有清晰度选项，供播放器切换
+                // 缓存画质选项
                 if (playResult.urls.size > 1) {
                     val options = playResult.urls.zip(playResult.names).map { (u, n) ->
                         VideoQualityCache.QualityOption(label = n, url = u)
                     }
                     videoQualityCache.cacheQualityOptions("pan123", fileId, fileId, options)
                 }
-
-                val finalUrl = if (mp4Url != null) {
-                    Log.d(TAG, "resolvePan123: Using MP4 URL (preserves embedded subtitles)")
-                    mp4Url
-                } else if (hlsUrl != null) {
-                    Log.w(TAG, "resolvePan123: No MP4 URL available, falling back to HLS (subtitles may be missing)")
-                    hlsUrl
-                } else {
-                    Log.w(TAG, "resolvePan123: Using first available URL")
-                    playResult.urls.first()
-                } + "#pan123Play=true#"
-                
-                Log.d(TAG, "resolvePan123: Returning video URL: ${finalUrl.take(100)}...")
-                Log.d(TAG, "========== resolvePan123 END (video play) ==========")
-                return finalUrl
-            } else {
-                Log.w(TAG, "resolvePan123: getVideoPlayInfo FAILED or returned empty urls")
+                // 优先 MP4，HLS 也接受（原版逻辑）
+                val mp4Url = playResult.urls.find { !it.contains(".m3u8") && !it.contains("/hls/") }
+                val hlsUrl = playResult.urls.find { it.contains(".m3u8") || it.contains("/hls/") }
+                // 存储 HLS 备用 URL（MP4 直链容器元数据损坏时自动切换）
+                if (mp4Url != null && hlsUrl != null) {
+                    Pan123FallbackCache.put(fileId, hlsUrl)
+                    Log.d(TAG, "resolvePan123: cached HLS fallback: ${hlsUrl.take(100)}")
+                }
+                val bestUrl = mp4Url ?: playResult.urls.first()
+                Log.d(TAG, "resolvePan123: selected URL isHls=${mp4Url == null} url=${bestUrl.take(150)}")
+                Log.d(TAG, "========== resolvePan123 END (getVideoPlayInfo) ==========")
+                return bestUrl + "#pan123Play=true#"
             }
-            
-            // Fallback to download
-            Log.d(TAG, "resolvePan123: Trying getFileDownloadUrl as fallback...")
+
+            // Step 2: getFileDownloadUrl 兜底
+            Log.w(TAG, "resolvePan123: getVideoPlayInfo failed, trying getFileDownloadUrl...")
             val dlUrl = client.getFileDownloadUrl(item).getOrNull()
             if (dlUrl != null) {
-                Log.d(TAG, "resolvePan123: getFileDownloadUrl SUCCESS - url=${dlUrl.take(100)}...")
-                Log.d(TAG, "========== resolvePan123 END (download) ==========")
+                Log.d(TAG, "resolvePan123: getFileDownloadUrl SUCCESS")
+                Log.d(TAG, "========== resolvePan123 END (download fallback) ==========")
                 return dlUrl + "#pan123Play=true#"
-            } else {
-                Log.e(TAG, "resolvePan123: getFileDownloadUrl also FAILED!")
             }
+            Log.e(TAG, "resolvePan123: getFileDownloadUrl also FAILED!")
         } else {
             Log.e(TAG, "resolvePan123: fileMetadata is NULL for fileId=$fileId")
         }

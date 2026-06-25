@@ -114,6 +114,8 @@ private class AuthAwareDataSource(
             } catch (e: HttpDataSource.InvalidResponseCodeException) {
                 lastException = e
                 Log.w(TAG, "openWithRetry: attempt=$attempt HTTP ${e.responseCode}")
+                // 416 on seek: throw immediately so ExoPlayer can handle it fast
+                if (e.responseCode == 416 && dataSpec.position > 0) throw e
                 if (attempt < maxAttempts - 1) {
                     Thread.sleep(((attempt + 1) * 1000).toLong())
                 } else {
@@ -284,6 +286,7 @@ private class AuthAwareDataSource(
     override fun getUri(): Uri? = activeDelegate?.uri
 
     override fun close() {
+        activeDelegate?.close()
         activeDelegate = null
         httpDelegate.close()
         fileDelegate.close()

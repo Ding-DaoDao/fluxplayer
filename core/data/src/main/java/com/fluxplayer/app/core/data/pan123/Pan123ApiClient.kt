@@ -333,10 +333,12 @@ class Pan123ApiClient(
         Log.d(TAG, "getFileDownloadUrl: endpoint=$endpoint")
         
         val body = JSONObject().apply {
+            put("driveId", 0)
             put("fileId", item.fileId)
             put("etag", item.etag)
             put("size", item.size)
             put("s3keyFlag", item.s3keyFlag)
+            put("type", item.type)
         }
         Log.d(TAG, "getFileDownloadUrl: request body=$body")
         
@@ -438,6 +440,7 @@ class Pan123ApiClient(
             put("s3keyFlag", item.s3keyFlag)
             put("FileName", item.fileName)
             put("Size", item.size)
+            put("type", item.type)
         }
         Log.d(TAG, "getFileDownloadInfo: request body=$body")
         
@@ -616,7 +619,7 @@ class Pan123ApiClient(
         val headers = mapOf(
             "Referer" to referer,
             "X-MF-PAN-RANGE" to "1",
-            "User-Agent" to "123pan/v3.1.3(Android 10;;Xiaomi 24031PN0DC)"
+            "User-Agent" to Pan123AuthProvider.userAgent
         )
         Log.d(TAG, "buildDownloadHeaders: FINAL headers=$headers")
         return headers

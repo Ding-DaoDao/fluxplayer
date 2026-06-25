@@ -42,6 +42,7 @@ import com.fluxplayer.app.core.common.extensions.deleteFiles
 import com.fluxplayer.app.core.common.extensions.fromUri
 import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.CloudPlaylistCache
+import com.fluxplayer.app.core.common.Pan123FallbackCache
 import com.fluxplayer.app.core.common.extensions.getFilenameFromUri
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.cache.PlaybackCacheManager
@@ -430,12 +431,33 @@ class PlayerService : MediaSessionService() {
             Log.e(TAG, "========== onPlayerError ==========")
             Log.e(TAG, "onPlayerError: errorCode=${error.errorCode}, errorCodeName=${error.errorCodeName}")
             Log.e(TAG, "onPlayerError: message=${error.message}")
-            Log.e(TAG, "onPlayerError: cause=${error.cause}")
             
             // 获取当前播放的媒体项信息
             val currentMediaItem = mediaSession?.player?.currentMediaItem
+            val currentUri = currentMediaItem?.localConfiguration?.uri
             Log.e(TAG, "onPlayerError: currentMediaItem=${currentMediaItem?.mediaId}")
-            Log.e(TAG, "onPlayerError: currentMediaItem URI=${currentMediaItem?.localConfiguration?.uri}")
+            Log.e(TAG, "onPlayerError: currentMediaItem URI=$currentUri")
+            
+            // pan123 HLS fallback: MP4 直链失败时自动切换到 HLS
+            if (currentMediaItem != null && currentUri != null && currentUri.toString().contains("#pan123Play=true#")) {
+                val provider = CloudUriScheme.getProvider(currentMediaItem.mediaId.toUri())
+                val fileId = CloudUriScheme.getFileId(currentMediaItem.mediaId.toUri())
+                if (provider == "pan123" && fileId != null) {
+                    val hlsUrl = Pan123FallbackCache.get(fileId)
+                    if (hlsUrl != null) {
+                        Log.w(TAG, "onPlayerError: PAN123 HLS fallback - switching to HLS URL")
+                        val newUri = hlsUrl + "#pan123Play=true#"
+                        val newItem = currentMediaItem.buildUpon().setUri(newUri).build()
+                        mediaSession?.player?.replaceMediaItem(
+                            mediaSession?.player?.currentMediaItemIndex ?: 0,
+                            newItem
+                        )
+                        mediaSession?.player?.prepare()
+                        mediaSession?.player?.play()
+                        return
+                    }
+                }
+            }
             
             // 记录详细的错误信息
             when (error.errorCode) {
