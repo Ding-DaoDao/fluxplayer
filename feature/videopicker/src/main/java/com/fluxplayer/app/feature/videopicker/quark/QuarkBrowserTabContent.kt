@@ -71,6 +71,8 @@ fun QuarkBrowserTabContent(
     var showSortMenu by remember { mutableStateOf(false) }
     var imageViewerIndex by remember { mutableIntStateOf(-1) }
 
+    val cloudFolderPath = remember(navigationStack) { navigationStack.joinToString("/") { it.label } }
+
     val currentSortKey = remember(state.orderBy) {
         when (state.orderBy) {
             "file_name:asc" -> "name:asc"
@@ -105,7 +107,7 @@ fun QuarkBrowserTabContent(
                     allItems = state.items,
                     mediaFilter = { it.isAudio },
                     resolveUrl = { viewModel.resolveVideoUri(item) },
-                    buildPlaylistUri = { CloudUriScheme.buildCloudUri(if (state.driveType == "uc") "uc" else "quark", it.path) },
+                    buildPlaylistUri = { CloudUriScheme.buildCloudUri(if (state.driveType == "uc") "uc" else "quark", it.path, cloudFolderPath) },
                     onPlayVideos = onPlayVideos,
                     scope = scope,
                 )
@@ -114,7 +116,7 @@ fun QuarkBrowserTabContent(
                     item = item,
                     allItems = state.items,
                     resolveUrl = { viewModel.resolveVideoUri(item) },
-                    buildPlaylistUri = { CloudUriScheme.buildCloudUri(if (state.driveType == "uc") "uc" else "quark", it.path) },
+                    buildPlaylistUri = { CloudUriScheme.buildCloudUri(if (state.driveType == "uc") "uc" else "quark", it.path, cloudFolderPath) },
                     onPlayVideos = onPlayVideos,
                     scope = scope,
                 )

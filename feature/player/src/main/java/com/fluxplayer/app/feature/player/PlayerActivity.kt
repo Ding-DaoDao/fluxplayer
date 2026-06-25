@@ -439,6 +439,9 @@ class PlayerActivity : ComponentActivity() {
                     }
             } ?: listOf(uri.toString())
 
+        // 计算播放列表父目录，用于片头片尾持久化（同目录所有剧集共享）
+        viewModel.resolveParentDirFromPlaylist(playlist)
+
         val mediaItemIndexToPlay = playlist.indexOfFirst {
             it == (mediaContentUri ?: uri).toString()
         }.takeIf { it >= 0 } ?: 0

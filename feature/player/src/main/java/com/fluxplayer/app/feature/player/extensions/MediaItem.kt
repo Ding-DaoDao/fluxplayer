@@ -11,6 +11,8 @@ private const val MEDIA_METADATA_SUBTITLE_TRACK_INDEX_KEY = "subtitle_track_inde
 private const val MEDIA_METADATA_VIDEO_ZOOM_KEY = "media_metadata_video_zoom"
 private const val MEDIA_METADATA_SUBTITLE_DELAY_KEY = "media_metadata_subtitle_delay"
 private const val MEDIA_METADATA_SUBTITLE_SPEED_KEY = "media_metadata_subtitle_speed"
+private const val MEDIA_METADATA_INTRO_MS_KEY = "media_metadata_intro_ms"
+private const val MEDIA_METADATA_OUTRO_MS_KEY = "media_metadata_outro_ms"
 
 private fun Bundle.setExtras(
     positionMs: Long?,
@@ -20,6 +22,8 @@ private fun Bundle.setExtras(
     subtitleTrackIndex: Int?,
     subtitleDelayMilliseconds: Long? = null,
     subtitleSpeed: Float? = null,
+    introMs: Long? = null,
+    outroMs: Long? = null,
 ) = apply {
     positionMs?.let { putLong(MEDIA_METADATA_POSITION_KEY, it) }
     videoScale?.let { putFloat(MEDIA_METADATA_VIDEO_ZOOM_KEY, it) }
@@ -28,6 +32,8 @@ private fun Bundle.setExtras(
     subtitleTrackIndex?.let { putInt(MEDIA_METADATA_SUBTITLE_TRACK_INDEX_KEY, it) }
     subtitleDelayMilliseconds?.let { putLong(MEDIA_METADATA_SUBTITLE_DELAY_KEY, it) }
     subtitleSpeed?.let { putFloat(MEDIA_METADATA_SUBTITLE_SPEED_KEY, it) }
+    introMs?.let { putLong(MEDIA_METADATA_INTRO_MS_KEY, it) }
+    outroMs?.let { putLong(MEDIA_METADATA_OUTRO_MS_KEY, it) }
 }
 
 fun MediaMetadata.Builder.setExtras(
@@ -38,6 +44,8 @@ fun MediaMetadata.Builder.setExtras(
     subtitleTrackIndex: Int? = null,
     subtitleDelayMilliseconds: Long? = null,
     subtitleSpeed: Float? = null,
+    introMs: Long? = null,
+    outroMs: Long? = null,
 ): MediaMetadata.Builder = setExtras(
     Bundle().setExtras(
         positionMs = positionMs,
@@ -47,6 +55,8 @@ fun MediaMetadata.Builder.setExtras(
         subtitleTrackIndex = subtitleTrackIndex,
         subtitleDelayMilliseconds = subtitleDelayMilliseconds,
         subtitleSpeed = subtitleSpeed,
+        introMs = introMs,
+        outroMs = outroMs,
     ),
 )
 
@@ -92,6 +102,18 @@ val MediaMetadata.subtitleSpeed: Float?
             .takeIf { containsKey(MEDIA_METADATA_SUBTITLE_SPEED_KEY) }
     }
 
+val MediaMetadata.introMs: Long?
+    get() = extras?.run {
+        getLong(MEDIA_METADATA_INTRO_MS_KEY)
+            .takeIf { containsKey(MEDIA_METADATA_INTRO_MS_KEY) }
+    }
+
+val MediaMetadata.outroMs: Long?
+    get() = extras?.run {
+        getLong(MEDIA_METADATA_OUTRO_MS_KEY)
+            .takeIf { containsKey(MEDIA_METADATA_OUTRO_MS_KEY) }
+    }
+
 fun MediaItem.copy(
     positionMs: Long? = this.mediaMetadata.positionMs,
     durationMs: Long? = this.mediaMetadata.durationMs,
@@ -101,6 +123,8 @@ fun MediaItem.copy(
     subtitleTrackIndex: Int? = this.mediaMetadata.subtitleTrackIndex,
     subtitleDelayMilliseconds: Long? = this.mediaMetadata.subtitleDelayMilliseconds,
     subtitleSpeed: Float? = this.mediaMetadata.subtitleSpeed,
+    introMs: Long? = this.mediaMetadata.introMs,
+    outroMs: Long? = this.mediaMetadata.outroMs,
 ): MediaItem = buildUpon().setMediaMetadata(
     mediaMetadata.buildUpon()
         .setDurationMs(durationMs)
@@ -113,6 +137,8 @@ fun MediaItem.copy(
                 subtitleTrackIndex = subtitleTrackIndex,
                 subtitleDelayMilliseconds = subtitleDelayMilliseconds,
                 subtitleSpeed = subtitleSpeed,
+                introMs = introMs,
+                outroMs = outroMs,
             ),
         ).build(),
 ).build()

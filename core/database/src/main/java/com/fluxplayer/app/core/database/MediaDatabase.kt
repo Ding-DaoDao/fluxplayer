@@ -29,7 +29,7 @@ import com.fluxplayer.app.core.database.entities.VideoStreamInfoEntity
         SubtitleStreamInfoEntity::class,
         DownloadTaskEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class MediaDatabase : RoomDatabase() {
@@ -230,7 +230,7 @@ abstract class MediaDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATION_7_8 = object : Migration(7, 8) {
+        val         MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """
@@ -248,6 +248,13 @@ abstract class MediaDatabase : RoomDatabase() {
                     )
                     """,
                 )
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `media_state` ADD COLUMN `intro_ms` INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE `media_state` ADD COLUMN `outro_ms` INTEGER NOT NULL DEFAULT -1")
             }
         }
     }

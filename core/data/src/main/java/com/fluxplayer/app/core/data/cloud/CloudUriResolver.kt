@@ -153,11 +153,16 @@ class CloudUriResolver @Inject constructor(
                     Log.d(TAG, "  [$index] ${playResult.names.getOrNull(index)}: ${url.take(80)}...")
                 }
                 
-                // 优先使用 HLS URL（包含 .m3u8 或 /hls/）- 更可靠，避免 Range 请求 416 错误
-                val hlsUrl = playResult.urls.find { 
-                    it.contains(".m3u8") || it.contains("/hls/") 
+                // 优先非 HLS URL（MP4/MKV 直链保留内嵌字幕）
+                // 海阔视界 JS 逻辑：DownloadUrl（直链）排第一位, video.url 排第二位
+                // 123pan CDN 的 HLS (.m3u8) 流不带字幕轨，仅在没有 MP4 可用时才退用 HLS
+                val mp4Url = playResult.urls.find {
+                    !it.contains(".m3u8") && !it.contains("/hls/")
                 }
-                
+                val hlsUrl = playResult.urls.find {
+                    it.contains(".m3u8") || it.contains("/hls/")
+                }
+
                 // 缓存所有清晰度选项，供播放器切换
                 if (playResult.urls.size > 1) {
                     val options = playResult.urls.zip(playResult.names).map { (u, n) ->
@@ -165,12 +170,15 @@ class CloudUriResolver @Inject constructor(
                     }
                     videoQualityCache.cacheQualityOptions("pan123", fileId, fileId, options)
                 }
-                
-                val finalUrl = if (hlsUrl != null) {
-                    Log.d(TAG, "resolvePan123: Using HLS URL (avoid Range request issues)")
+
+                val finalUrl = if (mp4Url != null) {
+                    Log.d(TAG, "resolvePan123: Using MP4 URL (preserves embedded subtitles)")
+                    mp4Url
+                } else if (hlsUrl != null) {
+                    Log.w(TAG, "resolvePan123: No MP4 URL available, falling back to HLS (subtitles may be missing)")
                     hlsUrl
                 } else {
-                    Log.w(TAG, "resolvePan123: No HLS URL found, using first available URL (may cause 416 error)")
+                    Log.w(TAG, "resolvePan123: Using first available URL")
                     playResult.urls.first()
                 } + "#pan123Play=true#"
                 

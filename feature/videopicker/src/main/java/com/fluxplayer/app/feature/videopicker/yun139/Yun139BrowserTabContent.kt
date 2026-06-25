@@ -78,6 +78,8 @@ fun Yun139BrowserTabContent(
     var showSortMenu by remember { mutableStateOf(false) }
     var imageViewerIndex by remember { mutableIntStateOf(-1) }
 
+    val cloudFolderPath = remember(navigationStack) { navigationStack.joinToString("/") { it.label } }
+
     val currentSortKey = remember(state.orderBy, state.orderDirection) {
         val dir = state.orderDirection.uppercase()
         when (state.orderBy) {
@@ -103,7 +105,7 @@ fun Yun139BrowserTabContent(
                 allItems = state.items,
                 mediaFilter = { it.isAudio },
                 resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("yun139", it.path) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("yun139", it.path, cloudFolderPath) },
                 onPlayVideos = onPlayVideos,
                 scope = scope,
             )
@@ -111,7 +113,7 @@ fun Yun139BrowserTabContent(
                 item = item,
                 allItems = state.items,
                 resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("yun139", it.path) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("yun139", it.path, cloudFolderPath) },
                 onPlayVideos = onPlayVideos,
                 scope = scope,
             )

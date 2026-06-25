@@ -77,6 +77,8 @@ fun AliyunBrowserTabContent(
     var showSortMenu by remember { mutableStateOf(false) }
     var imageViewerIndex by remember { mutableIntStateOf(-1) }
 
+    val cloudFolderPath = remember(navigationStack) { navigationStack.joinToString("/") { it.label } }
+
     val currentSortKey = remember(state.orderBy) {
         when (state.orderBy) {
             "name:ASC" -> "name:asc"
@@ -111,7 +113,7 @@ fun AliyunBrowserTabContent(
                     allItems = state.items,
                     mediaFilter = { it.isAudio },
                     resolveUrl = { viewModel.resolveVideoUri(item) },
-                    buildPlaylistUri = { CloudUriScheme.buildCloudUri("alipan", it.path) },
+                    buildPlaylistUri = { CloudUriScheme.buildCloudUri("alipan", it.path, cloudFolderPath) },
                     onPlayVideos = onPlayVideos,
                     scope = scope,
                 )
@@ -120,7 +122,7 @@ fun AliyunBrowserTabContent(
                     item = item,
                     allItems = state.items,
                     resolveUrl = { viewModel.resolveVideoUri(item) },
-                    buildPlaylistUri = { CloudUriScheme.buildCloudUri("alipan", it.path) },
+                    buildPlaylistUri = { CloudUriScheme.buildCloudUri("alipan", it.path, cloudFolderPath) },
                     onPlayVideos = onPlayVideos,
                     scope = scope,
                 )

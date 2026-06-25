@@ -71,6 +71,7 @@ import com.fluxplayer.app.core.model.DanmakuDownloadState
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.ui.R as coreUiR
 import com.fluxplayer.app.core.ui.extensions.copy
+import com.fluxplayer.app.feature.player.extensions.copy as mediaItemCopy
 import com.fluxplayer.app.feature.player.danmaku.Danmaku
 import com.fluxplayer.app.feature.player.danmaku.DanmakuController
 import com.fluxplayer.app.feature.player.danmaku.DanmakuOverlay
@@ -99,7 +100,9 @@ import com.fluxplayer.app.feature.player.state.rememberVolumeAndBrightnessGestur
 import com.fluxplayer.app.feature.player.state.rememberVolumeState
 import com.fluxplayer.app.feature.player.extensions.nameRes
 import com.fluxplayer.app.feature.player.extensions.formatted
+import com.fluxplayer.app.feature.player.extensions.introMs
 import com.fluxplayer.app.feature.player.extensions.noRippleClickable
+import com.fluxplayer.app.feature.player.extensions.outroMs
 import com.fluxplayer.app.feature.player.state.seekAmountFormatted
 import com.fluxplayer.app.feature.player.state.seekToPositionFormated
 import com.fluxplayer.app.feature.player.ui.DoubleTapIndicator
@@ -125,7 +128,13 @@ import kotlin.time.DurationUnit
 
 val LocalControlsVisibilityState = compositionLocalOf<ControlsVisibilityState?> { null }
 
-private const val INTRO_OUTRO_KEY = "current_session"
+private fun currentIntroOutroKey(player: Player, viewModel: PlayerViewModel): String {
+    // 优先使用播放列表父目录（同目录共享片头片尾设置）
+    val dirKey = viewModel.playlistParentPath
+    if (dirKey.isNotEmpty()) return dirKey
+    val currentMediaItem = player.currentMediaItem ?: return ""
+    return currentMediaItem.mediaId.ifEmpty { currentMediaItem.localConfiguration?.uri?.toString() ?: "" }
+}
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -351,23 +360,35 @@ fun MediaPlayerScreen(
         }
     }
 
-    // 剧集切换时自动 seek 到片头（使用 Player.Listener 直接监听，不依赖 Compose State）
-    var isFirstItem by remember { mutableStateOf(true) }
-    var skipNextTransitionSeek by remember { mutableStateOf(false) }
+    // 从 MediaItem metadata 恢复持久化的片头片尾状态（UI 标签 + 片尾检测用）
+    // 注意：seek 逻辑统一由 PlayerService.playbackStateListener 处理，这里只做状态初始化
     DisposableEffect(player) {
+        // 立即从当前 media item 的 metadata 初始化
+        val currentItem = player.currentMediaItem
+        if (currentItem != null) {
+            val key = currentIntroOutroKey(player, viewModel)
+            if (key.isNotEmpty()) {
+                val currentTs = introOutroState.getTimestamps(key)
+                currentItem.mediaMetadata.let { metadata ->
+                    // metadata 里 -1 表示加载时还没设置，保留内存中已有的值
+                    val savedIntro = metadata.introMs?.takeIf { it != -1L } ?: currentTs.introMs
+                    val savedOutro = metadata.outroMs?.takeIf { it != -1L } ?: currentTs.outroMs
+                    introOutroState.setIntro(key, savedIntro)
+                    introOutroState.setOutro(key, savedOutro)
+                }
+            }
+        }
         val listener = object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-                if (skipNextTransitionSeek) {
-                    skipNextTransitionSeek = false
-                    return
-                }
-                if (isFirstItem) {
-                    isFirstItem = false
-                    return
-                }
-                val ts = introOutroState.getTimestamps(INTRO_OUTRO_KEY)
-                if (ts.introMs > 0) {
-                    player.seekTo(ts.introMs)
+                val key = currentIntroOutroKey(player, viewModel)
+                if (key.isNotEmpty()) {
+                    val currentTs = introOutroState.getTimestamps(key)
+                    mediaItem?.mediaMetadata?.let { metadata ->
+                        val savedIntro = metadata.introMs?.takeIf { it != -1L } ?: currentTs.introMs
+                        val savedOutro = metadata.outroMs?.takeIf { it != -1L } ?: currentTs.outroMs
+                        introOutroState.setIntro(key, savedIntro)
+                        introOutroState.setOutro(key, savedOutro)
+                    }
                 }
             }
         }
@@ -380,7 +401,8 @@ fun MediaPlayerScreen(
     LaunchedEffect(Unit) {
         while (isActive) {
             delay(500)
-            val ts = introOutroState.getTimestamps(INTRO_OUTRO_KEY)
+            val key = currentIntroOutroKey(player, viewModel)
+            val ts = introOutroState.getTimestamps(key)
             val currentIndex = player.currentMediaItemIndex
             if (ts.outroMs > 0 && currentIndex != lastSkippedOutroIndex
                 && player.isPlaying && player.currentPosition >= ts.outroMs
@@ -624,7 +646,8 @@ fun MediaPlayerScreen(
                                 enter = fadeIn(),
                                 exit = fadeOut(),
                             ) {
-                                val timestamps = introOutroState.getTimestamps(INTRO_OUTRO_KEY)
+                                val key = currentIntroOutroKey(player, viewModel)
+                                val timestamps = introOutroState.getTimestamps(key)
                                 val introLabel = if (timestamps.introMs < 0) "片头"
                                     else "片头 ${timestamps.introMs.milliseconds.formatted()}"
                                 val outroLabel = if (timestamps.outroMs < 0) "片尾"
@@ -676,7 +699,6 @@ fun MediaPlayerScreen(
                                             isSwitchingQuality = true
                                             errorState.dismiss()
                                             selectedQualityLabel = option.label
-                                            skipNextTransitionSeek = true
                                             val originalFragment = currentItem.localConfiguration?.uri?.fragment
                                             val newUri = if (!originalFragment.isNullOrEmpty()) {
                                                 android.net.Uri.parse("${option.uri}#${originalFragment}")
@@ -724,11 +746,57 @@ fun MediaPlayerScreen(
                                             }
                                         },
                                         introLabel = introLabel,
-                                        onIntroClick = { introOutroState.setIntro(INTRO_OUTRO_KEY, player.currentPosition) },
-                                        onIntroLongClick = { introOutroState.setIntro(INTRO_OUTRO_KEY, -1L) },
+                                        onIntroClick = {
+                                            val pos = player.currentPosition
+                                            introOutroState.setIntro(key, pos)
+                                            viewModel.updateMediumIntroOutro(key, pos, timestamps.outroMs)
+                                            // 刷新播放列表所有 item，确保切集时 onMediaItemTransition 读到新值
+                                            val p = player
+                                            val count = p.mediaItemCount
+                                            for (i in 0 until count) {
+                                                val item = p.getMediaItemAt(i)
+                                                val updated = item.mediaItemCopy(introMs = pos, outroMs = timestamps.outroMs)
+                                                p.replaceMediaItem(i, updated)
+                                            }
+                                        },
+                                        onIntroLongClick = {
+                                            introOutroState.setIntro(key, -1L)
+                                            viewModel.updateMediumIntroOutro(key, -1L, timestamps.outroMs)
+                                            val p = player
+                                            val count = p.mediaItemCount
+                                            for (i in 0 until count) {
+                                                val item = p.getMediaItemAt(i)
+                                                val updated = item.mediaItemCopy(
+                                                    introMs = -1L, outroMs = timestamps.outroMs)
+                                                p.replaceMediaItem(i, updated)
+                                            }
+                                        },
                                         outroLabel = outroLabel,
-                                        onOutroClick = { introOutroState.setOutro(INTRO_OUTRO_KEY, player.currentPosition) },
-                                        onOutroLongClick = { introOutroState.setOutro(INTRO_OUTRO_KEY, -1L) },
+                                        onOutroClick = {
+                                            val pos = player.currentPosition
+                                            introOutroState.setOutro(key, pos)
+                                            viewModel.updateMediumIntroOutro(key, timestamps.introMs, pos)
+                                            val p = player
+                                            val count = p.mediaItemCount
+                                            for (i in 0 until count) {
+                                                val item = p.getMediaItemAt(i)
+                                                val updated = item.mediaItemCopy(
+                                                    introMs = timestamps.introMs, outroMs = pos)
+                                                p.replaceMediaItem(i, updated)
+                                            }
+                                        },
+                                        onOutroLongClick = {
+                                            introOutroState.setOutro(key, -1L)
+                                            viewModel.updateMediumIntroOutro(key, timestamps.introMs, -1L)
+                                            val p = player
+                                            val count = p.mediaItemCount
+                                            for (i in 0 until count) {
+                                                val item = p.getMediaItemAt(i)
+                                                val updated = item.mediaItemCopy(
+                                                    introMs = timestamps.introMs, outroMs = -1L)
+                                                p.replaceMediaItem(i, updated)
+                                            }
+                                        },
                                         currentSpeed = currentSpeed,
                                         onSpeedBarToggle = {
                                             showSpeedBar = !showSpeedBar

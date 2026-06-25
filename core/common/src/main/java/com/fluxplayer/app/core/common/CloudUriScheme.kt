@@ -18,7 +18,15 @@ object CloudUriScheme {
         return path.trimStart('/')
     }
 
-    fun buildCloudUri(provider: String, fileId: String): Uri {
-        return Uri.parse("$SCHEME://$provider/$fileId")
+    /** 获取云端文件夹路径（从 query 参数中提取） */
+    fun getCloudFolder(uri: Uri): String? = uri.getQueryParameter("folder")
+
+    fun buildCloudUri(provider: String, fileId: String, folder: String = ""): Uri {
+        val base = "$SCHEME://$provider/$fileId"
+        return if (folder.isNotEmpty()) {
+            Uri.parse(base).buildUpon().appendQueryParameter("folder", folder).build()
+        } else {
+            Uri.parse(base)
+        }
     }
 }

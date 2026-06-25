@@ -33,4 +33,8 @@ data class MediumStateEntity(
     val subtitleDelayMilliseconds: Long = 0,
     @ColumnInfo(name = "subtitle_speed")
     val subtitleSpeed: Float = 1f,
+    @ColumnInfo(name = "intro_ms")
+    val introMs: Long = -1L,
+    @ColumnInfo(name = "outro_ms")
+    val outroMs: Long = -1L,
 )

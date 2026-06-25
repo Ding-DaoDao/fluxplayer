@@ -9,6 +9,7 @@ import com.fluxplayer.app.core.common.di.ApplicationScope
 import com.fluxplayer.app.core.data.backup.AutoBackupHelper
 import com.fluxplayer.app.core.data.openlist.OpenListManager
 import com.fluxplayer.app.core.data.openlist.OpenListManagerProvider
+import com.fluxplayer.app.core.data.repository.MediaRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.crash.CrashActivity
 import com.fluxplayer.app.core.data.openlist.OpenListService
@@ -34,6 +35,9 @@ class NextPlayerApplication : Application(), SingletonImageLoader.Factory {
     @Inject
     lateinit var autoBackupHelper: AutoBackupHelper
 
+    @Inject
+    lateinit var mediaRepository: MediaRepository
+
     lateinit var openListManager: OpenListManager
         private set
 
@@ -54,6 +58,12 @@ class NextPlayerApplication : Application(), SingletonImageLoader.Factory {
         // 如果启用自动检查，在后台检查新备份
         applicationScope.launch(Dispatchers.IO) {
             autoBackupHelper.checkNewBackupAvailable()
+        }
+
+        // 清理超过 30 天未播放的 media_state 记录
+        applicationScope.launch(Dispatchers.IO) {
+            val thirtyDaysMs = 30L * 24 * 60 * 60 * 1000
+            mediaRepository.deleteStaleState(System.currentTimeMillis() - thirtyDaysMs)
         }
     }
 

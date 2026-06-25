@@ -98,6 +98,8 @@ fun C189BrowserTabContent(
     var contextMenuIndex by remember { mutableStateOf<Int?>(null) }
     var renameIndex by remember { mutableStateOf(-1) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+
+    val cloudFolderPath = remember(navigationStack) { navigationStack.joinToString("/") { it.label } }
     var showSortMenu by remember { mutableStateOf(false) }
     var imageViewerIndex by remember { mutableIntStateOf(-1) }
 
@@ -128,7 +130,7 @@ fun C189BrowserTabContent(
                 allItems = state.items,
                 mediaFilter = { it.isAudio },
                 resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("cloud189", it.path) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("cloud189", it.path, cloudFolderPath) },
                 onPlayVideos = onPlayVideos,
                 scope = scope,
             )
@@ -136,7 +138,7 @@ fun C189BrowserTabContent(
                 item = item,
                 allItems = state.items,
                 resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("cloud189", it.path) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("cloud189", it.path, cloudFolderPath) },
                 onPlayVideos = onPlayVideos,
                 scope = scope,
             )

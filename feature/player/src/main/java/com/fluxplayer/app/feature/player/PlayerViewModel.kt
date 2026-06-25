@@ -625,6 +625,43 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    fun updateMediumIntroOutro(uri: String, introMs: Long, outroMs: Long) {
+        viewModelScope.launch {
+            mediaRepository.updateMediumIntroOutro(uri, introMs, outroMs)
+        }
+    }
+
+    /** 当前播放列表的父目录路径，用作片头片尾持久化的 key */
+    var playlistParentPath: String = ""
+
+    /** 根据播放列表设置父目录路径（带来源前缀，确保本地/云端互不干扰） */
+    suspend fun resolveParentDirFromPlaylist(playlist: List<String>) {
+        if (playlist.isEmpty()) return
+        val firstUri = playlist.first()
+        playlistParentPath = when {
+            firstUri.startsWith("content://") || firstUri.startsWith("file://") -> {
+                val localPath = mediaRepository.getVideoByUri(firstUri)?.parentPath
+                    ?: firstUri.substringAfter("file://").substringBeforeLast('/')
+                if (localPath.isNotEmpty()) "local:$localPath" else ""
+            }
+            firstUri.startsWith("cloud:") -> {
+                val uri = android.net.Uri.parse(firstUri)
+                val folder = com.fluxplayer.app.core.common.CloudUriScheme.getCloudFolder(uri)
+                val provider = com.fluxplayer.app.core.common.CloudUriScheme.getProvider(uri) ?: ""
+                if (!folder.isNullOrEmpty()) {
+                    "cloud:$provider/$folder"
+                } else {
+                    val cloudKey = firstUri.substringBeforeLast('/')
+                    if (cloudKey.isNotEmpty() && cloudKey != firstUri) "cloud:$cloudKey" else ""
+                }
+            }
+            else -> {
+                val fallback = firstUri.substringBeforeLast('/')
+                if (fallback.isNotEmpty() && fallback != firstUri) "other:$fallback" else ""
+            }
+        }
+    }
+
     fun updatePlayerBrightness(value: Float) {
         viewModelScope.launch {
             preferencesRepository.updatePlayerPreferences { it.copy(playerBrightness = value) }

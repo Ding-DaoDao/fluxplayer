@@ -144,4 +144,17 @@ class LocalMediaRepository @Inject constructor(
             ),
         )
     }
+
+    override suspend fun updateMediumIntroOutro(uri: String, introMs: Long, outroMs: Long) {
+        mediumStateDao.upsertIntroOutro(
+            uri = uri,
+            introMs = introMs,
+            outroMs = outroMs,
+            lastPlayedTime = System.currentTimeMillis(),
+        )
+    }
+
+    override suspend fun deleteStaleState(staleBefore: Long) {
+        mediumStateDao.deleteStale(cutoff = staleBefore)
+    }
 }

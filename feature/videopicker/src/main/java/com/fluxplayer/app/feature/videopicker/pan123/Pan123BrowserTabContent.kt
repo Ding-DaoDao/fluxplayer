@@ -96,6 +96,8 @@ fun Pan123BrowserTabContent(
     var showSortMenu by remember { mutableStateOf(false) }
     var imageViewerIndex by remember { mutableIntStateOf(-1) }
 
+    val cloudFolderPath = remember(navigationStack) { navigationStack.joinToString("/") { it.label } }
+
     val currentSortKey = remember(state.orderBy, state.orderDirection) {
         val dir = state.orderDirection.lowercase()
         when (state.orderBy) {
@@ -121,7 +123,7 @@ fun Pan123BrowserTabContent(
                 allItems = state.items,
                 mediaFilter = { it.isAudio },
                 resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("pan123", it.path) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("pan123", it.path, cloudFolderPath) },
                 onPlayVideos = onPlayVideos,
                 scope = scope,
             )
@@ -129,7 +131,7 @@ fun Pan123BrowserTabContent(
                 item = item,
                 allItems = state.items,
                 resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("pan123", it.path) },
+                buildPlaylistUri = { CloudUriScheme.buildCloudUri("pan123", it.path, cloudFolderPath) },
                 onPlayVideos = onPlayVideos,
                 scope = scope,
             )
