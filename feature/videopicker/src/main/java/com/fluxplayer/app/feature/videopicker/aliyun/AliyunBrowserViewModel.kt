@@ -114,7 +114,15 @@ class AliyunBrowserViewModel @Inject constructor(
                     .filter { it.parentPath != null }
                     .groupBy { it.parentPath!! }
                     .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
-                    .values.map { it.uriString }.toSet()
+                    .values.flatMap { item ->
+                        val uri = item.uriString
+                        val parts = mutableListOf(uri)
+                        if (uri.startsWith("cloud://")) {
+                            val baseUri = uri.substringBefore("?")
+                            if (baseUri != uri) parts.add(baseUri)
+                        }
+                        parts
+                    }.toSet()
                 _uiState.update { it.copy(playedUriSet = latestPerDir) }
             }
         }

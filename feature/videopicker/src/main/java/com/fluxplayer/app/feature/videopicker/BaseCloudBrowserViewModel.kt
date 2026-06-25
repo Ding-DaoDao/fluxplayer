@@ -481,6 +481,10 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                 val historyUris = latestHistory.flatMap { item ->
                     val uri = item.uriString
                     val parts = mutableListOf(uri)
+                    if (uri.startsWith("cloud://")) {
+                        val baseUri = uri.substringBefore("?")
+                        if (baseUri != uri) parts.add(baseUri)
+                    }
                     if (uri.startsWith("http://") || uri.startsWith("https://")) {
                         try {
                             val parsed = Uri.parse(uri)
