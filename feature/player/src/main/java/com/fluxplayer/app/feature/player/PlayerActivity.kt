@@ -549,6 +549,14 @@ class PlayerActivity : ComponentActivity() {
         super.onNewIntent(intent)
         if (intent.data != null) {
             setIntent(intent)
+            /**
+             * 重建 PlayerApi，读取新 Intent 的 extras（playlist 等）。
+             * 必须做，因为 PlayerApi 在构造时将 activity.intent.extras 缓存为不可变 val，
+             * setIntent(intent) 不会自动更新 PlayerApi 内部的 extras 引用。
+             * 不重建会导致 singleTask 复用 Activity 时，playerApi.getPlaylist()
+             * 返回上一个 directory 的播放列表，造成片头片尾 key 泄露。
+             */
+            playerApi = PlayerApi(this)
             isIntentNew = true
             if (mediaController != null) {
                 startPlayback()

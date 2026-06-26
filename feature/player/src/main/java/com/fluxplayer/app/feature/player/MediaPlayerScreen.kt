@@ -750,10 +750,13 @@ fun MediaPlayerScreen(
                                             val pos = player.currentPosition
                                             introOutroState.setIntro(key, pos)
                                             viewModel.updateMediumIntroOutro(key, pos, timestamps.outroMs)
-                                            // 刷新播放列表所有 item，确保切集时 onMediaItemTransition 读到新值
+                                            // 更新后续 item 的片头片尾元数据，跳过当前 item
+                                            // 替换当前 item 会导致播放器重新加载，出现"从头播放"的闪烁
                                             val p = player
+                                            val currentIdx = p.currentMediaItemIndex
                                             val count = p.mediaItemCount
                                             for (i in 0 until count) {
+                                                if (i == currentIdx) continue
                                                 val item = p.getMediaItemAt(i)
                                                 val updated = item.mediaItemCopy(introMs = pos, outroMs = timestamps.outroMs)
                                                 p.replaceMediaItem(i, updated)
@@ -763,8 +766,10 @@ fun MediaPlayerScreen(
                                             introOutroState.setIntro(key, -1L)
                                             viewModel.updateMediumIntroOutro(key, -1L, timestamps.outroMs)
                                             val p = player
+                                            val currentIdx = p.currentMediaItemIndex
                                             val count = p.mediaItemCount
                                             for (i in 0 until count) {
+                                                if (i == currentIdx) continue
                                                 val item = p.getMediaItemAt(i)
                                                 val updated = item.mediaItemCopy(
                                                     introMs = -1L, outroMs = timestamps.outroMs)
@@ -777,8 +782,10 @@ fun MediaPlayerScreen(
                                             introOutroState.setOutro(key, pos)
                                             viewModel.updateMediumIntroOutro(key, timestamps.introMs, pos)
                                             val p = player
+                                            val currentIdx = p.currentMediaItemIndex
                                             val count = p.mediaItemCount
                                             for (i in 0 until count) {
+                                                if (i == currentIdx) continue
                                                 val item = p.getMediaItemAt(i)
                                                 val updated = item.mediaItemCopy(
                                                     introMs = timestamps.introMs, outroMs = pos)
@@ -789,8 +796,10 @@ fun MediaPlayerScreen(
                                             introOutroState.setOutro(key, -1L)
                                             viewModel.updateMediumIntroOutro(key, timestamps.introMs, -1L)
                                             val p = player
+                                            val currentIdx = p.currentMediaItemIndex
                                             val count = p.mediaItemCount
                                             for (i in 0 until count) {
+                                                if (i == currentIdx) continue
                                                 val item = p.getMediaItemAt(i)
                                                 val updated = item.mediaItemCopy(
                                                     introMs = timestamps.introMs, outroMs = -1L)
