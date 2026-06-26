@@ -144,8 +144,29 @@ class CloudUriResolver @Inject constructor(
                 starredStatus = 0
             )
             
-            // Step 1: getVideoPlayInfo → 优先 MP4 直链，HLS 兜底
-            Log.d(TAG, "resolvePan123: Step1 getVideoPlayInfo...")
+            // Step 1: 海阔视界风格下载直链（原画2 → 最高优先级）
+            //   HEAD 跟随重定向 → 最终 CDN 直链，比 getVideoPlayInfo 更可靠
+            Log.d(TAG, "resolvePan123: Step1 resolveDownloadUrlViaHead (Hiker-style)...")
+            val headUrlResult = client.resolveDownloadUrlViaHead(item)
+            var headUrl: String? = null
+            if (headUrlResult.isSuccess) {
+                headUrl = headUrlResult.getOrThrow()
+                Log.d(TAG, "resolvePan123: resolveDownloadUrlViaHead SUCCESS url=${headUrl.take(150)}")
+
+                // 从 URL 解析 ref 参数解密 Referer，注册 CDN 域名 headers
+                val dlHeaders = client.buildDownloadHeaders(headUrl)
+                Pan123AuthProvider.referer = dlHeaders["Referer"] ?: Pan123AuthProvider.referer
+                val host = try { java.net.URI(headUrl).host ?: "" } catch (_: Exception) { "" }
+                if (host.isNotBlank()) {
+                    val suffix = host.substringAfter('.')
+                    if (suffix.isNotBlank()) CloudPlayHeaders.registerSuffix(".$suffix", dlHeaders)
+                }
+            } else {
+                Log.w(TAG, "resolvePan123: resolveDownloadUrlViaHead FAILED: ${headUrlResult.exceptionOrNull()?.message}")
+            }
+
+            // Step 2: getVideoPlayInfo → 画质选项缓存 + MP4/HLS 列表
+            Log.d(TAG, "resolvePan123: Step2 getVideoPlayInfo...")
             val playResult = client.getVideoPlayInfo(item).getOrNull()
             if (playResult != null && playResult.urls.isNotEmpty()) {
                 Log.d(TAG, "resolvePan123: getVideoPlayInfo SUCCESS - urls size=${playResult.urls.size}")
@@ -153,24 +174,30 @@ class CloudUriResolver @Inject constructor(
                     val isHls = url.contains(".m3u8") || url.contains("/hls/")
                     Log.d(TAG, "  [$index] isHls=$isHls url=${url.take(150)}")
                 }
-                // 缓存画质选项
-                if (playResult.urls.size > 1) {
-                    val options = playResult.urls.zip(playResult.names).map { (u, n) ->
+                // 组合所有画质选项（headUrl 排第一，匹配 海阔视界 顺序）
+                if (playResult.urls.isNotEmpty()) {
+                    val allUrls = mutableListOf<String>()
+                    val allNames = mutableListOf<String>()
+                    if (headUrl != null) { allUrls.add(headUrl); allNames.add("原画2") }
+                    allUrls.addAll(playResult.urls)
+                    allNames.addAll(playResult.names)
+
+                    val options = allUrls.zip(allNames).map { (u, n) ->
                         VideoQualityCache.QualityOption(label = n, url = u)
                     }
                     videoQualityCache.cacheQualityOptions("pan123", fileId, fileId, options)
                 }
-                // 优先 MP4，HLS 也接受（原版逻辑）
+
                 val mp4Url = playResult.urls.find { !it.contains(".m3u8") && !it.contains("/hls/") }
                 val hlsUrl = playResult.urls.find { it.contains(".m3u8") || it.contains("/hls/") }
-                // 存储 HLS 备用 URL（MP4 直链容器元数据损坏时自动切换）
                 if (mp4Url != null && hlsUrl != null) {
                     Pan123FallbackCache.put(fileId, hlsUrl)
-                    Log.d(TAG, "resolvePan123: cached HLS fallback: ${hlsUrl.take(100)}")
                 }
-                val bestUrl = mp4Url ?: playResult.urls.first()
-                Log.d(TAG, "resolvePan123: selected URL isHls=${mp4Url == null} url=${bestUrl.take(150)}")
-                Log.d(TAG, "========== resolvePan123 END (getVideoPlayInfo) ==========")
+
+                // 优先 getVideoPlayInfo MP4（有字幕），其次 headUrl，最后 HLS
+                val bestUrl = mp4Url ?: (headUrl ?: playResult.urls.first())
+                Log.d(TAG, "resolvePan123: selected URL isMp4=${bestUrl == mp4Url} isHead=${bestUrl == headUrl} url=${bestUrl.take(150)}")
+                Log.d(TAG, "========== resolvePan123 END ==========")
                 return bestUrl + "#pan123Play=true#"
             }
 

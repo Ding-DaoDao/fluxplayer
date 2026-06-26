@@ -465,6 +465,45 @@ class Pan123ApiClient(
         )
     }
 
+    // region ==================== 下载直链解析（海阔视界 down() 1:1移植） ====================
+
+    /**
+     * 获取可靠下载直链 — 1:1 移植海阔视界 down() 函数
+     *
+     * 海阔视界逻辑:
+     *   1. POST fileDownloadInfo (Android API) → 中间 URL
+     *   2. HEAD 跟随重定向 → 最终 CDN 直链
+     *   3. 解析 ref 参数解密得到 Referer
+     *   4. 返回最终 CDN 直链（可直接播放）
+     */
+    suspend fun resolveDownloadUrlViaHead(item: Pan123FileItem): Result<String> = runCatching {
+        Log.d(TAG, "========== resolveDownloadUrlViaHead START: fileId=${item.fileId} ==========")
+
+        // Step 1: 获取中间下载 URL（Android API，已有方法）
+        val downloadInfo = getFileDownloadInfo(item).getOrThrow()
+        val intermediateUrl = downloadInfo.url
+        Log.d(TAG, "resolveDownloadUrlViaHead: intermediateUrl=$intermediateUrl")
+
+        // Step 2: HEAD 跟随重定向 → 最终 CDN URL（海阔视界: fetch(url, {onlyHeaders:true}).url）
+        val headRequest = Request.Builder()
+            .url(intermediateUrl)
+            .head()
+            .build()
+        val response = client.newCall(headRequest).execute()
+        val finalUrl = response.request.url.toString()
+        response.close()
+        Log.d(TAG, "resolveDownloadUrlViaHead: finalUrl=$finalUrl")
+
+        if (finalUrl == intermediateUrl) {
+            Log.w(TAG, "resolveDownloadUrlViaHead: no redirect, using intermediate URL")
+        }
+
+        Log.d(TAG, "========== resolveDownloadUrlViaHead END ==========")
+        finalUrl
+    }
+
+    // endregion
+
     suspend fun createFolder(name: String, parentFileId: String = "0"): Result<Boolean> = runCatching {
         loadConfig().getOrThrow()
         val endpoint = "$API_BASE/file/upload_request"
