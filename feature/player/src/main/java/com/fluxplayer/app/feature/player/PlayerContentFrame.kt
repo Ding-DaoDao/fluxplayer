@@ -1,7 +1,7 @@
 package com.fluxplayer.app.feature.player
 
 import android.graphics.Rect
-import android.view.TextureView
+import android.view.SurfaceView
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -41,26 +41,31 @@ fun PlayerContentFrame(
     videoZoomAndContentScaleState: VideoZoomAndContentScaleState,
     volumeAndBrightnessGestureState: VolumeAndBrightnessGestureState,
     subtitleConfiguration: SubtitleConfiguration,
-    onTextureView: ((TextureView?) -> Unit)? = null,
+    onSurfaceView: ((SurfaceView?) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val presentationState = rememberPresentationState(player)
 
-    // 使用 remember + DisposableEffect 管理 TextureView，
-    // 避免 rememberSaveable 机制尝试序列化不可序列化的 TextureView/回调
-    val textureView = remember { TextureView(context) }
+    // 使用 SurfaceView 替代 TextureView：
+    // TextureView 在 Android 13+ 上误报 HDR 能力导致 Media3 跳过 tone mapping，
+    // SurfaceView 能正确处理 HDR 输出 / SDR 降级，是 Google 官方推荐的 HDR 播放方案。
+    val surfaceView = remember {
+        SurfaceView(context).apply {
+            setZOrderMediaOverlay(false) // SurfaceView 置于 Compose UI 下层
+        }
+    }
 
-    DisposableEffect(textureView) {
-        onTextureView?.invoke(textureView)
+    DisposableEffect(surfaceView) {
+        onSurfaceView?.invoke(surfaceView)
         onDispose {
-            onTextureView?.invoke(null)
+            onSurfaceView?.invoke(null)
         }
     }
 
     AndroidView(
         factory = { ctx ->
-            player.setVideoTextureView(textureView)
-            textureView
+            player.setVideoSurfaceView(surfaceView)
+            surfaceView
         },
         modifier = modifier
             .resizeWithContentScale(
@@ -88,7 +93,7 @@ fun PlayerContentFrame(
                 translationX = videoZoomAndContentScaleState.offset.x
                 translationY = videoZoomAndContentScaleState.offset.y
             },
-        onRelease = { player.setVideoTextureView(null) },
+        onRelease = { player.clearVideoSurfaceView(surfaceView) },
     )
 
     PlayerGestures(

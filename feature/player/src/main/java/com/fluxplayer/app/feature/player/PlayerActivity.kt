@@ -3,11 +3,15 @@ package com.fluxplayer.app.feature.player
 import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.view.TextureView
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
+import android.view.SurfaceView
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -60,6 +64,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 val LocalUseMaterialYouControls = compositionLocalOf { false }
@@ -83,7 +88,7 @@ class PlayerActivity : ComponentActivity() {
     private var playInBackground: Boolean = false
     private var isIntentNew: Boolean = true
     private var isFinishingPlayer = false
-    private var playerTextureView: TextureView? = null
+    private var playerSurfaceView: SurfaceView? = null
 
     /** 听书模式：当前播放列表中所有音频文件的绝对路径列表，用于通过 mediaId 反查章节索引 */
     private var audioBookChapterPaths: List<String> = emptyList()
@@ -252,7 +257,7 @@ class PlayerActivity : ComponentActivity() {
                             danmakuFileUri = danmakuFileUri,
                             danmakuEnabled = danmakuEnabled,
                             danmakuForCurrentEpisode = danmakuForCurrentEpisode,
-                            onTextureView = { tv -> playerTextureView = tv },
+                            onSurfaceView = { sv -> playerSurfaceView = sv },
                             onSelectSubtitleClick = {
                                 lifecycleScope.launch {
                                     val uri = subtitleFileSuspendLauncher.launch(
@@ -604,16 +609,35 @@ class PlayerActivity : ComponentActivity() {
                     Log.w("PlayerActivity", "finish save SKIPPED: mediaId=$mediaId, duration=$duration")
                 }
             }
-            // 退出时截取当前播放帧作为缩略图，存入 PlayerFrameCapture 供 recordPlaybackHistory 使用
+            // 退出时通过 PixelCopy 截取 SurfaceView 当前帧作为缩略图
+            val sv = playerSurfaceView
             val uri = mediaController?.currentMediaItem?.mediaId
-            if (uri != null) {
+            if (uri != null && sv != null && sv.width > 0 && sv.height > 0) {
                 try {
-                    val bitmap = playerTextureView?.getBitmap()
-                    if (bitmap != null) {
-                        val path = thumbnailExtractor.saveDirect(uri, bitmap)
+                    val bitmap = Bitmap.createBitmap(
+                        sv.width, sv.height, Bitmap.Config.ARGB_8888,
+                    )
+                    val copyResult = suspendCancellableCoroutine { cont ->
+                        PixelCopy.request(
+                            sv, bitmap,
+                            { result -> cont.resume(result) {} },
+                            Handler(Looper.getMainLooper()),
+                        )
+                    }
+                    if (copyResult == PixelCopy.SUCCESS) {
+                        val path = withContext(Dispatchers.Default) {
+                            // 缩到 320px 宽的缩略图
+                            val thumbW = 320
+                            val thumbH = (bitmap.height.toFloat() / bitmap.width * thumbW).toInt().coerceAtLeast(1)
+                            val thumb = Bitmap.createScaledBitmap(bitmap, thumbW, thumbH, true)
+                            bitmap.recycle()
+                            thumbnailExtractor.saveDirect(uri, thumb)
+                        }
                         if (path != null) {
                             PlayerFrameCapture.put(uri, path)
                         }
+                    } else {
+                        bitmap.recycle()
                     }
                 } catch (_: Exception) {
                     // 截图失败不影响退出
@@ -664,6 +688,7 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", "wma", "opus")
+
 
         private fun scanAudioFiles(dir: File?): List<File> {
             if (dir == null || !dir.isDirectory) return emptyList()

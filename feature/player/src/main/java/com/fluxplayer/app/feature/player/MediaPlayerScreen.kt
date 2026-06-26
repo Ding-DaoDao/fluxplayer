@@ -5,7 +5,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.view.TextureView
+import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -147,7 +147,7 @@ fun MediaPlayerScreen(
     danmakuEnabled: Boolean,
     danmakuForCurrentEpisode: Boolean = false,
     modifier: Modifier = Modifier,
-    onTextureView: ((TextureView?) -> Unit)? = null,
+    onSurfaceView: ((SurfaceView?) -> Unit)? = null,
     onSelectSubtitleClick: () -> Unit,
     onDanmakuPickFile: () -> Unit,
     onDanmakuLocalFileSelected: ((Uri) -> Unit)? = null,
@@ -463,6 +463,7 @@ fun MediaPlayerScreen(
                     seekGestureState = seekGestureState,
                     videoZoomAndContentScaleState = videoZoomAndContentScaleState,
                     volumeAndBrightnessGestureState = volumeAndBrightnessGestureState,
+                    onSurfaceView = onSurfaceView,
                     subtitleConfiguration = SubtitleConfiguration(
                         useSystemCaptionStyle = playerPreferences.useSystemCaptionStyle,
                         showBackground = playerPreferences.subtitleBackground,
@@ -471,7 +472,6 @@ fun MediaPlayerScreen(
                         textBold = playerPreferences.subtitleTextBold,
                         applyEmbeddedStyles = playerPreferences.applyEmbeddedStyles,
                     ),
-                    onTextureView = onTextureView,
                 )
 
                 // ── 弹幕叠加层 ──

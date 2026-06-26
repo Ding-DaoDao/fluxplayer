@@ -129,6 +129,8 @@ class PlayerService : MediaSessionService() {
     lateinit var cacheKeyRegistry: CloudAwareCacheKeyRegistry
 
     private lateinit var mediaSourceFactory: CloudAwareMediaSourceFactory
+    private lateinit var trackSelector: DefaultTrackSelector
+    private lateinit var loadControl: DefaultLoadControl
 
     private val playerPreferences: PlayerPreferences
         get() = preferencesRepository.playerPreferences.value
@@ -469,6 +471,7 @@ class PlayerService : MediaSessionService() {
                 }
                 PlaybackException.ERROR_CODE_DECODER_INIT_FAILED -> {
                     Log.e(TAG, "onPlayerError: Decoder init failed")
+                    handleDecoderFallback()
                 }
                 PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED -> {
                     Log.e(TAG, "onPlayerError: Malformed container")
@@ -711,17 +714,8 @@ class PlayerService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val renderersFactory = NextRenderersFactory(applicationContext)
-            .setEnableDecoderFallback(true)
-            .setExtensionRendererMode(
-                when (playerPreferences.decoderPriority) {
-                    DecoderPriority.DEVICE_ONLY -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
-                    DecoderPriority.PREFER_DEVICE -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-                    DecoderPriority.PREFER_APP -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
-                },
-            )
 
-        val trackSelector = DefaultTrackSelector(applicationContext).apply {
+        trackSelector = DefaultTrackSelector(applicationContext).apply {
             setParameters(
                 buildUponParameters()
                     .setPreferredAudioLanguage(playerPreferences.preferredAudioLanguage)
@@ -729,12 +723,12 @@ class PlayerService : MediaSessionService() {
             )
         }
 
-        val loadControl = DefaultLoadControl.Builder()
+        loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,      // 15000: 最少缓冲 15 秒即可开始播放
-                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,      // 60000: 最大缓冲 60 秒
-                2500,    // 起播缓冲 2.5 秒（云盘流媒体加速起播）
-                5000,    // 重缓冲后 5 秒恢复（原 10 秒，减少卡顿等待）
+                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                2500,
+                5000,
             )
             .setBackBuffer(5000, false)
             .setTargetBufferBytes(DefaultLoadControl.DEFAULT_TARGET_BUFFER_BYTES)
@@ -752,58 +746,10 @@ class PlayerService : MediaSessionService() {
             }
         }
 
-        val player = ExoPlayer.Builder(applicationContext)
-            .setRenderersFactory(renderersFactory)
-            .setTrackSelector(trackSelector)
-            .setLoadControl(loadControl)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                    .build(),
-                playerPreferences.requireAudioFocus,
-            )
-            .setHandleAudioBecomingNoisy(playerPreferences.pauseOnHeadsetDisconnect)
-            .build()
-            .also {
-                it.addListener(playbackStateListener)
-                it.pauseAtEndOfMediaItems = !playerPreferences.autoplay
-                it.repeatMode = when (playerPreferences.loopMode) {
-                    LoopMode.OFF -> Player.REPEAT_MODE_OFF
-                    LoopMode.ONE -> Player.REPEAT_MODE_ONE
-                    LoopMode.ALL -> Player.REPEAT_MODE_ALL
-                }
-                // 会话倍速以全局默认值起步，之后由用户的修改驱动（见 onPlaybackParametersChanged）。
-                sessionPlaybackSpeed = playerPreferences.defaultPlaybackSpeed
-                it.setPlaybackSpeed(sessionPlaybackSpeed)
-            }
+        val player = createExoPlayer(playerPreferences.decoderPriority)
+        configurePlayer(player)
 
-        try {
-            mediaSession = MediaSession.Builder(this, player).apply {
-                setSessionActivity(
-                    PendingIntent.getActivity(
-                        this@PlayerService,
-                        0,
-                        Intent(this@PlayerService, PlayerActivity::class.java),
-                        PendingIntent.FLAG_IMMUTABLE,
-                    ),
-                )
-                setCallback(mediaSessionCallback)
-                setCustomLayout(
-                    listOf(
-                        CommandButton.Builder(ICON_UNDEFINED)
-                            .setCustomIconResId(coreUiR.drawable.ic_close)
-                            .setDisplayName(getString(coreUiR.string.stop_player_session))
-                            .setSessionCommand(CustomCommands.STOP_PLAYER_SESSION.sessionCommand)
-                            .setEnabled(true)
-                            .build(),
-                    ),
-                )
-            }.build()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        buildMediaSession(player)
 
         // 监听缓存开关变化，实时更新 MediaSourceFactory
         serviceScope.launch {
@@ -871,6 +817,137 @@ class PlayerService : MediaSessionService() {
         playbackCacheManager.release()
         subtitleCacheDir.deleteFiles()
         serviceScope.cancel()
+    }
+
+    /**
+     * 创建 ExoPlayer 实例，接受 [decoderPriority] 以支持解码失败时软件解码降级重试。
+     */
+    private fun createExoPlayer(decoderPriority: DecoderPriority): ExoPlayer {
+        val renderersFactory = NextRenderersFactory(applicationContext)
+            .setEnableDecoderFallback(true)
+            .setExtensionRendererMode(
+                when (decoderPriority) {
+                    DecoderPriority.DEVICE_ONLY -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
+                    DecoderPriority.PREFER_DEVICE -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+                    DecoderPriority.PREFER_APP -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                },
+            )
+
+        return ExoPlayer.Builder(applicationContext)
+            .setRenderersFactory(renderersFactory)
+            .setTrackSelector(trackSelector)
+            .setLoadControl(loadControl)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                playerPreferences.requireAudioFocus,
+            )
+            .setHandleAudioBecomingNoisy(playerPreferences.pauseOnHeadsetDisconnect)
+            .build()
+    }
+
+    /** 配置播放器通用参数（监听器、播放模式、倍速等），用于初始化或降级重建。 */
+    private fun configurePlayer(player: ExoPlayer) {
+        with(player) {
+            addListener(playbackStateListener)
+            pauseAtEndOfMediaItems = !playerPreferences.autoplay
+            repeatMode = when (playerPreferences.loopMode) {
+                LoopMode.OFF -> Player.REPEAT_MODE_OFF
+                LoopMode.ONE -> Player.REPEAT_MODE_ONE
+                LoopMode.ALL -> Player.REPEAT_MODE_ALL
+            }
+            sessionPlaybackSpeed = playerPreferences.defaultPlaybackSpeed
+            setPlaybackSpeed(sessionPlaybackSpeed)
+        }
+    }
+
+    /** 构建 MediaSession，用于初始化或降级重建。 */
+    private fun buildMediaSession(player: ExoPlayer) {
+        try {
+            mediaSession = MediaSession.Builder(this, player).apply {
+                setSessionActivity(
+                    PendingIntent.getActivity(
+                        this@PlayerService,
+                        0,
+                        Intent(this@PlayerService, PlayerActivity::class.java),
+                        PendingIntent.FLAG_IMMUTABLE,
+                    ),
+                )
+                setCallback(mediaSessionCallback)
+                setCustomLayout(
+                    listOf(
+                        CommandButton.Builder(ICON_UNDEFINED)
+                            .setCustomIconResId(coreUiR.drawable.ic_close)
+                            .setDisplayName(getString(coreUiR.string.stop_player_session))
+                            .setSessionCommand(CustomCommands.STOP_PLAYER_SESSION.sessionCommand)
+                            .setEnabled(true)
+                            .build(),
+                    ),
+                )
+            }.build()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * 解码器初始化失败时的降级处理。
+     * 如果当前不是软件解码优先，则强制切换到 FFmpeg 软件解码重建播放器重试。
+     * 常见触发场景：Dolby Vision / HDR 内容在低端设备/平板上硬件解码失败。
+     *
+     * 注意：此方法从 Player.Listener 回调中触发，重建逻辑投递到主线程执行以避免
+     * 在监听器回调内部 release 播放器。
+     */
+    private fun handleDecoderFallback() {
+        val currentPlayer = mediaSession?.player ?: return
+
+        if (playerPreferences.decoderPriority == DecoderPriority.PREFER_APP) {
+            Log.e(TAG, "handleDecoderFallback: already using software decoder, giving up")
+            return
+        }
+
+        Log.w(TAG, "handleDecoderFallback: retrying with FFmpeg software decoder")
+
+        // 保存当前播放状态（必须在 release 前捕获）
+        val savedItems = (0 until currentPlayer.mediaItemCount).map { currentPlayer.getMediaItemAt(it) }
+        val savedIndex = currentPlayer.currentMediaItemIndex
+        val savedPosition = currentPlayer.currentPosition
+        val wasPlaying = currentPlayer.playWhenReady
+
+        // 投递到主线程执行 player/MediaSession 的重建，避免在监听器线程中 release
+        serviceScope.launch {
+            // 持久化切换为软件解码优先
+            preferencesRepository.updatePlayerPreferences {
+                it.copy(decoderPriority = DecoderPriority.PREFER_APP)
+            }
+
+            // 清理旧播放器和 MediaSession
+            loudnessEnhancer?.release()
+            loudnessEnhancer = null
+            currentPlayer.removeListener(playbackStateListener)
+            currentPlayer.stop()
+            currentPlayer.release()
+            mediaSession?.release()
+            mediaSession = null
+
+            // 用软件解码优先重建播放器
+            val newPlayer = createExoPlayer(DecoderPriority.PREFER_APP)
+            configurePlayer(newPlayer)
+            buildMediaSession(newPlayer)
+
+            // 恢复播放
+            if (savedItems.isNotEmpty()) {
+                newPlayer.setMediaItems(savedItems, savedIndex, savedPosition)
+                newPlayer.playWhenReady = wasPlaying
+                newPlayer.prepare()
+            }
+
+            Log.w(TAG, "handleDecoderFallback: player rebuilt with PREFER_APP, " +
+                "items=${savedItems.size}, index=$savedIndex, position=$savedPosition")
+        }
     }
 
     private suspend fun updatedMediaItemsWithMetadata(
