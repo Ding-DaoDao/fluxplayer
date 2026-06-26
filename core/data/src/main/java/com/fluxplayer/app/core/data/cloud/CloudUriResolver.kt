@@ -174,13 +174,12 @@ class CloudUriResolver @Inject constructor(
                     val isHls = url.contains(".m3u8") || url.contains("/hls/")
                     Log.d(TAG, "  [$index] isHls=$isHls url=${url.take(150)}")
                 }
-                // 组合所有画质选项（headUrl 排第一，匹配 海阔视界 顺序）
+                // 组合画质选项 —— 全部来自 getVideoPlayInfo 服务端转码流
+                // 不加入 headUrl（原始 CDN 直链），避免用户切换到 Dolby Vision
+                // 原始文件导致偏色。123 云盘的服务端转码流已经是 SDR。
                 if (playResult.urls.isNotEmpty()) {
-                    val allUrls = mutableListOf<String>()
-                    val allNames = mutableListOf<String>()
-                    if (headUrl != null) { allUrls.add(headUrl); allNames.add("原画2") }
-                    allUrls.addAll(playResult.urls)
-                    allNames.addAll(playResult.names)
+                    val allUrls = playResult.urls.toMutableList()
+                    val allNames = playResult.names.toMutableList()
 
                     val options = allUrls.zip(allNames).map { (u, n) ->
                         VideoQualityCache.QualityOption(label = n, url = u)
@@ -194,8 +193,10 @@ class CloudUriResolver @Inject constructor(
                     Pan123FallbackCache.put(fileId, hlsUrl)
                 }
 
-                // 优先 getVideoPlayInfo MP4（有字幕），其次 headUrl，最后 HLS
-                val bestUrl = mp4Url ?: (headUrl ?: playResult.urls.first())
+                // 优先 getVideoPlayInfo MP4（有字幕），其次 HLS 转码流，最后才用 headUrl 原始文件
+                // getVideoPlayInfo 的所有流都是 123 云盘服务端转码的 SDR，不会出现 Dolby Vision 偏色
+                // urls.isNotEmpty() 已保证 first() 非空，类型收敛为 String
+                val bestUrl = mp4Url ?: playResult.urls.first()
                 Log.d(TAG, "resolvePan123: selected URL isMp4=${bestUrl == mp4Url} isHead=${bestUrl == headUrl} url=${bestUrl.take(150)}")
                 Log.d(TAG, "========== resolvePan123 END ==========")
                 return bestUrl + "#pan123Play=true#"
