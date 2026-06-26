@@ -149,10 +149,9 @@ class PlayerActivity : ComponentActivity() {
                 lifecycleScope.launch {
                     player = controllerFuture?.await()
                 }
-
-                onStopOrDispose {
-                    player = null
-                }
+                // 不设 player = null，保留引用避免 Crossfade 销毁 MediaPlayerScreen
+                // 导致 remember 状态（IntroOutroState/弹幕渲染等）丢失
+                onStopOrDispose { /* keep player alive */ }
             }
 
             val danmakuList by viewModel.danmakuList.collectAsStateWithLifecycle()
@@ -308,7 +307,9 @@ class PlayerActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         lifecycleScope.launch {
+            // maybeInitControllerFuture 在首次启动时创建 future，恢复时 no-op
             maybeInitControllerFuture()
+            // await 在首次启动时等待连接，恢复时 future 已完成立即返回
             mediaController = controllerFuture?.await()
 
             mediaController?.run {
@@ -336,12 +337,13 @@ class PlayerActivity : ComponentActivity() {
             }
         }
 
-        viewModel.onPlayerExit()
+        // 不在此处调用 viewModel.onPlayerExit() —— 息屏/切后台只是临时暂停，
+        // 恢复后弹幕上下文和切集自动加载仍应有效。
+        // onPlayerExit() 移到 finishAndStopPlayerSession() 中，只在真正退出时调用。
 
-        controllerFuture?.run {
-            MediaController.releaseFuture(this)
-            controllerFuture = null
-        }
+        // 不在此处释放 controllerFuture —— 保持连接可避免 onStart() 重建 controller
+        // 导致 Crossfade 销毁 MediaPlayerScreen 和 Compose remember 状态丢失。
+
         super.onStop()
     }
 
@@ -359,7 +361,8 @@ class PlayerActivity : ComponentActivity() {
         val isNewUriTheCurrentMediaItem = mediaController?.currentMediaItem?.localConfiguration?.uri.toString() == uri.toString()
 
         if (returningFromBackground || isNewUriTheCurrentMediaItem) {
-            mediaController?.prepare()
+            // 从后台恢复：媒体源已准备完毕，直接恢复播放即可。
+            // 不调用 prepare() —— 云盘下载直链有时效性，re-prepare 可能因 URL 过期而失败。
             mediaController?.playWhenReady = viewModel.playWhenReady
             return
         }
@@ -653,11 +656,18 @@ class PlayerActivity : ComponentActivity() {
             }
             // 音频模式：只停播放+清空列表，保留 Service 热连接（下次播放秒开）
             // 视频模式：走完整清理流程（含 DB 位置记录）
+            // 先通知 ViewModel 退出，清理弹幕上下文和设置 isExiting
+            viewModel.onPlayerExit()
             if (intent.getBooleanExtra("audio_only", false)) {
                 mediaController?.stop()
                 mediaController?.clearMediaItems()
             } else {
                 mediaController?.stopPlayerSession()
+            }
+            // 真正退出时断开 controller 连接
+            controllerFuture?.run {
+                MediaController.releaseFuture(this)
+                controllerFuture = null
             }
             finish()
         }
