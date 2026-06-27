@@ -27,6 +27,10 @@ class PlaybackCacheManager @Inject constructor(
             if (cacheMaxSize == maxSizeBytes) return existing
             existing.release()
         }
+        // Evict old cache if disk is insufficient (leave at least equal space to requested size)
+        if (cacheDir.exists() && cacheDir.usableSpace < maxSizeBytes) {
+            clearCache()
+        }
         val newCache = createCache(maxSizeBytes)
         cache = newCache
         cacheMaxSize = maxSizeBytes

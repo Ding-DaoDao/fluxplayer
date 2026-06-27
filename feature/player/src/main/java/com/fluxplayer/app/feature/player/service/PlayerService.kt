@@ -731,8 +731,8 @@ class PlayerService : MediaSessionService() {
                 5000,
             )
             .setBackBuffer(5000, false)
-            .setTargetBufferBytes(DefaultLoadControl.DEFAULT_TARGET_BUFFER_BYTES)
-            .setPrioritizeTimeOverSizeThresholds(true)
+            .setTargetBufferBytes(64 * 1024 * 1024) // 64MB cap to avoid OOM
+            .setPrioritizeTimeOverSizeThresholds(false)
             .build()
 
         mediaSourceFactory = CloudAwareMediaSourceFactory(
