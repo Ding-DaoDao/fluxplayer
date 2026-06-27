@@ -220,7 +220,14 @@ fun ControlsBottomView(
                 if (qualityOptions.size > 1) {
                     var showQualityMenu by remember { mutableStateOf(false) }
                     Box {
-                        PlayerButton(onClick = { showQualityMenu = true }) {
+                        // 使用自适应宽度的 Box 替代 PlayerButton，避免文本被方形按钮截断
+                        Box(
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 48.dp)
+                                .noRippleClickable { showQualityMenu = true }
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             Text(
                                 text = currentQualityLabel,
                                 style = MaterialTheme.typography.bodyMedium,
