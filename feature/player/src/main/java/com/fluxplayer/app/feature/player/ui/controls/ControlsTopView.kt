@@ -38,8 +38,7 @@ fun ControlsTopView(
     videoInfoLine: String = "",
     danmakuEnabled: Boolean = false,
     danmakuHasData: Boolean = false,
-    onAudioClick: () -> Unit = {},
-    onSubtitleClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     onDanmakuToggleClick: () -> Unit = {},
     onDanmakuSearchClick: () -> Unit = {},
     onDanmakuSettingsClick: () -> Unit = {},
@@ -85,18 +84,6 @@ fun ControlsTopView(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            PlayerButton(onClick = onAudioClick) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_audio_track),
-                    contentDescription = null,
-                )
-            }
-            PlayerButton(onClick = onSubtitleClick) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_subtitle_track),
-                    contentDescription = null,
-                )
-            }
             // 弹幕搜索/本地文件按钮（始终可见，图标同 mpv 的弹幕设置按钮）
             PlayerButton(onClick = onDanmakuSearchClick) {
                 Icon(
@@ -124,6 +111,13 @@ fun ControlsTopView(
             PlayerButton(onClick = onDanmakuSettingsClick) {
                 Icon(
                     painter = painterResource(R.drawable.ic_danmaku_settings),
+                    contentDescription = null,
+                )
+            }
+            // 设置按钮（音轨/字幕）
+            PlayerButton(onClick = onSettingsClick) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_settings),
                     contentDescription = null,
                 )
             }

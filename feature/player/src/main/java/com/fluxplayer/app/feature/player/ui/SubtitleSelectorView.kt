@@ -117,7 +117,7 @@ fun BoxScope.SubtitleSelectorView(
 }
 
 @Composable
-private fun DelayInput(
+internal fun DelayInput(
     value: Long,
     onValueChange: (Long) -> Unit,
 ) {
@@ -168,7 +168,7 @@ private fun DelayInput(
 }
 
 @Composable
-private fun SpeedInput(
+internal fun SpeedInput(
     value: Float,
     onValueChange: (Float) -> Unit,
 ) {
@@ -218,7 +218,7 @@ private fun SpeedInput(
 }
 
 @Composable
-private fun NumberChooserInput(
+internal fun NumberChooserInput(
     modifier: Modifier = Modifier,
     title: String,
     value: String,
@@ -264,7 +264,7 @@ private fun NumberChooserInput(
     }
 }
 
-private fun Modifier.repeatingClickable(
+internal fun Modifier.repeatingClickable(
     enabled: Boolean = true,
     maxDelayMillis: Long = 200,
     minDelayMillis: Long = 5,

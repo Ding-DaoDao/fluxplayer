@@ -21,6 +21,7 @@ fun BoxScope.OverlayShowView(
     onDanmakuConfigChange: (DanmakuConfig) -> Unit = {},
     onDismiss: () -> Unit = {},
     onSelectSubtitleClick: () -> Unit = {},
+    onSubtitleFileSelected: (Uri) -> Unit = {},
     onSubtitleOptionEvent: (SubtitleOptionsEvent) -> Unit = {},
     onVideoContentScaleChanged: (VideoContentScale) -> Unit = {},
 ) {
@@ -67,12 +68,21 @@ fun BoxScope.OverlayShowView(
         config = danmakuConfig,
         onConfigChange = onDanmakuConfigChange,
     )
+
+    PlayerSettingsSheet(
+        show = overlayView == OverlayView.PLAYER_SETTINGS,
+        player = player,
+        onSubtitleFileSelected = onSubtitleFileSelected,
+        onSubtitleOptionEvent = onSubtitleOptionEvent,
+        onDismiss = onDismiss,
+    )
 }
 
 val Configuration.isPortrait: Boolean
     get() = orientation == Configuration.ORIENTATION_PORTRAIT
 
 enum class OverlayView {
+    PLAYER_SETTINGS,
     AUDIO_SELECTOR,
     SUBTITLE_SELECTOR,
     VIDEO_CONTENT_SCALE,

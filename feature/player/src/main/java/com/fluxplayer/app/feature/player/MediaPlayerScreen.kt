@@ -150,6 +150,7 @@ fun MediaPlayerScreen(
     modifier: Modifier = Modifier,
     onSurfaceView: ((SurfaceView?) -> Unit)? = null,
     onSelectSubtitleClick: () -> Unit,
+    onSubtitleFileSelected: (Uri) -> Unit = {},
     onDanmakuPickFile: () -> Unit,
     onDanmakuLocalFileSelected: ((Uri) -> Unit)? = null,
     onBackClick: () -> Unit,
@@ -567,13 +568,9 @@ fun MediaPlayerScreen(
                                     videoInfoLine = videoInfoLine,
                                     danmakuEnabled = danmakuEnabled,
                                     danmakuHasData = danmakuList != null && danmakuForCurrentEpisode,
-                                    onAudioClick = {
+                                    onSettingsClick = {
                                         controlsVisibilityState.hideControls()
-                                        overlayView = OverlayView.AUDIO_SELECTOR
-                                    },
-                                    onSubtitleClick = {
-                                        controlsVisibilityState.hideControls()
-                                        overlayView = OverlayView.SUBTITLE_SELECTOR
+                                        overlayView = OverlayView.PLAYER_SETTINGS
                                     },
 
                                     onDanmakuToggleClick = {
@@ -930,6 +927,7 @@ fun MediaPlayerScreen(
                 onDanmakuConfigChange = { viewModel.updateDanmakuConfig(it) },
                 onDismiss = { overlayView = null },
                 onSelectSubtitleClick = onSelectSubtitleClick,
+                onSubtitleFileSelected = onSubtitleFileSelected,
                 onSubtitleOptionEvent = viewModel::onSubtitleOptionEvent,
                 onVideoContentScaleChanged = { videoZoomAndContentScaleState.onVideoContentScaleChanged(it) },
             )

@@ -274,6 +274,12 @@ class PlayerActivity : ComponentActivity() {
                                     controllerFuture?.await()?.addSubtitleTrack(uri)
                                 }
                             },
+                            onSubtitleFileSelected = { uri ->
+                                lifecycleScope.launch {
+                                    maybeInitControllerFuture()
+                                    controllerFuture?.await()?.addSubtitleTrack(uri)
+                                }
+                            },
                             onDanmakuPickFile = {
                                 lifecycleScope.launch {
                                     val uri = danmakuFileSuspendLauncher.launch(
