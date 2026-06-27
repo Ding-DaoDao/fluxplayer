@@ -97,4 +97,12 @@ class VideoQualityCache @Inject constructor(
     fun clear() {
         prefs.edit().clear().apply()
     }
+
+    /**
+     * 检查是否有缓存的画质选项（不解析完整数据，只判断 key 是否存在）
+     */
+    fun hasQualityOptions(provider: String, fileId: String): Boolean {
+        val key = "${provider}_$fileId"
+        return prefs.contains(key)
+    }
 }

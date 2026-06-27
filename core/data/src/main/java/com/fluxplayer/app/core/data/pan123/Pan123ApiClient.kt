@@ -358,7 +358,7 @@ class Pan123ApiClient(
     }
 
     /**
-     * 获取视频播放信息 — 使用 apiGet + URL 参数（与反编译代码一致）
+     * 获取视频播放信息 — 使用 apiPost（POST 请求，与海阔视界 main.js 一致）
      * 解析 video_play_info 数组获取不同清晰度的播放 URL
      */
     suspend fun getVideoPlayInfo(item: Pan123FileItem): Result<VideoPlayResult> = runCatching {
@@ -368,7 +368,8 @@ class Pan123ApiClient(
         loadConfig().getOrThrow()
         Log.d(TAG, "getVideoPlayInfo: loadConfig SUCCESS")
 
-        // 使用 buildUrl + apiGet（与反编译代码一致）
+        // 使用 buildUrl + apiPost（与海阔视界 main.js 的 this.post 一致）
+        // main.js: this.post(buildUrl(getVideoPlayInfo, {etag, size}))
         val baseEndpoint = apiEndpoint("getVideoPlayInfo")
         Log.d(TAG, "getVideoPlayInfo: baseEndpoint=$baseEndpoint")
         
@@ -379,10 +380,10 @@ class Pan123ApiClient(
         val fullUrl = buildUrl(baseEndpoint, params)
         Log.d(TAG, "getVideoPlayInfo: fullUrl=$fullUrl")
 
-        Log.d(TAG, "getVideoPlayInfo: Calling apiGet...")
-        val json = apiGet(fullUrl)
-        Log.d(TAG, "getVideoPlayInfo: apiGet response code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
-        Log.d(TAG, "getVideoPlayInfo: apiGet response data=${json.optJSONObject("data")?.toString()?.take(500)}")
+        Log.d(TAG, "getVideoPlayInfo: Calling apiPost...")
+        val json = apiPost(fullUrl)
+        Log.d(TAG, "getVideoPlayInfo: apiPost response code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
+        Log.d(TAG, "getVideoPlayInfo: apiPost response data=${json.optJSONObject("data")?.toString()?.take(500)}")
 
         val data = json.optJSONObject("data")
         if (data == null) {
@@ -402,17 +403,25 @@ class Pan123ApiClient(
             Log.d(TAG, "getVideoPlayInfo: Added original video URL")
         }
 
-        // 转码清晰度列表
+        // 转码清晰度列表 — 防御式解析，跳过空 url，避免单条异常导致整链断裂
         val playInfos = data.optJSONArray("video_play_info")
         Log.d(TAG, "getVideoPlayInfo: video_play_info array size=${playInfos?.length() ?: 0}")
         if (playInfos != null) {
             for (i in 0 until playInfos.length()) {
-                val info = playInfos.getJSONObject(i)
-                val url = info.getString("url")
-                val resolution = info.optString("resolution", "转码${i + 1}")
-                Log.d(TAG, "getVideoPlayInfo: transcode[$i] resolution=$resolution, url=${url.take(100)}...")
-                urls.add(url)
-                names.add(resolution)
+                try {
+                    val info = playInfos.getJSONObject(i)
+                    val url = info.optString("url", "")
+                    if (url.isBlank()) {
+                        Log.w(TAG, "getVideoPlayInfo: transcode[$i] url is BLANK, skipping")
+                        continue
+                    }
+                    val resolution = info.optString("resolution", "转码${i + 1}")
+                    Log.d(TAG, "getVideoPlayInfo: transcode[$i] resolution=$resolution, url=${url.take(100)}...")
+                    urls.add(url)
+                    names.add(resolution)
+                } catch (e: Exception) {
+                    Log.w(TAG, "getVideoPlayInfo: transcode[$i] parse failed: ${e.message}, skipping")
+                }
             }
         }
         

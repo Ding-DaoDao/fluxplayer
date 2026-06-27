@@ -959,7 +959,13 @@ class PlayerService : MediaSessionService() {
                 val uri = mediaId.toUri()
 
                 // Pre-resolve cloud URIs on background thread to avoid blocking ExoPlayer start
-                val resolvedUri = if (CloudUriScheme.isCloudUri(uri)) {
+                // 但如果 MediaItem 已有有效的 HTTP URL（如画质切换传入的新 URL），不要覆盖
+                val existingUri = mediaItem.localConfiguration?.uri
+                val resolvedUri = if (existingUri != null && existingUri.scheme in listOf("http", "https")) {
+                    // 已有 HTTP URL，保持原样（画质切换场景）
+                    Log.d(TAG, "Pre-resolve: keeping existing HTTP URI: ${existingUri.toString().take(120)}")
+                    null
+                } else if (CloudUriScheme.isCloudUri(uri)) {
                     try {
                         val resolved = cloudUriResolver.resolve(uri)
                         if (resolved != null) {

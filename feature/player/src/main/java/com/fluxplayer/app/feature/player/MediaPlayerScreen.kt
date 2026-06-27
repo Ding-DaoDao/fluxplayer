@@ -124,6 +124,7 @@ import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.time.DurationUnit
 
 val LocalControlsVisibilityState = compositionLocalOf<ControlsVisibilityState?> { null }
@@ -699,47 +700,51 @@ fun MediaPlayerScreen(
                                             isSwitchingQuality = true
                                             errorState.dismiss()
                                             selectedQualityLabel = option.label
+                                            videoResolution = Pair(0, 0)
                                             val originalFragment = currentItem.localConfiguration?.uri?.fragment
-                                            val newUri = if (!originalFragment.isNullOrEmpty()) {
-                                                android.net.Uri.parse("${option.uri}#${originalFragment}")
-                                            } else {
-                                                option.uri
-                                            }
-                                            Log.d("FluxQuality", "=== 切换清晰度 ===")
-                                            Log.d("FluxQuality", "原始 URL: ${currentItem.localConfiguration?.uri}")
-                                            Log.d("FluxQuality", "原始 fragment: $originalFragment")
-                                            Log.d("FluxQuality", "选择清晰度: ${option.label}")
-                                            Log.d("FluxQuality", "质量 URL: ${option.uri}")
-                                            Log.d("FluxQuality", "新 URL: $newUri")
-                                            Log.d("FluxQuality", "播放位置: $currentPosition, playWhenReady: $playWhenReady")
-                                            val newMediaItem = currentItem.buildUpon()
-                                                .setUri(newUri)
-                                                .build()
-                                            val totalItems = player.mediaItemCount
-                                            val mediaItems = if (totalItems > 1) {
-                                                (0 until totalItems).map { i ->
-                                                    if (i == currentIndex) newMediaItem else player.getMediaItemAt(i)
-                                                }
-                                            } else {
-                                                listOf(newMediaItem)
-                                            }
-                                            player.setMediaItems(mediaItems, currentIndex, currentPosition)
-                                            player.playWhenReady = playWhenReady
-                                            // 切换失败时静默回退到原清晰度
+                                            val cloudMediaId = currentItem.mediaId
+                                            val isPan123 = cloudMediaId.startsWith("cloud://pan123")
+
                                             coroutineScope.launch {
-                                                delay(5000)
-                                                val error = player.playerError
-                                                Log.d("FluxQuality", "5s 后检查: playerError=$error")
-                                                if (error != null) {
-                                                    Log.e("FluxQuality", "切换失败，回退到 $previousLabel, error=${error.message}")
-                                                    selectedQualityLabel = previousLabel
-                                                    val revertItems = (0 until player.mediaItemCount).map { i ->
-                                                        if (i == currentIndex) currentItem else player.getMediaItemAt(i)
+                                                var finalUri = option.uri
+                                                if (isPan123) {
+                                                    try {
+                                                        val fileId = cloudMediaId.removePrefix("cloud://pan123/")
+                                                            .substringBefore("?")
+                                                        val freshOptions = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                            viewModel.refreshPan123QualityUrls(fileId)
+                                                        }
+                                                        val match = freshOptions?.find { it.label == option.label }
+                                                        if (match != null) finalUri = match.uri
+                                                    } catch (e: Exception) {
+                                                        Log.w("FluxQuality", "刷新 URL 失败: ${e.message}")
                                                     }
-                                                    player.setMediaItems(revertItems, currentIndex, currentPosition)
+                                                }
+
+                                                val newUri = if (!originalFragment.isNullOrEmpty()) {
+                                                    android.net.Uri.parse("${finalUri}#${originalFragment}")
+                                                } else finalUri
+
+                                                val newMediaItem = androidx.media3.common.MediaItem.Builder()
+                                                    .setUri(newUri)
+                                                    .setMediaId(currentItem.mediaId)
+                                                    .setMediaMetadata(currentItem.mediaMetadata)
+                                                    .build()
+                                                player.setMediaItems(listOf(newMediaItem), 0, currentPosition)
+                                                player.playWhenReady = playWhenReady
+                                                delay(10000)
+                                                val error = player.playerError
+                                                val resUpdated = videoResolution.first > 0 && videoResolution.second > 0
+                                                if (error != null || !resUpdated) {
+                                                    Log.w("FluxQuality", "切换失败, error=$error, resUpdated=$resUpdated")
+                                                    selectedQualityLabel = previousLabel
+                                                    val revertItem = androidx.media3.common.MediaItem.Builder()
+                                                        .setUri(currentItem.localConfiguration?.uri ?: Uri.EMPTY)
+                                                        .setMediaId(currentItem.mediaId)
+                                                        .setMediaMetadata(currentItem.mediaMetadata)
+                                                        .build()
+                                                    player.setMediaItems(listOf(revertItem), 0, currentPosition)
                                                     player.playWhenReady = true
-                                                } else {
-                                                    Log.d("FluxQuality", "切换成功")
                                                 }
                                                 isSwitchingQuality = false
                                                 errorState.dismiss()

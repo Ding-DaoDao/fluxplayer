@@ -20,6 +20,10 @@ import com.fluxplayer.app.core.data.quark.QuarkAuthProvider
 import com.fluxplayer.app.core.data.yun139.Yun139ApiClient
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,6 +35,8 @@ class CloudUriResolver @Inject constructor(
     companion object {
         private const val TAG = "CloudUriResolver"
     }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 清除除指定 Provider 之外的所有云盘认证状态，防止 HLS 分片兜底注入时 Cookie/Token 串号 */
     private fun clearOtherProviders(except: String) {
@@ -70,11 +76,81 @@ class CloudUriResolver @Inject constructor(
         val fileId = CloudUriScheme.getFileId(uri) ?: return null
 
         // Check cache first
-        CloudPlaylistCache.getResolvedUrl(provider, fileId)?.let { return Uri.parse(it) }
+        val cachedUrl = CloudPlaylistCache.getResolvedUrl(provider, fileId)
+        if (cachedUrl != null) {
+            // 缓存命中但画质选项缺失时，异步补缓存（不阻塞本次播放）
+            // 场景：首次播放时 getVideoPlayInfo 失败走了下载兜底，
+            // CloudPlaylistCache 存了兜底 URL，15min 内 resolvePan123 不会再被调用
+            if (provider == "pan123" && !videoQualityCache.hasQualityOptions(provider, fileId)) {
+                Log.d(TAG, "resolve: CloudPlaylistCache hit but quality options missing for $fileId, backfilling...")
+                scope.launch {
+                    try {
+                        resolveUrl(provider, fileId)
+                        Log.d(TAG, "resolve: quality options backfilled for $fileId")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "resolve: backfill quality options failed for $fileId: ${e.message}")
+                    }
+                }
+            }
+            return Uri.parse(cachedUrl)
+        }
 
         val resolvedUrl = resolveUrl(provider, fileId) ?: return null
         CloudPlaylistCache.putResolvedUrl(provider, fileId, resolvedUrl)
         return Uri.parse(resolvedUrl)
+    }
+
+    /**
+     * 刷新 123 云盘画质 URL（鉴权 token 可能过期，切换画质前调用）
+     * 返回新的 QualityOption 列表，同时更新 VideoQualityCache
+     */
+    suspend fun refreshPan123QualityUrls(fileId: String): List<VideoQualityCache.QualityOption>? {
+        val prefs = context.getSharedPreferences("pan123", Context.MODE_PRIVATE)
+        val token = prefs.getString("token", "") ?: ""
+        if (token.isBlank()) {
+            Log.w(TAG, "refreshPan123QualityUrls: token is blank")
+            return null
+        }
+
+        val metadata = CloudPlaylistCache.getFileMetadata("pan123", fileId)
+        if (metadata == null) {
+            Log.w(TAG, "refreshPan123QualityUrls: fileMetadata is null for $fileId")
+            return null
+        }
+
+        val client = Pan123ApiClient()
+        client.setToken("Bearer $token")
+        val cfg = client.loadConfig().getOrNull()
+        if (cfg == null) {
+            Log.w(TAG, "refreshPan123QualityUrls: loadConfig failed")
+            return null
+        }
+
+        val item = com.fluxplayer.app.core.data.pan123.Pan123FileItem(
+            fileId = fileId,
+            fileName = metadata.fileName,
+            type = 0,
+            size = metadata.size ?: return null,
+            etag = metadata.etag ?: return null,
+            s3keyFlag = metadata.s3keyFlag ?: "",
+            downloadUrl = metadata.downloadUrl ?: "",
+            createAt = "",
+            trashedAt = "",
+            starredStatus = 0
+        )
+
+        val playResult = client.getVideoPlayInfo(item).getOrNull()
+        if (playResult == null || playResult.urls.isEmpty()) {
+            Log.w(TAG, "refreshPan123QualityUrls: getVideoPlayInfo failed or empty")
+            return null
+        }
+
+        val options = playResult.urls.zip(playResult.names).map { (u, n) ->
+            VideoQualityCache.QualityOption(label = n, url = u)
+        }
+        videoQualityCache.cacheQualityOptions("pan123", fileId, fileId, options)
+        Log.d(TAG, "refreshPan123QualityUrls: refreshed ${options.size} quality options")
+        return options
     }
 
     suspend fun resolveUrl(provider: String, fileId: String): String? {

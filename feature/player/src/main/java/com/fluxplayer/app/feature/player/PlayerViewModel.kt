@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.fluxplayer.app.core.data.cloud.CloudUriResolver
+import com.fluxplayer.app.feature.player.ui.QualityOption
 import kotlinx.coroutines.withContext
 
 private const val TAG = "PlayerViewModel"
@@ -45,6 +47,7 @@ class PlayerViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
     private val getSortedPlaylistUseCase: GetSortedPlaylistUseCase,
     private val danmakuRepository: DanmakuRepository,
+    private val cloudUriResolver: CloudUriResolver,
 ) : ViewModel() {
     // region ==================== 统一通知 ====================
 
@@ -712,6 +715,15 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.updatePlayerPreferences { it.copy(danmakuConfig = config) }
         }
+    }
+
+    /**
+     * 刷新 123 云盘画质 URL（鉴权 token 可能过期）
+     * 返回新的 QualityOption 列表，同时更新 VideoQualityCache
+     */
+    suspend fun refreshPan123QualityUrls(fileId: String): List<QualityOption>? {
+        val freshOptions = cloudUriResolver.refreshPan123QualityUrls(fileId) ?: return null
+        return freshOptions.map { QualityOption(label = it.label, uri = android.net.Uri.parse(it.url)) }
     }
 
     private fun updateSubtitleDelay(uri: String, delay: Long) {
