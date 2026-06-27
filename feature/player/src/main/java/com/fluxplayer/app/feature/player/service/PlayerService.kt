@@ -146,6 +146,13 @@ class PlayerService : MediaSessionService() {
      */
     private var sessionPlaybackSpeed: Float = 1.0f
 
+    /**
+     * 标记：当前 setPlaybackSpeed() 调用是否为系统自动恢复倍速（初始化/切集/重入），
+     * 而非用户主动改变倍速。用于防止 onPlaybackParametersChanged 在恢复阶段
+     * 用默认倍速覆盖 DB 中已保存的目录级倍速。
+     */
+    private var isRestoringPlaybackSpeed = false
+
     private var loudnessEnhancer: LoudnessEnhancer? = null
 
     companion object {
@@ -173,7 +180,9 @@ class PlayerService : MediaSessionService() {
                     }
                     playerSpecificSubtitleDelayMilliseconds = metadata.subtitleDelayMilliseconds ?: 0L
                     playerSpecificSubtitleSpeed = metadata.subtitleSpeed ?: 1f
+                    isRestoringPlaybackSpeed = true
                     setPlaybackSpeed(sessionPlaybackSpeed)
+                    isRestoringPlaybackSpeed = false
                 }
 
                 // 计算 seek 目标：片头跳过 vs 续播位置，取较大值
@@ -307,12 +316,15 @@ class PlayerService : MediaSessionService() {
             // 追踪当前会话倍速，切集/切清晰度时重新应用（而不是重置为全局默认）。
             sessionPlaybackSpeed = playbackSpeed
 
-            val mediaId = currentMediaItem.mediaId
-            saveScope.launch {
-                // 倍速存目录级 key，与片头片尾一致（同目录共享）
-                val dirKey = computeDirKey(mediaId)
-                if (dirKey.isNotEmpty()) {
-                    mediaRepository.updateMediumPlaybackSpeed(dirKey, playbackSpeed)
+            // 系统自动恢复倍速（初始化/切集/重入）时不写入 DB，
+            // 防止在 STATE_IDLE 等过渡阶段用默认倍速覆盖已保存的目录级倍速。
+            if (!isRestoringPlaybackSpeed) {
+                val mediaId = currentMediaItem.mediaId
+                saveScope.launch {
+                    val dirKey = computeDirKey(mediaId)
+                    if (dirKey.isNotEmpty()) {
+                        mediaRepository.updateMediumPlaybackSpeed(dirKey, playbackSpeed)
+                    }
                 }
             }
             player.replaceMediaItem(
@@ -326,9 +338,10 @@ class PlayerService : MediaSessionService() {
 
             if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_IDLE) {
                 mediaSession?.player?.trackSelectionParameters = TrackSelectionParameters.DEFAULT
-                // 切清晰度(setMediaItems→STATE_IDLE)或自动播完切下一集(STATE_ENDED)时，
-                // 保留会话倍速而非重置为全局默认，符合"未退出播放界面时保留用户倍速"的预期。
-                mediaSession?.player?.setPlaybackSpeed(sessionPlaybackSpeed)
+                // 不再在此处调用 setPlaybackSpeed。倍速恢复统一由
+                // onMediaItemTransition 处理（从 DB 的目录级 key 读取已保存倍速），
+                // 此处调用会导致在 STATE_IDLE 过渡阶段用默认倍速触发
+                // onPlaybackParametersChanged，进而覆盖 DB 中已保存的目录级倍速。
             }
 
             if (playbackState == Player.STATE_READY) {
@@ -860,7 +873,9 @@ class PlayerService : MediaSessionService() {
                 LoopMode.ALL -> Player.REPEAT_MODE_ALL
             }
             sessionPlaybackSpeed = playerPreferences.defaultPlaybackSpeed
+            isRestoringPlaybackSpeed = true
             setPlaybackSpeed(sessionPlaybackSpeed)
+            isRestoringPlaybackSpeed = false
         }
     }
 
