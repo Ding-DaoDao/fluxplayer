@@ -101,6 +101,7 @@ fun DanmakuSearchSheet(
     onKeywordChange: (String) -> Unit,
     currentLocalDir: File,
     onLocalDirChange: (File) -> Unit,
+    browserRoot: String,
     onSearch: (DanmakuSource, String) -> Unit,
     onSelectAnime: (AnimeMatch) -> Unit,
     onSelectEpisode: (EpisodeInfo) -> Unit,
@@ -314,7 +315,6 @@ fun DanmakuSearchSheet(
                     }
 
                     DanmakuSearchViewMode.LOCAL_FILE -> {
-                        val browserRoot = remember { currentLocalDir.absolutePath }
                         val parent = currentLocalDir.parentFile
                         val canGoUp = parent != null
                             && parent != currentLocalDir

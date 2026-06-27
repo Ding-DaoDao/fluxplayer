@@ -943,6 +943,7 @@ fun MediaPlayerScreen(
                 onKeywordChange = { viewModel.setDanmakuSearchKeyword(it) },
                 currentLocalDir = File(danmakuLocalBrowserDir ?: playerPreferences.localDanmakuPath),
                 onLocalDirChange = { viewModel.setDanmakuLocalBrowserDir(it.absolutePath) },
+                browserRoot = playerPreferences.localDanmakuPath,
                 onSearch = { source, keyword ->
                     if (keyword.isNotBlank()) {
                         viewModel.searchDanmaku(source, keyword)
