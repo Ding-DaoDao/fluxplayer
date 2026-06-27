@@ -10,7 +10,7 @@ object CloudHttpClient {
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .cookieJar(GlobalCookieJar)
-        .connectionPool(ConnectionPool(5, 10, TimeUnit.MINUTES))
+        .connectionPool(ConnectionPool(10, 10, TimeUnit.MINUTES))
         .build()
 
     val NO_REDIRECT: OkHttpClient = DEFAULT.newBuilder()

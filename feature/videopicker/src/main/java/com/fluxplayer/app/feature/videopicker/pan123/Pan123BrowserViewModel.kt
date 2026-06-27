@@ -158,6 +158,10 @@ class Pan123BrowserViewModel @Inject constructor(
                 return
             }
             apiClient.setToken("Bearer $token")
+            // 预热 getconfig（写入静态缓存，后续播放无需再请求）
+            viewModelScope.launch {
+                try { apiClient.loadConfig() } catch (_: Exception) {}
+            }
             Pan123AuthProvider.authorization = "Bearer $token"
             Pan123AuthProvider.isActive = true
             CloudPlayHeaders.registerSuffix(".123pan.cn") { Pan123AuthProvider.getPlayHeaders() }
@@ -225,6 +229,10 @@ class Pan123BrowserViewModel @Inject constructor(
             return
         }
         apiClient.setTokenDirectly(trimmed)
+        // 预热 getconfig（写入静态缓存，后续播放无需再请求）
+        viewModelScope.launch {
+            try { apiClient.loadConfig() } catch (_: Exception) {}
+        }
         val tokenValue = trimmed.removePrefix("Bearer ")
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit()

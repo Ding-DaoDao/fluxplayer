@@ -5,6 +5,8 @@ import android.util.Log
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -25,6 +27,14 @@ class Pan123ApiClient(
         private const val CONFIG_URL = "https://apigate.123795.com/getconfig-api/v1/getconfig?platform=android&version=313&channel=1003&env="
         private const val WEB_API_BASE = "https://api.123278.com/b/api"
         private const val API_BASE = "https://api.123278.com/api"
+
+        // 静态 config 缓存，所有实例共享，10 分钟过期
+        @Volatile private var cachedConfig: JSONObject? = null
+        @Volatile private var configTimestamp: Long = 0L
+        private const val CONFIG_CACHE_DURATION_MS = 10 * 60 * 1000L // 10 分钟
+
+        // 正在加载的协程，防止并发多次请求 getconfig
+        private val configLoadLock = kotlinx.coroutines.sync.Mutex()
 
         private val DEVICE_TYPES = listOf(
             "2312DRAABC", "2312DRAABI", "2312DRAABG", "2310RK86C", "2310RK86I",
@@ -99,11 +109,13 @@ class Pan123ApiClient(
     // region ==================== 认证 & 配置 ====================
 
     private var authToken: String? = null
-    private var config: JSONObject? = null
 
     fun setToken(token: String?) {
         this.authToken = token
-        if (token.isNullOrBlank()) this.config = null
+        if (token.isNullOrBlank()) {
+            cachedConfig = null
+            configTimestamp = 0L
+        }
     }
 
     fun setTokenDirectly(token: String) {
@@ -113,25 +125,38 @@ class Pan123ApiClient(
     fun getToken(): String? = authToken
 
     suspend fun loadConfig(): Result<JSONObject> = runCatching {
-        if (config != null) {
-            return@runCatching config!!
+        val now = System.currentTimeMillis()
+        val cached = cachedConfig
+        if (cached != null && now - configTimestamp < CONFIG_CACHE_DURATION_MS) {
+            Log.d(TAG, "loadConfig: using cached config (age=${now - configTimestamp}ms)")
+            return@runCatching cached
         }
-        val request = Request.Builder().url(CONFIG_URL).get().build()
-        val body = executeRequest(request)
-        val json = JSONObject(body)
-        val cfg = json.getJSONObject("data")
-        config = cfg
-        val apis = cfg.optJSONObject("interfaceapi")
-        if (apis != null) {
-            val names = apis.names()
-            val keys = if (names != null) (0 until names.length()).map { names.getString(it) } else emptyList()
-            Log.d(TAG, "Config interfaceapi keys: $keys")
+        configLoadLock.withLock {
+            // 双重检查，避免等待锁期间其他协程已加载
+            val recheck = cachedConfig
+            if (recheck != null && (System.currentTimeMillis() - configTimestamp < CONFIG_CACHE_DURATION_MS)) {
+                Log.d(TAG, "loadConfig: using cached config after lock (age=${System.currentTimeMillis() - configTimestamp}ms)")
+                return@runCatching recheck
+            }
+            Log.d(TAG, "loadConfig: fetching fresh config from $CONFIG_URL")
+            val request = Request.Builder().url(CONFIG_URL).get().build()
+            val body = executeRequest(request)
+            val json = JSONObject(body)
+            val cfg = json.getJSONObject("data")
+            cachedConfig = cfg
+            configTimestamp = System.currentTimeMillis()
+            val apis = cfg.optJSONObject("interfaceapi")
+            if (apis != null) {
+                val namesArray = apis.names()
+                val keys = if (namesArray != null) (0 until namesArray.length()).map { namesArray.getString(it) } else emptyList()
+                Log.d(TAG, "Config interfaceapi keys: $keys")
+            }
+            cfg
         }
-        cfg
     }
 
     private fun apiEndpoint(key: String): String {
-        val cfg = config ?: throw IllegalStateException("Config not loaded")
+        val cfg = cachedConfig ?: throw IllegalStateException("Config not loaded")
         val apis = cfg.optJSONObject("interfaceapi")
             ?: throw IllegalStateException("No interfaceapi in config")
         val endpoint = apis.optString(key)

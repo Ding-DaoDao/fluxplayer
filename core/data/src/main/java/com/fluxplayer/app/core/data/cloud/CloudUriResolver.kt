@@ -23,6 +23,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -220,80 +222,83 @@ class CloudUriResolver @Inject constructor(
                 starredStatus = 0
             )
             
-            // Step 1: 海阔视界风格下载直链（原画2 → 最高优先级）
-            //   HEAD 跟随重定向 → 最终 CDN 直链，比 getVideoPlayInfo 更可靠
-            Log.d(TAG, "resolvePan123: Step1 resolveDownloadUrlViaHead (Hiker-style)...")
-            val headUrlResult = client.resolveDownloadUrlViaHead(item)
-            var headUrl: String? = null
-            if (headUrlResult.isSuccess) {
-                headUrl = headUrlResult.getOrThrow()
-                Log.d(TAG, "resolvePan123: resolveDownloadUrlViaHead SUCCESS url=${headUrl.take(150)}")
+            // Step 1 & Step 2 并行：resolveDownloadUrlViaHead + getVideoPlayInfo
+            // 两个网络请求同时发出，总耗时 = max(HEAD, getVideoPlayInfo)
+            Log.d(TAG, "resolvePan123: launching parallel HEAD + getVideoPlayInfo...")
 
-                // 从 URL 解析 ref 参数解密 Referer，注册 CDN 域名 headers
-                val dlHeaders = client.buildDownloadHeaders(headUrl)
-                Pan123AuthProvider.referer = dlHeaders["Referer"] ?: Pan123AuthProvider.referer
-                val host = try { java.net.URI(headUrl).host ?: "" } catch (_: Exception) { "" }
-                if (host.isNotBlank()) {
-                    val suffix = host.substringAfter('.')
-                    if (suffix.isNotBlank()) CloudPlayHeaders.registerSuffix(".$suffix", dlHeaders)
-                }
-            } else {
-                Log.w(TAG, "resolvePan123: resolveDownloadUrlViaHead FAILED: ${headUrlResult.exceptionOrNull()?.message}")
-            }
+            val result = coroutineScope {
+                val headUrlDeferred = async { client.resolveDownloadUrlViaHead(item) }
+                val playResultDeferred = async { client.getVideoPlayInfo(item) }
 
-            // Step 2: getVideoPlayInfo → 画质选项缓存 + MP4/HLS 列表
-            Log.d(TAG, "resolvePan123: Step2 getVideoPlayInfo...")
-            val playResult = client.getVideoPlayInfo(item).getOrNull()
-            if (playResult != null && playResult.urls.isNotEmpty()) {
-                Log.d(TAG, "resolvePan123: getVideoPlayInfo SUCCESS - urls size=${playResult.urls.size}")
-                playResult.urls.forEachIndexed { index, url ->
-                    val isHls = url.contains(".m3u8") || url.contains("/hls/")
-                    Log.d(TAG, "  [$index] isHls=$isHls url=${url.take(150)}")
-                }
-                // 组合画质选项 —— 全部来自 getVideoPlayInfo 服务端转码流
-                // 不加入 headUrl（原始 CDN 直链），避免用户切换到 Dolby Vision
-                // 原始文件导致偏色。123 云盘的服务端转码流已经是 SDR。
-                if (playResult.urls.isNotEmpty()) {
-                    val allUrls = playResult.urls.toMutableList()
-                    val allNames = playResult.names.toMutableList()
-
-                    val options = allUrls.zip(allNames).map { (u, n) ->
-                        VideoQualityCache.QualityOption(label = n, url = u)
+                // 先处理 HEAD 结果（副作用：注册 CDN headers，解析 Referer）
+                val headUrlResult = headUrlDeferred.await()
+                var headUrl: String? = null
+                if (headUrlResult.isSuccess) {
+                    headUrl = headUrlResult.getOrThrow()
+                    Log.d(TAG, "resolvePan123: resolveDownloadUrlViaHead SUCCESS url=${headUrl.take(150)}")
+                    val dlHeaders = client.buildDownloadHeaders(headUrl)
+                    Pan123AuthProvider.referer = dlHeaders["Referer"] ?: Pan123AuthProvider.referer
+                    val host = try { java.net.URI(headUrl).host ?: "" } catch (_: Exception) { "" }
+                    if (host.isNotBlank()) {
+                        val suffix = host.substringAfter('.')
+                        if (suffix.isNotBlank()) CloudPlayHeaders.registerSuffix(".$suffix", dlHeaders)
                     }
-                    videoQualityCache.cacheQualityOptions("pan123", fileId, fileId, options)
+                } else {
+                    Log.w(TAG, "resolvePan123: resolveDownloadUrlViaHead FAILED: ${headUrlResult.exceptionOrNull()?.message}")
                 }
 
-                val mp4Url = playResult.urls.find { !it.contains(".m3u8") && !it.contains("/hls/") }
-                val hlsUrl = playResult.urls.find { it.contains(".m3u8") || it.contains("/hls/") }
-                if (mp4Url != null && hlsUrl != null) {
-                    Pan123FallbackCache.put(fileId, hlsUrl)
+                // 再处理 getVideoPlayInfo 结果（优先播放路径）
+                Log.d(TAG, "resolvePan123: processing getVideoPlayInfo result...")
+                val playResult = playResultDeferred.await().getOrNull()
+                if (playResult != null && playResult.urls.isNotEmpty()) {
+                    Log.d(TAG, "resolvePan123: getVideoPlayInfo SUCCESS - urls size=${playResult.urls.size}")
+                    playResult.urls.forEachIndexed { index, url ->
+                        val isHls = url.contains(".m3u8") || url.contains("/hls/")
+                        Log.d(TAG, "  [$index] isHls=$isHls url=${url.take(150)}")
+                    }
+                    if (playResult.urls.isNotEmpty()) {
+                        val allUrls = playResult.urls.toMutableList()
+                        val allNames = playResult.names.toMutableList()
+                        val options = allUrls.zip(allNames).map { (u, n) ->
+                            VideoQualityCache.QualityOption(label = n, url = u)
+                        }
+                        videoQualityCache.cacheQualityOptions("pan123", fileId, fileId, options)
+                    }
+                    val mp4Url = playResult.urls.find { !it.contains(".m3u8") && !it.contains("/hls/") }
+                    val hlsUrl = playResult.urls.find { it.contains(".m3u8") || it.contains("/hls/") }
+                    if (mp4Url != null && hlsUrl != null) {
+                        Pan123FallbackCache.put(fileId, hlsUrl)
+                    }
+                    val bestUrl = mp4Url ?: playResult.urls.first()
+                    Log.d(TAG, "resolvePan123: selected URL isMp4=${bestUrl == mp4Url} isHead=${bestUrl == headUrl} url=${bestUrl.take(150)}")
+                    Log.d(TAG, "========== resolvePan123 END ==========")
+                    return@coroutineScope bestUrl
                 }
 
-                // 优先 getVideoPlayInfo MP4（有字幕），其次 HLS 转码流，最后才用 headUrl 原始文件
-                // getVideoPlayInfo 的所有流都是 123 云盘服务端转码的 SDR，不会出现 Dolby Vision 偏色
-                // urls.isNotEmpty() 已保证 first() 非空，类型收敛为 String
-                val bestUrl = mp4Url ?: playResult.urls.first()
-                Log.d(TAG, "resolvePan123: selected URL isMp4=${bestUrl == mp4Url} isHead=${bestUrl == headUrl} url=${bestUrl.take(150)}")
+                // getVideoPlayInfo 失败，getFileDownloadUrl 兜底
+                Log.w(TAG, "resolvePan123: getVideoPlayInfo failed, trying getFileDownloadUrl...")
+                val dlUrl = client.getFileDownloadUrl(item).getOrNull()
+                if (dlUrl != null) {
+                    Log.d(TAG, "resolvePan123: getFileDownloadUrl SUCCESS")
+                    Log.d(TAG, "========== resolvePan123 END (download fallback) ==========")
+                    return@coroutineScope dlUrl
+                }
+                Log.e(TAG, "resolvePan123: getFileDownloadUrl also FAILED!")
+                return@coroutineScope null
+            }
+
+            if (result != null) {
                 Log.d(TAG, "========== resolvePan123 END ==========")
-                return bestUrl + "#pan123Play=true#"
+                return result + "#pan123Play=true#"
             }
-
-            // Step 2: getFileDownloadUrl 兜底
-            Log.w(TAG, "resolvePan123: getVideoPlayInfo failed, trying getFileDownloadUrl...")
-            val dlUrl = client.getFileDownloadUrl(item).getOrNull()
-            if (dlUrl != null) {
-                Log.d(TAG, "resolvePan123: getFileDownloadUrl SUCCESS")
-                Log.d(TAG, "========== resolvePan123 END (download fallback) ==========")
-                return dlUrl + "#pan123Play=true#"
-            }
-            Log.e(TAG, "resolvePan123: getFileDownloadUrl also FAILED!")
         } else {
             Log.e(TAG, "resolvePan123: fileMetadata is NULL for fileId=$fileId")
         }
-        
+
         Log.e(TAG, "========== resolvePan123 FAILED: returning null ==========")
         return null
     }
+
 
     private suspend fun resolveQuark(fileId: String): String? {
         val prefs = context.getSharedPreferences("quark", Context.MODE_PRIVATE)
