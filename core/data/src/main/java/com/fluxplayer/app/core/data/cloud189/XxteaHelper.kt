@@ -80,13 +80,13 @@ object XxteaHelper {
 
         val delta = -1640531527
         val rounds = 52L / n + 6L
-        var sum: Long = rounds * delta.toLong()
+        var sum: Long = rounds * delta.toLong()  // 64-bit 无溢出, 匹配 JS Float64
 
         // 轮间 carry: 对应 JS 的 let i2 = iArr[0]
         var carryY = data[0]
 
         while (sum != 0L) {
-            val sumInt = sum.toInt()
+            val sumInt = toInt32(sum)  // 匹配 JS ToInt32(sum), 不是 sum.toInt()!
             val e = (sumInt ushr 2) and 3
             // 本轮初始 carry: 对应 JS 的 let i4 = i2
             var y = carryY
@@ -104,7 +104,7 @@ object XxteaHelper {
             carryY = unsignedSub(data[0], mx) // 对应 JS 的 i8
             data[0] = carryY
 
-            // 对应 JS: i -= -1640531527
+            // 对应 JS: i -= -1640531527 (64-bit float, 每轮减少 |delta|)
             sum -= delta.toLong()
         }
 
@@ -125,6 +125,12 @@ object XxteaHelper {
      */
     private fun unsignedSub(a: Int, b: Int): Int {
         return (((a.toLong() and 0xFFFFFFFFL) - (b.toLong() and 0xFFFFFFFFL)) and 0xFFFFFFFFL).toInt()
+    }
+
+    /** 匹配 JS ToInt32(x): x mod 2^32 后映射到 signed 32-bit */
+    private fun toInt32(value: Long): Int {
+        val unsigned = Math.floorMod(value, 4294967296L)
+        return if (unsigned >= 2147483648L) (unsigned - 4294967296L).toInt() else unsigned.toInt()
     }
 
     /** 模仿 JS 的 utf8ArrayToStr: 将 UTF-8 字节数组转换为字符串 */
