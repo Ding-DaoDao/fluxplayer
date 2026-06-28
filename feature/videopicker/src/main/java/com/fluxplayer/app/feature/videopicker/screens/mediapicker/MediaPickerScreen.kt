@@ -1479,6 +1479,19 @@ private fun FloatingBottomBar(
                     label = { Text(stringResource(R.string.history)) },
                 )
             }
+            if (3 in visibleTabs) {
+                NavigationBarItem(
+                    selected = selectedTab == 3,
+                    onClick = { onTabSelected(3) },
+                    icon = {
+                        Icon(
+                            imageVector = NextIcons.Audio,
+                            contentDescription = null,
+                        )
+                    },
+                    label = { Text(stringResource(R.string.audiobook)) },
+                )
+            }
         }
     }
 }
