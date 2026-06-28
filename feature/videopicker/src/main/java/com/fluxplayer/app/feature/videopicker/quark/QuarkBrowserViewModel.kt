@@ -192,7 +192,6 @@ class QuarkBrowserViewModel @Inject constructor(
             CloudDirectoryCache.get(getApplication(), type, "0")?.let { directoryCache["0"] = it }
             loadDirectory("0")
         } else {
-            if (isSwitching) QuarkAuthProvider.clear()
             updateUiState { it.copy(isLoggedIn = false, driveType = type, items = if (isSwitching) emptyList() else it.items, error = null, isLoading = false) }
         }
     }
@@ -202,21 +201,24 @@ class QuarkBrowserViewModel @Inject constructor(
     // region ==================== 登出 ====================
 
     fun logout() {
-        QuarkAuthProvider.clear()
-        apiClient.clearCookie()
+        val driveType = _uiState.value.driveType
+        val isUC = driveType == "uc"
 
-        // 清除 OkHttp GlobalCookieJar 中 Quark/UC 的 Cookie
-        GlobalCookieJar.clearHost("drive.quark.cn")
-        GlobalCookieJar.clearHost("pc-api.uc.cn")
-        GlobalCookieJar.clearHost("drive.uc.cn")
+        // 只清除当前云盘相关的 GlobalCookieJar、prefs、缓存
+        if (isUC) {
+            GlobalCookieJar.clearHost("pc-api.uc.cn")
+            GlobalCookieJar.clearHost("drive.uc.cn")
+        } else {
+            GlobalCookieJar.clearHost("drive.quark.cn")
+        }
 
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefName = if (isUC) UC_PREF_NAME else PREF_NAME
+        val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
-        val ucPrefs = getApplication<Application>().getSharedPreferences(UC_PREF_NAME, Context.MODE_PRIVATE)
-        ucPrefs.edit().clear().apply()
+        apiClient.clearCookie()
         directoryCache.clear()
-        CloudDirectoryCache.clear(getApplication(), "quark")
-        CloudDirectoryCache.clear(getApplication(), "uc")
+        CloudDirectoryCache.clear(getApplication(), driveType)
+
         // 清除 WebView 痕迹
         try {
             val cookieManager = android.webkit.CookieManager.getInstance()

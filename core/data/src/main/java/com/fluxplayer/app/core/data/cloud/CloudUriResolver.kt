@@ -42,9 +42,15 @@ class CloudUriResolver @Inject constructor(
 
     /** 清除除指定 Provider 之外的所有云盘认证状态，防止 HLS 分片兜底注入时 Cookie/Token 串号 */
     private fun clearOtherProviders(except: String) {
-        if (except != "quark") {
+        // quark/uc 共享 QuarkAuthProvider，只要保留其一即不清除
+        if (except != "quark" && except != "uc") {
             QuarkAuthProvider.clear()
+        }
+        // GlobalCookieJar 按域名分别清理，防止 quark/uc 串号
+        if (except != "quark") {
             GlobalCookieJar.clearHost("drive.quark.cn")
+        }
+        if (except != "uc") {
             GlobalCookieJar.clearHost("pc-api.uc.cn")
             GlobalCookieJar.clearHost("drive.uc.cn")
         }
@@ -311,6 +317,8 @@ class CloudUriResolver @Inject constructor(
         val client = QuarkApiClient()
         client.setDriveType("quark")
         client.setCookie(cookie)
+        // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
+        client.onCookieUpdated = { merged -> prefs.edit().putString("cookie", merged).apply() }
         clearOtherProviders("quark")
 
         // 注册夸克播放头（后缀匹配覆盖所有 *.quark.cn 子域名）
@@ -343,7 +351,9 @@ class CloudUriResolver @Inject constructor(
         val client = QuarkApiClient()
         client.setDriveType("uc")
         client.setCookie(cookie)
-        clearOtherProviders("quark")
+        // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
+        client.onCookieUpdated = { merged -> prefs.edit().putString("cookie", merged).apply() }
+        clearOtherProviders("uc")
 
         // 注册 UC 播放头（后缀匹配覆盖 *.quark.cn 和 *.uc.cn 子域名）
         CloudPlayHeaders.registerSuffix(".quark.cn") { QuarkAuthProvider.getPlayHeaders() }

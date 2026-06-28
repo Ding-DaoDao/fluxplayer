@@ -169,7 +169,7 @@ fun QuarkBrowserTabContent(
                 driveType = state.driveType,
                 onLoginWithCookie = { cookie, dt -> viewModel.loginWithCookie(cookie, dt) },
                 loginUrl = if (driveType == "uc") "https://drive.uc.cn/" else "https://pan.quark.cn/",
-                cookieDomains = if (driveType == "uc") listOf("drive.uc.cn") else listOf("pan.quark.cn", "drive-pc.quark.cn"),
+                cookieDomains = if (driveType == "uc") listOf("drive.uc.cn", "pc-api.uc.cn") else listOf("pan.quark.cn", "drive-pc.quark.cn"),
             )
         },
         onCreateFolder = { showCreateFolderDialog = true },

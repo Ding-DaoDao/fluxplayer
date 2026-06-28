@@ -41,7 +41,9 @@ import com.fluxplayer.app.feature.videopicker.aliyun.AliyunBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.cloud189.C189BrowserTabContent
 import com.fluxplayer.app.feature.videopicker.openlist.OpenListBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.pan123.Pan123BrowserTabContent
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.fluxplayer.app.feature.videopicker.quark.QuarkBrowserTabContent
+import com.fluxplayer.app.feature.videopicker.quark.QuarkBrowserViewModel
 import com.fluxplayer.app.feature.videopicker.screens.webdav.WebDavBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.yun139.Yun139BrowserTabContent
 import com.fluxplayer.app.core.ui.R as UiR
@@ -210,6 +212,10 @@ fun BrowseTabs(
             }
 
             Box(modifier = Modifier.fillMaxSize()) {
+                // quark/uc 各自独立 ViewModel 实例，避免共享状态导致切换时数据串号
+                val quarkViewModel: QuarkBrowserViewModel = hiltViewModel(key = "quark_browser")
+                val ucViewModel: QuarkBrowserViewModel = hiltViewModel(key = "uc_browser")
+
                 when (provider) {
                     "alipan" -> AliyunBrowserTabContent(
                         modifier = Modifier.fillMaxSize(),
@@ -221,6 +227,7 @@ fun BrowseTabs(
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
                     "quark" -> QuarkBrowserTabContent(
+                        viewModel = quarkViewModel,
                         modifier = Modifier.fillMaxSize(),
                         onPlayVideo = onPlayVideo,
                         onPlayVideos = onPlayVideos,
@@ -230,6 +237,7 @@ fun BrowseTabs(
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
                     "uc" -> QuarkBrowserTabContent(
+                        viewModel = ucViewModel,
                         modifier = Modifier.fillMaxSize(),
                         driveType = "uc",
                         onPlayVideo = onPlayVideo,

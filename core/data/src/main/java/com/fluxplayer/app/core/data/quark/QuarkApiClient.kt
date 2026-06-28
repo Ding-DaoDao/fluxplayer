@@ -27,6 +27,10 @@ class QuarkApiClient(
     private val pr: String get() = if (driveType == "uc") "UCBrowser" else "ucpro"
 
     fun setDriveType(type: String) {
+        if (driveType != type) {
+            cookieManager.clear()
+            onCookieUpdated = null
+        }
         driveType = type
     }
 
