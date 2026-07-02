@@ -173,7 +173,7 @@ class Yun139ApiClient(
                 fileName = item.optString("name", ""),
                 fileSize = item.optLong("size", 0),
                 isDir = type == "folder",
-                createDate = "",
+                createDate = item.optString("createdAt", "").replace("\\..*".toRegex(), ""),
                 lastOpTime = item.optString("updatedAt", "").replace("\\..*".toRegex(), ""),
                 contentType = item.optString("category", ""),
                 thumbnailUrl = item.optJSONArray("thumbnailUrls")?.let { arr ->

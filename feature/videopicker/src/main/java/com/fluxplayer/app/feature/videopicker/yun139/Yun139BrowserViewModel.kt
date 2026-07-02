@@ -732,7 +732,7 @@ class Yun139BrowserViewModel @Inject constructor(
             thumbnailUrl = file.thumbnailUrl,
             folderSize = if (file.isDir) file.fileSize else 0,
             category = file.contentType,
-            createdAt = file.createDate
+            createdAt = file.createDate.ifEmpty { file.lastOpTime }
         )
     }
 
