@@ -162,7 +162,7 @@ fun MediaPlayerScreen(
             manager?.defaultVibrator
         } else {
             @Suppress("DEPRECATION")
-            context.getSystemService(Vibrator::class.java) as? Vibrator
+            context.getSystemService(Vibrator::class.java)
         }
     }
     val notificationState = remember { FluxNotificationState() }
@@ -946,10 +946,10 @@ fun MediaPlayerScreen(
                 browserRoot = playerPreferences.localDanmakuPath,
                 onSearch = { source, keyword ->
                     if (keyword.isNotBlank()) {
-                        viewModel.searchDanmaku(source, keyword)
+                        viewModel.searchDanmaku(context, source, keyword)
                     }
                 },
-                onSelectAnime = { viewModel.selectAnime(it) },
+                onSelectAnime = { viewModel.selectAnime(context, it) },
                 onSelectEpisode = { viewModel.selectEpisode(context, it) },
                 onResetSearch = { viewModel.resetDanmakuSearch() },
                 onNavigateBack = { viewModel.navigateDanmakuBack() },

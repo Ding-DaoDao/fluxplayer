@@ -36,39 +36,42 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import com.fluxplayer.app.core.model.DanmakuConfig
+import com.fluxplayer.app.feature.player.R
 
-private val settingsList = listOf(
+@Composable
+private fun settingsList(): List<DanmakuSetting> = listOf(
     DanmakuSetting(
-        name = "不透明度",
+        name = stringResource(R.string.danmaku_setting_opacity),
         options = DanmakuConfig.OPACITY_OPTIONS,
         valueToString = { it.second },
         currentValue = { it.opacity },
         updateValue = { config, value -> config.copy(opacity = value as Float) },
     ),
     DanmakuSetting(
-        name = "弹幕密度",
+        name = stringResource(R.string.danmaku_setting_density),
         options = DanmakuConfig.DENSITY_OPTIONS,
         valueToString = { it.second },
         currentValue = { it.density },
         updateValue = { config, value -> config.copy(density = value as Float) },
     ),
     DanmakuSetting(
-        name = "时间轴偏移",
+        name = stringResource(R.string.danmaku_setting_time_offset),
         options = DanmakuConfig.TIME_OFFSET_OPTIONS,
         valueToString = { it.second },
         currentValue = { it.timeOffsetMs },
         updateValue = { config, value -> config.copy(timeOffsetMs = value as Int) },
     ),
     DanmakuSetting(
-        name = "轨道间距",
+        name = stringResource(R.string.danmaku_setting_track_spacing),
         options = DanmakuConfig.TRACK_SPACING_OPTIONS,
         valueToString = { it.second },
         currentValue = { it.trackSpacingDp },
         updateValue = { config, value -> config.copy(trackSpacingDp = value as Int) },
     ),
     DanmakuSetting(
-        name = "刷新率",
+        name = stringResource(R.string.danmaku_setting_refresh_rate),
         options = DanmakuConfig.FPS_OPTIONS,
         valueToString = { it.second },
         currentValue = { it.targetFps },
@@ -93,7 +96,7 @@ fun BoxScope.DanmakuSettingsSheet(
 ) {
     OverlayView(
         show = show,
-        title = "弹幕设置",
+        title = stringResource(R.string.danmaku_settings_title),
     ) {
         Column(
             modifier = Modifier
@@ -102,7 +105,7 @@ fun BoxScope.DanmakuSettingsSheet(
                 .padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            settingsList.forEach { setting ->
+            settingsList().forEach { setting ->
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -163,9 +166,9 @@ private fun DisplayModeSliderRow(
     var sliderValue by remember { mutableFloatStateOf(displayMode.toFloat()) }
 
     val label = when (sliderValue.toInt()) {
-        0 -> "不显示"
-        9 -> "满屏"
-        else -> "${sliderValue.toInt()} 行"
+        0 -> stringResource(R.string.danmaku_display_hidden)
+        9 -> stringResource(R.string.danmaku_display_fullscreen)
+        else -> stringResource(R.string.danmaku_display_rows, sliderValue.toInt())
     }
 
     Column(
@@ -178,7 +181,7 @@ private fun DisplayModeSliderRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             FluxText(
-                text = "显示区域",
+                text = stringResource(R.string.danmaku_display_area),
                 style = MaterialTheme.typography.titleSmall,
             )
             FluxText(
@@ -220,7 +223,7 @@ private fun SpeedSliderRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             FluxText(
-                text = "弹幕速度",
+                text = stringResource(R.string.danmaku_speed),
                 style = MaterialTheme.typography.titleSmall,
             )
             FluxText(
@@ -257,7 +260,7 @@ private fun BlockKeywordSection(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         FluxText(
-            text = "屏蔽关键词",
+            text = stringResource(R.string.danmaku_block_keywords),
             style = MaterialTheme.typography.titleSmall,
         )
 
@@ -272,7 +275,7 @@ private fun BlockKeywordSection(
                 onValueChange = { newKeyword = it },
                 placeholder = {
                     FluxText(
-                        text = "输入要屏蔽的关键词",
+                        text = stringResource(R.string.danmaku_block_keyword_hint),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 },
@@ -291,7 +294,7 @@ private fun BlockKeywordSection(
             ) {
                 FluxIcon(
                     imageVector = Icons.Filled.Add,
-                    contentDescription = "添加关键词",
+                    contentDescription = stringResource(R.string.danmaku_add_keyword),
                     tint = Color(0xFF4CAF50),
                 )
             }
@@ -318,7 +321,7 @@ private fun BlockKeywordSection(
                         Spacer(modifier = Modifier.width(4.dp))
                         FluxIcon(
                             imageVector = Icons.Filled.Close,
-                            contentDescription = "移除 $keyword",
+                            contentDescription = stringResource(R.string.danmaku_remove_keyword, keyword),
                             tint = Color.White.copy(alpha = 0.6f),
                             modifier = Modifier.height(16.dp),
                         )

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 弹幕设置 -->
+    <string name="danmaku_settings_title">弹幕设置</string>
+    <string name="danmaku_setting_opacity">不透明度</string>
+    <string name="danmaku_setting_density">弹幕密度</string>
+    <string name="danmaku_setting_time_offset">时间轴偏移</string>
+    <string name="danmaku_setting_track_spacing">轨道间距</string>
+    <string name="danmaku_setting_refresh_rate">刷新率</string>
+    <string name="danmaku_display_area">显示区域</string>
+    <string name="danmaku_display_hidden">不显示</string>
+    <string name="danmaku_display_fullscreen">满屏</string>
+    <string name="danmaku_display_rows">%1$d 行</string>
+    <string name="danmaku_speed">弹幕速度</string>
+    <string name="danmaku_block_keywords">屏蔽关键词</string>
+    <string name="danmaku_block_keyword_hint">输入要屏蔽的关键词</string>
+    <string name="danmaku_add_keyword">添加关键词</string>
+    <string name="danmaku_remove_keyword">移除 %1$s</string>
+    <string name="danmaku_mode_scroll">滚动</string>
+    <string name="danmaku_mode_top">顶部</string>
+    <string name="danmaku_mode_bottom">底部</string>
+    <string name="danmaku_close">关闭</string>
+    <string name="danmaku_input_hint">输入弹幕文字</string>
+    <string name="danmaku_send">发送</string>
+    <string name="danmaku_source_add">添加</string>
+    <string name="danmaku_source_add_custom_title">添加自定义弹幕源</string>
+    <string name="danmaku_source_name">名称</string>
+    <string name="danmaku_source_api_hint">API 地址，如 https://api.dandanplay.com</string>
+    <string name="danmaku_source_cancel">取消</string>
+    <string name="danmaku_source_delete">删除</string>
+    <string name="danmaku_loaded_toast">弹幕已加载（%1$d条）</string>
+    <string name="danmaku_loading_toast">正在加载 %1$s</string>
+    <string name="danmaku_loaded_count">已加载 %1$d 条弹幕</string>
+    <string name="danmaku_error_no_result">未找到匹配结果</string>
+    <string name="danmaku_error_search_failed">搜索失败</string>
+    <string name="danmaku_error_episodes_failed">获取剧集失败</string>
+    <string name="danmaku_error_parse_failed">弹幕解析失败</string>
+    <string name="danmaku_error_cache_missing">缓存文件不存在</string>
+    <string name="danmaku_error_download_failed">下载失败</string>
+    <string name="danmaku_error_unknown">未知错误</string>
+    <string name="danmaku_error_platform_fetch">平台弹幕抓取失败</string>
+
+    <!-- 清晰度 -->
+    <string name="quality_title">清晰度</string>
+    <string name="quality_unavailable">当前视频无可用清晰度信息</string>
+
+    <!-- 视频信息 -->
+    <string name="video_info_title">视频信息</string>
+    <string name="video_info_play_url">播放链接</string>
+    <string name="video_info_file_size">文件大小</string>
+    <string name="video_info_unknown">未知</string>
+    <string name="video_info_loading">加载中...</string>
+
+    <!-- 字幕文件浏览器 -->
+    <string name="subtitle_browser_title">选择字幕文件</string>
+    <string name="subtitle_back_to_settings">返回设置</string>
+    <string name="subtitle_up_dir">上级目录</string>
+    <string name="subtitle_permission_required">需要存储权限才能浏览文件</string>
+    <string name="subtitle_grant_permission">授予权限</string>
+    <string name="subtitle_not_found">未找到字幕文件</string>
+
+    <!-- 双击快进/快退 -->
+    <string name="double_tap_seek">%1$d 秒</string>
+
+    <!-- 音频播放器 -->
+    <string name="audio_playback_speed">播放速度</string>
+    <string name="audio_custom_speed">自定义倍速</string>
+    <string name="audio_skip_title">片头片尾跳过</string>
+    <string name="audio_skip_intro">片头跳过</string>
+    <string name="audio_skip_outro">片尾跳过</string>
+    <string name="audio_custom_seconds">自定义秒数</string>
+    <string name="audio_save">保存</string>
+    <string name="audio_sleep_timer">定时关闭</string>
+    <string name="audio_minutes_format">%1$d 分钟</string>
+    <string name="audio_custom_minutes">自定义（分钟）</string>
+    <string name="audio_input_minutes">输入分钟数</string>
+    <string name="audio_start">开始</string>
+    <string name="audio_cancel_timer">取消定时</string>
+    <string name="audio_input_speed">输入倍速，如 1.75</string>
+    <string name="audio_confirm">确定</string>
+    <string name="audio_cancel">取消</string>
+    <string name="audio_playlist">播放列表</string>
+    <string name="audio_played_percent">·已播 %1$d%%</string>
+    <string name="audio_back">返回</string>
+    <string name="audio_album_cover">专辑封面</string>
+    <string name="audio_previous_episode">上一集</string>
+    <string name="audio_rewind_10s">快退10秒</string>
+    <string name="audio_play">播放</string>
+    <string name="audio_pause">暂停</string>
+    <string name="audio_forward_10s">快进10秒</string>
+    <string name="audio_next_episode">下一集</string>
+    <string name="audio_sleep_label">定时</string>
+    <string name="audio_list">列表</string>
+    <string name="audio_skip_intro_outro">跳片头尾</string>
+</resources>

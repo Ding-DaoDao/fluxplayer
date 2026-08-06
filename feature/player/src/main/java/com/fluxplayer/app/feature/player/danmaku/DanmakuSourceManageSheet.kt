@@ -37,8 +37,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import com.fluxplayer.app.core.model.DanmakuSource
 import com.fluxplayer.app.core.model.DanmakuSourceType
+import com.fluxplayer.app.feature.player.R
 import java.util.UUID
 
 /**
@@ -94,7 +96,7 @@ fun DanmakuSourceManageSheet(
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A0FF)),
                         shape = RoundedCornerShape(8.dp),
                     ) {
-                        FluxText("添加", color = Color.White)
+                        FluxText(stringResource(R.string.danmaku_source_add), color = Color.White)
                     }
                 }
             }
@@ -148,14 +150,14 @@ private fun AddSourceForm(
     var url by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text("添加自定义弹幕源", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text(stringResource(R.string.danmaku_source_add_custom_title), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
         Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { FluxText("名称", color = Color.White.copy(alpha = 0.5f)) },
+            placeholder = { FluxText(stringResource(R.string.danmaku_source_name), color = Color.White.copy(alpha = 0.5f)) },
             textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
@@ -171,7 +173,7 @@ private fun AddSourceForm(
             value = url,
             onValueChange = { url = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { FluxText("API 地址，如 https://api.dandanplay.com", color = Color.White.copy(alpha = 0.5f)) },
+            placeholder = { FluxText(stringResource(R.string.danmaku_source_api_hint), color = Color.White.copy(alpha = 0.5f)) },
             textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
@@ -188,7 +190,7 @@ private fun AddSourceForm(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton("取消", onClick = onCancel)
+            TextButton(stringResource(R.string.danmaku_source_cancel), onClick = onCancel)
             Spacer(modifier = Modifier.width(8.dp))
             Button(
                 onClick = { onAdd(name, url) },
@@ -240,7 +242,7 @@ private fun SourceItem(
                     shape = RoundedCornerShape(6.dp),
                     contentPadding = ButtonDefaults.TextButtonContentPadding,
                 ) {
-                    Text("删除", color = Color.White, fontSize = 12.sp)
+                    Text(stringResource(R.string.danmaku_source_delete), color = Color.White, fontSize = 12.sp)
                 }
             }
         }

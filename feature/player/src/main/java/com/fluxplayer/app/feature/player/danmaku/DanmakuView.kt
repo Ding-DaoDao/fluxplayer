@@ -103,6 +103,9 @@ class DanmakuView @JvmOverloads constructor(
     private var fpsTimer = 0L
     private var scrollEmittedThisFrame = 0
 
+    /** Surface 是否已执行过首次清屏（用于空转跳过时的脏帧保护） */
+    private var surfaceCleared = false
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     // ── 初始化 ─────────────────────────────────────────────
@@ -155,8 +158,7 @@ class DanmakuView @JvmOverloads constructor(
         if (track < 0) return
         val active = ActiveDanmaku(
             danmaku = danmaku,
-            y = trackAllocator.topPadding + track * trackAllocator.trackHeight +
-                    trackAllocator.trackHeight * 0.2f,
+            y = trackY(track),
             trackIndex = track,
             startTimeMs = currentTimeMs,
             textWidth = textWidth,
@@ -169,6 +171,8 @@ class DanmakuView @JvmOverloads constructor(
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         isSurfaceValid = true
+        // 新 Surface 首次必须清屏，防止空转优化跳过导致残留脏帧
+        surfaceCleared = false
         reconfigure()
         startRenderLoop()
     }
@@ -202,10 +206,10 @@ class DanmakuView @JvmOverloads constructor(
 
         try {
             val deltaMs = if (lastFrameTimeNs == 0L) {
-                16f
+                DEFAULT_FRAME_DELTA_MS
             } else {
                 ((frameTimeNanos - lastFrameTimeNs) / 1_000_000).toFloat()
-            }.coerceIn(1f, 100f)
+            }.coerceIn(MIN_FRAME_DELTA_MS, MAX_FRAME_DELTA_MS)
             lastFrameTimeNs = frameTimeNanos
 
             // 暂停时不移动弹幕，但仍绘制（弹幕停在当前位置）
@@ -254,8 +258,8 @@ class DanmakuView @JvmOverloads constructor(
         logRenderStats()
         if (fpsTimer == 0L) {
             fpsTimer = System.currentTimeMillis()
-        } else if (System.currentTimeMillis() - fpsTimer > 5000) {
-            Log.d(TAG, "FPS: ${frameCount / 5}  active=${activeDanmaku.size}")
+        } else if (System.currentTimeMillis() - fpsTimer > FPS_LOG_INTERVAL_MS) {
+            Log.d(TAG, "FPS: ${frameCount / (FPS_LOG_INTERVAL_MS / 1000)}  active=${activeDanmaku.size}")
             frameCount = 0
             fpsTimer = System.currentTimeMillis()
         }
@@ -263,12 +267,33 @@ class DanmakuView @JvmOverloads constructor(
 
     private companion object {
         const val MAX_SCROLL_EMIT_PER_FRAME = 5
+        const val MAX_DRAIN_PER_FRAME = 3
+        const val DEFAULT_FRAME_DELTA_MS = 16f
+        const val MIN_FRAME_DELTA_MS = 1f
+        const val MAX_FRAME_DELTA_MS = 100f
+        const val EMIT_AHEAD_WINDOW_MS = 1000L
+        const val MAX_EMIT_AGE_MS = 30_000L
+        const val DENSITY_HASH_MASK = 0xFFFF
+        const val DENSITY_HASH_NORMALIZER = 65535f
+        const val DEDUP_WINDOW_MS = 100L
+        const val TRACK_TEXT_VERTICAL_OFFSET = 0.2f
+        const val SHADOW_RADIUS = 3f
+        const val SHADOW_DX = 1.5f
+        const val SHADOW_DY = 1.5f
+        const val FPS_LOG_INTERVAL_MS = 5000L
+        const val EXHAUST_LOG_FRAME_MOD = 60
+        const val STATS_LOG_FRAME_MOD = 300
     }
+
+    /** 计算某轨道的文字基线 y 坐标（顶部 padding + 轨道偏移 + 垂直微调） */
+    private fun trackY(track: Int): Float =
+        trackAllocator.topPadding + track * trackAllocator.trackHeight +
+            trackAllocator.trackHeight * TRACK_TEXT_VERTICAL_OFFSET
 
     /** 发放当前时间点应该显示的弹幕 */
     private fun emitNewDanmaku() {
         if (nextEmitIndex >= allDanmaku.size) {
-            if (allDanmaku.isNotEmpty() && frameCount % 60 == 0) {
+            if (allDanmaku.isNotEmpty() && frameCount % EXHAUST_LOG_FRAME_MOD == 0) {
                 Log.w(TAG, "emitNewDanmaku: exhausted nextEmit=$nextEmitIndex " +
                         "total=${allDanmaku.size} time=${currentTimeMs}ms")
             }
@@ -283,17 +308,17 @@ class DanmakuView @JvmOverloads constructor(
 
         while (nextEmitIndex < allDanmaku.size) {
             val danmaku = allDanmaku[nextEmitIndex]
-            if (danmaku.timeMs > adjustedTimeMs + 1000) break
+            if (danmaku.timeMs > adjustedTimeMs + EMIT_AHEAD_WINDOW_MS) break
             nextEmitIndex++
 
             // 非滚动弹幕跳过
             if (danmaku.mode != Danmaku.MODE_SCROLL) continue
             // 超过 30s 的弹幕跳过
-            if (adjustedTimeMs - danmaku.timeMs > 30_000) continue
+            if (adjustedTimeMs - danmaku.timeMs > MAX_EMIT_AGE_MS) continue
 
             // 密度过滤：根据 danmakuDensity 使用 hash 方式随机丢弃部分弹幕
             if (danmakuDensity < 1.0f) {
-                val hash = (danmaku.text.hashCode() and 0xFFFF) / 65535f
+                val hash = (danmaku.text.hashCode() and DENSITY_HASH_MASK) / DENSITY_HASH_NORMALIZER
                 if (hash > danmakuDensity) continue
             }
 
@@ -319,7 +344,7 @@ class DanmakuView @JvmOverloads constructor(
                 // 同轨道同一时间点只显示一条弹幕
                 val dup = activeDanmaku.any {
                     it.trackIndex == scrollTrack &&
-                    kotlin.math.abs(it.startTimeMs - danmaku.timeMs) < 100
+                    kotlin.math.abs(it.startTimeMs - danmaku.timeMs) < DEDUP_WINDOW_MS
                 }
                 if (dup) continue
 
@@ -330,8 +355,7 @@ class DanmakuView @JvmOverloads constructor(
 
                 val active = ActiveDanmaku(
                     danmaku = danmaku,
-                    y = trackAllocator.topPadding + scrollTrack * trackAllocator.trackHeight +
-                            trackAllocator.trackHeight * 0.2f,
+                    y = trackY(scrollTrack),
                     trackIndex = scrollTrack,
                     startTimeMs = danmaku.timeMs,
                     textWidth = textWidth,
@@ -354,7 +378,7 @@ class DanmakuView @JvmOverloads constructor(
         val adjustedTimeMs = currentTimeMs + timeOffsetMs
         var drained = 0
 
-        while (drained < 3 && activeDanmaku.size < maxActiveDanmaku) {
+        while (drained < MAX_DRAIN_PER_FRAME && activeDanmaku.size < maxActiveDanmaku) {
             val result = trackAllocator.tryAllocatePending(
                 scrollSpeedPxPerSec,
                 adjustedTimeMs,
@@ -368,8 +392,7 @@ class DanmakuView @JvmOverloads constructor(
                 startTimeMs = adjustedTimeMs,
                 textWidth = pending.textWidth,
                 mode = Danmaku.MODE_SCROLL,
-                y = trackAllocator.topPadding + track * trackAllocator.trackHeight +
-                        trackAllocator.trackHeight * 0.2f,
+                y = trackY(track),
             ).also { it.x = viewW }
             activeDanmaku.add(active)
             drained++
@@ -380,11 +403,14 @@ class DanmakuView @JvmOverloads constructor(
 
     private fun drawFrame() {
         val holder = holder ?: return
+        // 空转优化：无活跃弹幕且已清过屏时跳过 lockCanvas，避免每帧空转绘制
+        if (activeDanmaku.isEmpty() && surfaceCleared) return
         var canvas: Canvas? = null
         try {
             canvas = holder.lockCanvas()
             if (canvas == null) return
             canvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+            surfaceCleared = true
             for (ad in activeDanmaku) {
                 drawDanmaku(canvas, ad)
             }
@@ -415,7 +441,7 @@ class DanmakuView @JvmOverloads constructor(
                 isDither = true
                 textSize = scaledSize
                 typeface = Typeface.DEFAULT_BOLD
-                setShadowLayer(3f, 1.5f, 1.5f, Color.BLACK)
+                setShadowLayer(SHADOW_RADIUS, SHADOW_DX, SHADOW_DY, Color.BLACK)
             }
             paintCache[scaledSize] = paint
         }
@@ -440,7 +466,7 @@ class DanmakuView @JvmOverloads constructor(
     }
 
     private fun logRenderStats() {
-        if (frameCount % 300 == 0) { // ~每5秒
+        if (frameCount % STATS_LOG_FRAME_MOD == 0) { // ~每5秒
             Log.d(TAG, "Render stats: frame=$frameCount active=${activeDanmaku.size} " +
                     "nextEmit=$nextEmitIndex/${allDanmaku.size} currentTime=${currentTimeMs}ms")
         }

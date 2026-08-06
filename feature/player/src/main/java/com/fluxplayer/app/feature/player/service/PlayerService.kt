@@ -1,7 +1,6 @@
 package com.fluxplayer.app.feature.player.service
 
 import android.app.PendingIntent
-import android.content.ContentResolver
 import android.content.Intent
 import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
@@ -34,21 +33,14 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import coil3.ImageLoader
-import coil3.request.CachePolicy
-import coil3.request.ImageRequest
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import com.fluxplayer.app.core.common.extensions.deleteFiles
-import com.fluxplayer.app.core.common.extensions.fromUri
 import com.fluxplayer.app.core.common.CloudUriScheme
-import com.fluxplayer.app.core.common.CloudPlaylistCache
 import com.fluxplayer.app.core.common.Pan123FallbackCache
-import com.fluxplayer.app.core.common.extensions.getFilenameFromUri
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.cache.PlaybackCacheManager
 import com.fluxplayer.app.core.common.CloudAwareCacheKeyRegistry
-import com.fluxplayer.app.core.common.extensions.getLocalSubtitles
-import com.fluxplayer.app.core.common.extensions.getPath
 import com.fluxplayer.app.core.common.extensions.subtitleCacheDir
 import com.fluxplayer.app.core.data.repository.MediaRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
@@ -57,11 +49,8 @@ import com.fluxplayer.app.core.model.DecoderPriority
 import com.fluxplayer.app.core.model.LoopMode
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.model.Resume
-import com.fluxplayer.app.core.model.VideoSource
 import com.fluxplayer.app.core.ui.R as coreUiR
 import com.fluxplayer.app.feature.player.PlayerActivity
-import com.fluxplayer.app.feature.player.R
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.fluxplayer.app.feature.player.extensions.addAdditionalSubtitleConfiguration
 import com.fluxplayer.app.feature.player.extensions.audioTrackIndex
 import com.fluxplayer.app.feature.player.extensions.copy
@@ -70,14 +59,12 @@ import com.fluxplayer.app.feature.player.extensions.introMs
 import com.fluxplayer.app.feature.player.extensions.outroMs
 import com.fluxplayer.app.feature.player.extensions.playbackSpeed
 import com.fluxplayer.app.feature.player.extensions.positionMs
-import com.fluxplayer.app.feature.player.extensions.setExtras
 import com.fluxplayer.app.feature.player.extensions.setIsScrubbingModeEnabled
 import com.fluxplayer.app.feature.player.extensions.subtitleDelayMilliseconds
 import com.fluxplayer.app.feature.player.extensions.subtitleSpeed
 import com.fluxplayer.app.feature.player.extensions.subtitleTrackIndex
 import com.fluxplayer.app.feature.player.extensions.switchTrack
 import com.fluxplayer.app.feature.player.extensions.uriToSubtitleConfiguration
-import com.fluxplayer.app.feature.player.extensions.videoZoom
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import io.github.anilbeesetti.nextlib.media3ext.renderer.subtitleDelayMilliseconds
 import io.github.anilbeesetti.nextlib.media3ext.renderer.subtitleSpeed
@@ -87,14 +74,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 
 @OptIn(UnstableApi::class)
@@ -131,6 +115,12 @@ class PlayerService : MediaSessionService() {
     private lateinit var mediaSourceFactory: CloudAwareMediaSourceFactory
     private lateinit var trackSelector: DefaultTrackSelector
     private lateinit var loadControl: DefaultLoadControl
+
+    /** 播放状态持久化助手 */
+    private lateinit var persistence: PlaybackPersistence
+
+    /** 媒体项元数据增强助手 */
+    private lateinit var mediaItemEnricher: MediaItemEnricher
 
     private val playerPreferences: PlayerPreferences
         get() = preferencesRepository.playerPreferences.value
@@ -221,36 +211,22 @@ class PlayerService : MediaSessionService() {
                         oldPosition.mediaItemIndex,
                         oldMediaItem.copy(positionMs = updatedPosition),
                     )
-                    saveScope.launch {
-                        mediaRepository.updateMediumPosition(
-                            uri = oldMediaItem.mediaId,
-                            position = updatedPosition,
-                        )
-                    }
-                    saveScope.launch {
-                        recordPlaybackHistory(
-                            mediaItem = oldMediaItem,
-                            position = updatedPosition.takeIf { it != C.TIME_UNSET }
-                                ?: oldPosition.positionMs,
-                        )
-                    }
+                    persistence.savePosition(oldMediaItem.mediaId, updatedPosition)
+                    persistence.recordHistory(
+                        mediaItem = oldMediaItem,
+                        position = updatedPosition.takeIf { it != C.TIME_UNSET }
+                            ?: oldPosition.positionMs,
+                    )
                 }
 
                 DISCONTINUITY_REASON_REMOVE -> {
-                    saveScope.launch {
-                        val durationMs = oldMediaItem.mediaMetadata.durationMs
-                        val isAtEnd = durationMs != null && oldPosition.positionMs >= durationMs - 1000
-                        mediaRepository.updateMediumPosition(
-                            uri = oldMediaItem.mediaId,
-                            position = if (isAtEnd) C.TIME_UNSET else oldPosition.positionMs,
-                        )
-                    }
-                    saveScope.launch {
-                        recordPlaybackHistory(
-                            mediaItem = oldMediaItem,
-                            position = oldPosition.positionMs,
-                        )
-                    }
+                    val durationMs = oldMediaItem.mediaMetadata.durationMs
+                    val isAtEnd = durationMs != null && oldPosition.positionMs >= durationMs - 1000
+                    persistence.savePosition(
+                        oldMediaItem.mediaId,
+                        if (isAtEnd) C.TIME_UNSET else oldPosition.positionMs,
+                    )
+                    persistence.recordHistory(oldMediaItem, oldPosition.positionMs)
                 }
 
                 else -> return
@@ -320,10 +296,11 @@ class PlayerService : MediaSessionService() {
             // 防止在 STATE_IDLE 等过渡阶段用默认倍速覆盖已保存的目录级倍速。
             if (!isRestoringPlaybackSpeed) {
                 val mediaId = currentMediaItem.mediaId
+                // 用 saveScope 保证不被 serviceScope 取消（与拆分前行为一致）
                 saveScope.launch {
-                    val dirKey = computeDirKey(mediaId)
+                    val dirKey = mediaItemEnricher.computeDirKey(mediaId)
                     if (dirKey.isNotEmpty()) {
-                        mediaRepository.updateMediumPlaybackSpeed(dirKey, playbackSpeed)
+                        persistence.savePlaybackSpeed(dirKey, playbackSpeed)
                     }
                 }
             }
@@ -387,12 +364,10 @@ class PlayerService : MediaSessionService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             super.onIsPlayingChanged(isPlaying)
             mediaSession?.run {
-                serviceScope.launch {
-                    mediaRepository.updateMediumPosition(
-                        uri = player.currentMediaItem?.mediaId ?: return@launch,
-                        position = player.currentPosition,
-                    )
-                }
+                persistence.savePosition(
+                    uri = player.currentMediaItem?.mediaId ?: return@run,
+                    position = player.currentPosition,
+                )
             }
             // 暂停时才记录播放历史（播放时不记录）
             if (isPlaying) return
@@ -400,12 +375,7 @@ class PlayerService : MediaSessionService() {
             // 播放器 IDLE 状态时由 STOP_PLAYER_SESSION 统一处理，避免重复覆盖
             if (player.playbackState == Player.STATE_IDLE) return
             val currentMediaItem = player.currentMediaItem ?: return
-            serviceScope.launch {
-                recordPlaybackHistory(
-                    mediaItem = currentMediaItem,
-                    position = player.currentPosition,
-                )
-            }
+            persistence.recordHistory(currentMediaItem, player.currentPosition)
         }
 
         override fun onRepeatModeChanged(repeatMode: Int) {
@@ -539,7 +509,7 @@ class PlayerService : MediaSessionService() {
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = serviceScope.future(Dispatchers.Default) {
             // 纯音频模式：跳过 DB 查询、字幕扫描、artwork 加载
             // 仍需从 mediaId 重建 URI（localConfiguration 可能在 IPC 传输中丢失）
-            if (mediaItems.all { isAudioFile(it.mediaId) }) {
+            if (mediaItems.all { persistence.isAudioFile(it.mediaId) }) {
                 // 听书倍速独立于视频播放设置，从 DataStore 读取上次保存的倍速
                 sessionPlaybackSpeed = preferencesRepository.applicationPreferences.value.audiobookPlaybackSpeed
                 val updatedItems = mediaItems.map { item ->
@@ -549,7 +519,7 @@ class PlayerService : MediaSessionService() {
                 }
                 return@future MediaSession.MediaItemsWithStartPosition(updatedItems, startIndex, startPositionMs)
             }
-            val updatedMediaItems = updatedMediaItemsWithMetadata(mediaItems)
+            val updatedMediaItems = mediaItemEnricher.enrich(mediaItems)
             return@future MediaSession.MediaItemsWithStartPosition(updatedMediaItems, startIndex, startPositionMs)
         }
 
@@ -559,7 +529,7 @@ class PlayerService : MediaSessionService() {
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> = serviceScope.future(Dispatchers.Default) {
             // 纯音频模式：跳过 metadata 增强，但仍需从 mediaId 重建 URI
-            if (mediaItems.all { isAudioFile(it.mediaId) }) {
+            if (mediaItems.all { persistence.isAudioFile(it.mediaId) }) {
                 sessionPlaybackSpeed = preferencesRepository.applicationPreferences.value.audiobookPlaybackSpeed
                 val updatedItems = mediaItems.map { item ->
                     item.buildUpon()
@@ -568,7 +538,7 @@ class PlayerService : MediaSessionService() {
                 }
                 return@future updatedItems.toMutableList()
             }
-            val updatedMediaItems = updatedMediaItemsWithMetadata(mediaItems)
+            val updatedMediaItems = mediaItemEnricher.enrich(mediaItems)
             return@future updatedMediaItems.toMutableList()
         }
 
@@ -701,16 +671,11 @@ class PlayerService : MediaSessionService() {
                     val stopMediaId = stopMediaItem?.mediaId
                     Log.d(TAG, "STOP_PLAYER_SESSION: mediaId=$stopMediaId, position=$stopPosition, hasMediaItem=${stopMediaItem != null}")
                     if (stopMediaId != null) {
-                        saveScope.launch {
-                            mediaRepository.updateMediumPosition(stopMediaId, stopPosition)
-                            Log.d(TAG, "STOP_PLAYER_SESSION: position saved to DB for $stopMediaId")
-                        }
+                        persistence.savePosition(stopMediaId, stopPosition)
+                        Log.d(TAG, "STOP_PLAYER_SESSION: position saved to DB for $stopMediaId")
                     }
                     if (stopMediaItem != null) {
-                        recordPlaybackHistory(
-                            mediaItem = stopMediaItem,
-                            position = stopPosition,
-                        )
+                        persistence.recordHistory(stopMediaItem, stopPosition)
                     }
                     mediaSession?.run {
                         player.clearMediaItems()
@@ -727,6 +692,16 @@ class PlayerService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+
+        persistence = PlaybackPersistence(applicationContext, mediaRepository, playbackHistoryRepository, saveScope)
+        mediaItemEnricher = MediaItemEnricher(
+            context = applicationContext,
+            mediaRepository = mediaRepository,
+            cloudUriResolver = cloudUriResolver,
+            preferencesRepository = preferencesRepository,
+            imageLoader = imageLoader,
+            cacheKeyRegistry = cacheKeyRegistry,
+        )
 
         trackSelector = DefaultTrackSelector(applicationContext).apply {
             setParameters(
@@ -801,15 +776,15 @@ class PlayerService : MediaSessionService() {
         Log.d(TAG, "onDestroy: mediaId=$currentUri, position=$currentPos, speed=$currentSpeed, " +
             "willSave=${currentUri != null && currentPos > 0}")
         if (currentUri != null) {
-            saveScope.launch {
-                if (currentPos > 0) {
-                    mediaRepository.updateMediumPosition(currentUri, currentPos)
-                    Log.d(TAG, "onDestroy: position saved to DB for $currentUri")
-                }
-                if (currentSpeed != 1.0f) {
-                    val dirKey = computeDirKey(currentUri)
+            if (currentPos > 0) {
+                persistence.savePosition(currentUri, currentPos)
+                Log.d(TAG, "onDestroy: position saved to DB for $currentUri")
+            }
+            if (currentSpeed != 1.0f) {
+                saveScope.launch {
+                    val dirKey = mediaItemEnricher.computeDirKey(currentUri)
                     if (dirKey.isNotEmpty()) {
-                        mediaRepository.updateMediumPlaybackSpeed(dirKey, currentSpeed)
+                        persistence.savePlaybackSpeed(dirKey, currentSpeed)
                         Log.d(TAG, "onDestroy: speed saved to DB for dirKey=$dirKey")
                     }
                 }
@@ -965,219 +940,6 @@ class PlayerService : MediaSessionService() {
         }
     }
 
-    private suspend fun updatedMediaItemsWithMetadata(
-        mediaItems: List<MediaItem>,
-    ): List<MediaItem> = supervisorScope {
-        mediaItems.map { mediaItem ->
-            async {
-                val mediaId = mediaItem.mediaId
-                val uri = mediaId.toUri()
-
-                // Pre-resolve cloud URIs on background thread to avoid blocking ExoPlayer start
-                // 但如果 MediaItem 已有有效的 HTTP URL（如画质切换传入的新 URL），不要覆盖
-                val existingUri = mediaItem.localConfiguration?.uri
-                val resolvedUri = if (existingUri != null && existingUri.scheme in listOf("http", "https")) {
-                    // 已有 HTTP URL，保持原样（画质切换场景）
-                    Log.d(TAG, "Pre-resolve: keeping existing HTTP URI: ${existingUri.toString().take(120)}")
-                    null
-                } else if (CloudUriScheme.isCloudUri(uri)) {
-                    try {
-                        val resolved = cloudUriResolver.resolve(uri)
-                        if (resolved != null) {
-                            cacheKeyRegistry?.register(resolved.toString(), uri.toString())
-                            Log.d(TAG, "Pre-resolved cloud URI: $uri -> $resolved")
-                        }
-                        resolved
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to pre-resolve cloud URI: $uri", e)
-                        null
-                    }
-                } else {
-                    null
-                }
-
-                val video = mediaRepository.getVideoByUri(uri = mediaId)
-                val videoState = mediaRepository.getVideoState(uri = mediaId)
-
-                // 片头片尾 & 倍速使用带来源前缀的目录级 key
-                val parentDirKey = computeDirKey(mediaId)
-                val dirVideoState = if (parentDirKey.isNotEmpty()) mediaRepository.getVideoState(parentDirKey) else null
-
-                val externalSubs = videoState?.externalSubs ?: emptyList()
-                val localSubs = (videoState?.path ?: getPath(uri))?.let {
-                    File(it).getLocalSubtitles(
-                        context = this@PlayerService,
-                        excludeSubsList = externalSubs,
-                    )
-                } ?: emptyList()
-
-                val existingSubConfigurations = mediaItem.localConfiguration?.subtitleConfigurations ?: emptyList()
-                val subConfigurations = (localSubs + externalSubs).map { subtitleUri ->
-                    uriToSubtitleConfiguration(
-                        uri = subtitleUri,
-                        subtitleEncoding = playerPreferences.subtitleTextEncoding,
-                    )
-                }
-
-                // Use placeholder artwork initially - actual artwork will be loaded in background
-                val artworkUri = getDefaultArtworkUri()
-
-                val title = mediaItem.mediaMetadata.title
-                    ?: video?.nameWithExtension
-                    ?: getTitleForUri(uri)
-                val positionMs = mediaItem.mediaMetadata.positionMs ?: videoState?.position
-                val videoScale = mediaItem.mediaMetadata.videoZoom ?: videoState?.videoScale
-                // 倍速优先目录级，回退文件级（同目录所有剧集共享）
-                val playbackSpeed = mediaItem.mediaMetadata.playbackSpeed
-                    ?: dirVideoState?.playbackSpeed
-                    ?: videoState?.playbackSpeed
-                val audioTrackIndex = mediaItem.mediaMetadata.audioTrackIndex ?: videoState?.audioTrackIndex
-                val subtitleTrackIndex = mediaItem.mediaMetadata.subtitleTrackIndex ?: videoState?.subtitleTrackIndex
-                val subtitleDelay = mediaItem.mediaMetadata.subtitleDelayMilliseconds ?: videoState?.subtitleDelayMilliseconds
-                val subtitleSpeed = mediaItem.mediaMetadata.subtitleSpeed ?: videoState?.subtitleSpeed
-                // 片头片尾优先使用目录级 key（同目录所有剧集共享）
-                val introMs = dirVideoState?.introMs?.takeIf { it != -1L } ?: -1L
-                val outroMs = dirVideoState?.outroMs?.takeIf { it != -1L } ?: -1L
-
-                Log.d(TAG, "updatedMediaItems: mediaId=$mediaId, parentDirKey=$parentDirKey, " +
-                    "dbPosition=${videoState?.position}, positionMs=$positionMs, " +
-                    "playbackSpeed=$playbackSpeed, introMs=$introMs, outroMs=$outroMs")
-
-                mediaItem.buildUpon().apply {
-                    // Use pre-resolved HTTP URL so ExoPlayer starts buffering immediately
-                    if (resolvedUri != null) {
-                        setUri(resolvedUri)
-                        setMediaId(mediaId)
-                    }
-                    setSubtitleConfigurations(existingSubConfigurations + subConfigurations)
-                    setMediaMetadata(
-                        MediaMetadata.Builder().apply {
-                            setTitle(title)
-                            setArtworkUri(artworkUri)
-                            setExtras(
-                                positionMs = positionMs,
-                                videoScale = videoScale,
-                                playbackSpeed = playbackSpeed,
-                                audioTrackIndex = audioTrackIndex,
-                                subtitleTrackIndex = subtitleTrackIndex,
-                                subtitleDelayMilliseconds = subtitleDelay,
-                                subtitleSpeed = subtitleSpeed,
-                                introMs = introMs,
-                                outroMs = outroMs,
-                            )
-                        }.build(),
-                    )
-                }.build()
-            }
-        }.awaitAll()
-    }
-
-    /** 计算来源前缀的目录级 key，与 intro/outro 逻辑一致 */
-    private suspend fun computeDirKey(mediaId: String): String {
-        val video = mediaRepository.getVideoByUri(mediaId)
-        return when {
-            mediaId.startsWith("content://") || mediaId.startsWith("file://") -> {
-                val localPath = video?.parentPath
-                    ?: mediaId.substringAfter("file://").substringBeforeLast('/').takeIf { it.isNotEmpty() && it != mediaId }
-                    ?: mediaId.substringBeforeLast('/').takeIf { it.isNotEmpty() && it != mediaId }
-                if (!localPath.isNullOrEmpty()) "local:$localPath" else ""
-            }
-            mediaId.startsWith("cloud:") -> {
-                val uri = android.net.Uri.parse(mediaId)
-                val folder = CloudUriScheme.getCloudFolder(uri)
-                val provider = CloudUriScheme.getProvider(uri) ?: ""
-                if (!folder.isNullOrEmpty()) {
-                    "cloud:$provider/$folder"
-                } else {
-                    val cloudKey = mediaId.substringBeforeLast('/').takeIf { it.isNotEmpty() && it != mediaId }
-                    if (!cloudKey.isNullOrEmpty()) "cloud:$cloudKey" else ""
-                }
-            }
-            else -> {
-                mediaId.substringBeforeLast('/').takeIf { it.isNotEmpty() && it != mediaId }
-                    ?.let { "other:$it" } ?: ""
-            }
-        }
-    }
-    
-    private suspend fun recordPlaybackHistory(mediaItem: MediaItem, position: Long) {
-        val uri = mediaItem.mediaId
-        // 纯音频文件（本地文件 + 音频扩展名）不记录到播放历史
-        if (isAudioFile(uri)) return
-
-        val title = mediaItem.mediaMetadata.title?.toString()
-            ?: getFilenameFromUri(uri.toUri())
-        val duration = mediaItem.mediaMetadata.durationMs ?: 0L
-        val source = VideoSource.fromUri(uri)
-        // 从 PlayerFrameCapture 取出退出时截取的缩略图路径
-        val preCapturedPath = PlayerFrameCapture.take(uri)
-        // 计算父目录名
-        val parentPath = computeParentPath(uri, source)
-        playbackHistoryRepository.recordPlayback(
-            uriString = uri,
-            title = title,
-            source = source,
-            position = position,
-            duration = duration,
-            originalUriString = if (source == VideoSource.WEBDAV) uri else null,
-            thumbnailPath = preCapturedPath,
-            parentPath = parentPath,
-        )
-    }
-
-    private fun isAudioFile(uri: String): Boolean {
-        val ext = uri.substringAfterLast('.', "").lowercase()
-        return ext in AUDIO_EXTENSIONS
-    }
-
-    private fun computeParentPath(uriString: String, source: VideoSource): String? {
-        val uri = uriString.toUri()
-        return when (source) {
-            VideoSource.LOCAL -> {
-                try {
-                    File(uri.path).parentFile?.name
-                } catch (_: Exception) {
-                    null
-                }
-            }
-            VideoSource.WEBDAV -> {
-                // 优先从 CloudPlaylistCache 获取完整 parentPath
-                val cachePath = uri.path?.let { filePath ->
-                    CloudPlaylistCache.getFileMetadata("webdav", filePath)?.parentPath
-                }
-                if (cachePath != null) return cachePath
-                // 回退：从路径提取父目录名
-                val segments = uri.path?.trimEnd('/')?.split("/")?.filter { it.isNotEmpty() } ?: return null
-                segments.dropLast(1).lastOrNull()
-            }
-            VideoSource.OPENLIST -> {
-                // OpenList URI 格式：http://127.0.0.1:5244/d/path/to/file → 去掉 /d 前缀即文件 path
-                val filePath = uri.path?.removePrefix("/d") ?: uri.path
-                if (filePath != null) {
-                    CloudPlaylistCache.getFileMetadata("openlist", filePath)?.parentPath
-                } else null
-            }
-            VideoSource.QUARK, VideoSource.UC,
-            VideoSource.ALIYUN,
-            VideoSource.PAN123,
-            VideoSource.CLOUD189,
-            VideoSource.YUN139 -> {
-                val provider = CloudUriScheme.getProvider(uri) ?: return null
-                val fileId = CloudUriScheme.getFileId(uri) ?: return null
-                CloudPlaylistCache.getFileMetadata(provider, fileId)?.parentPath
-            }
-            else -> null
-        }
-    }
-
-    private fun getDefaultArtworkUri(): Uri = Uri.Builder().apply {
-        val defaultArtwork = R.drawable.artwork_default
-        scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
-        authority(resources.getResourcePackageName(defaultArtwork))
-        appendPath(resources.getResourceTypeName(defaultArtwork))
-        appendPath(resources.getResourceEntryName(defaultArtwork))
-    }.build()
-
     private fun loadArtworkForCurrentMediaItem() {
         artworkLoadJob?.cancel()
         artworkLoadJob = serviceScope.launch(Dispatchers.Main) {
@@ -1185,7 +947,7 @@ class PlayerService : MediaSessionService() {
             val currentMediaItem = player.currentMediaItem ?: return@launch
             if (currentMediaItem.mediaMetadata.artworkData != null) return@launch
 
-            val artworkUri = loadArtworkForMediaItem(currentMediaItem) ?: return@launch
+            val artworkUri = mediaItemEnricher.loadArtworkForMediaItem(currentMediaItem) ?: return@launch
 
             val updatedPlayer = mediaSession?.player ?: return@launch
             val updatedMediaItem = updatedPlayer.currentMediaItem ?: return@launch
@@ -1193,53 +955,15 @@ class PlayerService : MediaSessionService() {
 
             updatedPlayer.replaceMediaItem(
                 updatedPlayer.currentMediaItemIndex,
-                updatedMediaItem.withArtwork(artworkUri),
+                updatedMediaItem.buildUpon()
+                    .setMediaMetadata(
+                        updatedMediaItem.mediaMetadata.buildUpon()
+                            .setArtworkUri(artworkUri)
+                            .build(),
+                    )
+                    .build(),
             )
         }
-    }
-    private suspend fun loadArtworkForMediaItem(mediaItem: MediaItem): Uri? = withContext(Dispatchers.IO) {
-        val uri = mediaItem.mediaId.toUri()
-        return@withContext try {
-            val request = ImageRequest.Builder(this@PlayerService)
-                .data(uri)
-                .size(512, 512)
-                .build()
-            imageLoader.execute(request)
-            val diskCache = imageLoader.diskCache ?: return@withContext null
-            return@withContext diskCache.openSnapshot(uri.toString())?.use { snapshot ->
-                snapshot.data.toFile().toUri()
-            }
-        } catch (_: Throwable) {
-            null
-        }
-    }
-    private fun MediaItem.withArtwork(uri: Uri): MediaItem = buildUpon()
-        .setMediaMetadata(
-            mediaMetadata.buildUpon()
-                .setArtworkUri(uri)
-                .build(),
-        )
-        .build()
-
-    /**
-     * 为 URI 获取可读的标题，对 cloud:// URI 做特殊处理。
-     */
-    private fun getTitleForUri(uri: Uri): String {
-        // 云盘 URI：尝试从 CloudPlaylistCache 获取缓存的视频名
-        if (CloudUriScheme.isCloudUri(uri)) {
-            val provider = CloudUriScheme.getProvider(uri)
-            val fileId = CloudUriScheme.getFileId(uri)
-            if (provider != null && fileId != null) {
-                val metadata = CloudPlaylistCache.getFileMetadata(provider, fileId)
-                if (metadata != null) {
-                    return metadata.fileName
-                }
-                // fallback: provider/fileId
-                return "$provider/$fileId"
-            }
-        }
-        // 普通 URI：用 getFilenameFromUri
-        return getFilenameFromUri(uri)
     }
 }
 

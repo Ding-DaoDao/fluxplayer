@@ -23,5 +23,5 @@ fun VideoContentScale.toContentScale(): ContentScale = when (this) {
     VideoContentScale.BEST_FIT -> ContentScale.Fit
     VideoContentScale.STRETCH -> ContentScale.FillBounds
     VideoContentScale.CROP -> ContentScale.Crop
-    VideoContentScale.HUNDRED_PERCENT -> FixedScale(1.0f) // TODO: fix this
+    VideoContentScale.HUNDRED_PERCENT -> FixedScale(1.0f) // 1:1 原始尺寸，不做容器适配（符合"100%"语义）
 }

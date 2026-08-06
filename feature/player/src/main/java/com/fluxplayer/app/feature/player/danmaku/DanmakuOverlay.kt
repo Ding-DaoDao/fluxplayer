@@ -34,11 +34,10 @@ fun DanmakuOverlay(
 ) {
     var danmakuView by remember { mutableStateOf<DanmakuView?>(null) }
     var controller by remember { mutableStateOf<DanmakuController?>(null) }
-    var density by remember { mutableFloatStateOf(1f) }
 
-    // 获取 density
+    // 获取 density（remember 内初始化，避免每次重组都写入 state）
     val context = LocalContext.current
-    density = context.resources.displayMetrics.density
+    var density by remember { mutableFloatStateOf(context.resources.displayMetrics.density) }
 
     // DisposableEffect: 监听播放状态变化（暂停/恢复）
     DisposableEffect(player) {
@@ -61,7 +60,6 @@ fun DanmakuOverlay(
         modifier = modifier,
         factory = { ctx ->
             val d = ctx.resources.displayMetrics.density
-            density = d
             val view = DanmakuView(ctx).apply {
                 danmakuOpacity = config.opacity
                 speedMultiplier = config.speed

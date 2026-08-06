@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.model.DoubleTapGesture
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
+import com.fluxplayer.app.feature.player.R as PlayerR
 import com.fluxplayer.app.feature.player.state.TapGestureState
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -67,7 +69,7 @@ fun DoubleTapIndicator(modifier: Modifier = Modifier, tapGestureState: TapGestur
             ) {
                 DoubleTapSeekTriangles(isForward = tapGestureState.seekMillis > 0)
                 Text(
-                    text = "${tapGestureState.seekMillis.milliseconds.inWholeSeconds} seconds",
+                    text = stringResource(PlayerR.string.double_tap_seek, tapGestureState.seekMillis.milliseconds.inWholeSeconds),
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.White,
                 )

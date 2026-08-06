@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
+import com.fluxplayer.app.feature.player.R
 import com.fluxplayer.app.feature.player.ui.QualityOption
 import kotlinx.coroutines.withContext
 
@@ -150,7 +151,7 @@ class PlayerViewModel @Inject constructor(
                 _danmakuFileUri.value = uri
                 danmakuEnabled.value = true
                 danmakuForCurrentEpisode.value = true
-                notifier.success("弹幕已加载（${list.size}条）")
+                notifier.success(context.getString(R.string.danmaku_loaded_toast, list.size))
                 // 保存本地弹幕上下文（用于切集自动加载）
                 val filePath = uri.path?.let { java.io.File(it) }
                 if (filePath != null && filePath.parentFile != null) {
@@ -195,7 +196,7 @@ class PlayerViewModel @Inject constructor(
      * @param source 弹幕源
      * @param keyword 搜索关键词
      */
-    fun searchDanmaku(source: DanmakuSource, keyword: String) {
+    fun searchDanmaku(context: Context, source: DanmakuSource, keyword: String) {
         Log.d(TAG, "searchDanmaku: source=$source keyword=$keyword")
         currentSource = source
         _danmakuDownloadState.value = DanmakuDownloadState.Searching(source)
@@ -204,7 +205,9 @@ class PlayerViewModel @Inject constructor(
                 val animes = danmakuRepository.searchAnime(source, keyword)
                 Log.d(TAG, "searchDanmaku: found ${animes.size} results for keyword=$keyword")
                 if (animes.isEmpty()) {
-                    _danmakuDownloadState.value = DanmakuDownloadState.Error("未找到匹配结果", source)
+                    _danmakuDownloadState.value = DanmakuDownloadState.Error(
+                        context.getString(R.string.danmaku_error_no_result), source,
+                    )
                 } else {
                     val result = DanmakuDownloadState.SearchResult(animes, source)
                     lastSearchResults = result
@@ -212,7 +215,9 @@ class PlayerViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "searchDanmaku failed", e)
-                _danmakuDownloadState.value = DanmakuDownloadState.Error(e.message ?: "搜索失败", source)
+                _danmakuDownloadState.value = DanmakuDownloadState.Error(
+                    e.message ?: context.getString(R.string.danmaku_error_search_failed), source,
+                )
             }
         }
     }
@@ -220,7 +225,7 @@ class PlayerViewModel @Inject constructor(
     /**
      * 选择动漫并获取剧集列表。
      */
-    fun selectAnime(anime: AnimeMatch) {
+    fun selectAnime(context: Context, anime: AnimeMatch) {
         val source = currentSource ?: return
         Log.d(TAG, "selectAnime: animeId=${anime.animeId} title=${anime.title} source=$source")
         _danmakuDownloadState.value = DanmakuDownloadState.Searching(source)
@@ -233,7 +238,9 @@ class PlayerViewModel @Inject constructor(
                 _danmakuDownloadState.value = state
             } catch (e: Exception) {
                 Log.e(TAG, "selectAnime failed", e)
-                _danmakuDownloadState.value = DanmakuDownloadState.Error(e.message ?: "获取剧集失败", source)
+                _danmakuDownloadState.value = DanmakuDownloadState.Error(
+                    e.message ?: context.getString(R.string.danmaku_error_episodes_failed), source,
+                )
             }
         }
     }
@@ -265,7 +272,7 @@ class PlayerViewModel @Inject constructor(
                             danmakuForCurrentEpisode.value = true
                             _danmakuDownloadState.value = DanmakuDownloadState.Ready(uri.toString())
                             withContext(Dispatchers.Main) {
-                                notifier.success("弹幕已加载（${list.size}条）")
+                                notifier.success(context.getString(R.string.danmaku_loaded_toast, list.size))
                             }
                             // 保存网络弹幕上下文（用于切集自动加载）
                             lastAnimeInfo = lastAnimeInfo?.copy(currentEpisode = episode)
@@ -278,17 +285,25 @@ class PlayerViewModel @Inject constructor(
                                 )
                             }
                         } else {
-                            _danmakuDownloadState.value = DanmakuDownloadState.Error("弹幕解析失败", source)
+                            _danmakuDownloadState.value = DanmakuDownloadState.Error(
+                                context.getString(R.string.danmaku_error_parse_failed), source,
+                            )
                         }
                     } else {
-                        _danmakuDownloadState.value = DanmakuDownloadState.Error("缓存文件不存在", source)
+                        _danmakuDownloadState.value = DanmakuDownloadState.Error(
+                            context.getString(R.string.danmaku_error_cache_missing), source,
+                        )
                     }
                 } else {
-                    _danmakuDownloadState.value = DanmakuDownloadState.Error("下载失败", source)
+                    _danmakuDownloadState.value = DanmakuDownloadState.Error(
+                        context.getString(R.string.danmaku_error_download_failed), source,
+                    )
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "selectEpisode failed", e)
-                _danmakuDownloadState.value = DanmakuDownloadState.Error(e.message ?: "未知错误", source)
+                _danmakuDownloadState.value = DanmakuDownloadState.Error(
+                    e.message ?: context.getString(R.string.danmaku_error_unknown), source,
+                )
             }
         }
     }
@@ -436,7 +451,7 @@ class PlayerViewModel @Inject constructor(
         Log.d(TAG, "silentLoadLocalDanmaku: ${file.name}")
         viewModelScope.launch {
             withContext(Dispatchers.Main) {
-                notifier.info("正在加载 ${file.name}")
+                notifier.info(context.getString(R.string.danmaku_loading_toast, file.name))
             }
             delay(800) // 给「正在加载」toast 留出展示时间
             val list = withContext(Dispatchers.IO) {
@@ -448,7 +463,7 @@ class PlayerViewModel @Inject constructor(
                 danmakuEnabled.value = true
                 danmakuForCurrentEpisode.value = true
                 withContext(Dispatchers.Main) {
-                    notifier.success("已加载 ${list.size} 条弹幕")
+                    notifier.success(context.getString(R.string.danmaku_loaded_count, list.size))
                 }
             } else {
                 Log.d(TAG, "silentLoadLocalDanmaku: failed to load ${file.name}")
@@ -468,7 +483,7 @@ class PlayerViewModel @Inject constructor(
         Log.d(TAG, "silentLoadNetworkDanmaku: episode=${episode.title} (${episode.episodeId})")
         viewModelScope.launch {
             withContext(Dispatchers.Main) {
-                notifier.info("正在加载 ${episode.title}")
+                notifier.info(context.getString(R.string.danmaku_loading_toast, episode.title))
             }
             delay(800) // 给「正在加载」toast 留出展示时间
             try {
@@ -487,7 +502,7 @@ class PlayerViewModel @Inject constructor(
                             danmakuEnabled.value = true
                             danmakuForCurrentEpisode.value = true
                             withContext(Dispatchers.Main) {
-                                notifier.success("已加载 ${list.size} 条弹幕")
+                                notifier.success(context.getString(R.string.danmaku_loaded_count, list.size))
                             }
                         } else {
                             Log.d(TAG, "silentLoadNetworkDanmaku: parsed empty list")
@@ -515,13 +530,15 @@ class PlayerViewModel @Inject constructor(
     /**
      * 通过平台源搜索弹幕。
      */
-    fun searchPlatformDanmaku(source: DanmakuSource, keyword: String) {
+    fun searchPlatformDanmaku(context: Context, source: DanmakuSource, keyword: String) {
         currentSource = source
         _danmakuDownloadState.value = DanmakuDownloadState.Searching(source)
         viewModelScope.launch(Dispatchers.IO) {
             val animes = danmakuRepository.searchPlatformAnime(keyword, source)
             if (animes.isEmpty()) {
-                _danmakuDownloadState.value = DanmakuDownloadState.Error("未找到匹配结果", source)
+                _danmakuDownloadState.value = DanmakuDownloadState.Error(
+                    context.getString(R.string.danmaku_error_no_result), source,
+                )
             } else {
                 val result = DanmakuDownloadState.SearchResult(animes, source)
                 lastSearchResults = result
@@ -549,16 +566,20 @@ class PlayerViewModel @Inject constructor(
                             danmakuForCurrentEpisode.value = true
                             _danmakuDownloadState.value = DanmakuDownloadState.Ready(uri.toString())
                             withContext(Dispatchers.Main) {
-                                notifier.success("弹幕已加载（${list.size}条）")
+                                notifier.success(context.getString(R.string.danmaku_loaded_toast, list.size))
                             }
                             return@launch
                         }
                     }
                 }
-                _danmakuDownloadState.value = DanmakuDownloadState.Error("平台弹幕抓取失败", DanmakuSource.DANDANPLAY)
+                _danmakuDownloadState.value = DanmakuDownloadState.Error(
+                    context.getString(R.string.danmaku_error_platform_fetch), DanmakuSource.DANDANPLAY,
+                )
             } catch (e: Exception) {
                 Log.e(TAG, "fetchDanmakuByUrl failed", e)
-                _danmakuDownloadState.value = DanmakuDownloadState.Error(e.message ?: "未知错误", DanmakuSource.DANDANPLAY)
+                _danmakuDownloadState.value = DanmakuDownloadState.Error(
+                    e.message ?: context.getString(R.string.danmaku_error_unknown), DanmakuSource.DANDANPLAY,
+                )
             }
         }
     }

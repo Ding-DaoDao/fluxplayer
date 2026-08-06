@@ -73,8 +73,6 @@ dependencies {
     implementation(libs.github.anilbeesetti.nextlib.media3ext)
     implementation(libs.github.anilbeesetti.nextlib.mediainfo)
 
-    // Danmaku
-    implementation(libs.danmaku.flame)
     implementation(libs.okhttp.core)
 
     implementation(libs.kotlinx.coroutines.android)

@@ -18,8 +18,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.feature.player.extensions.noRippleClickable
+import com.fluxplayer.app.feature.player.R
 
 @Composable
 fun BoxScope.QualitySelectorView(
@@ -43,14 +45,14 @@ fun BoxScope.QualitySelectorView(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 FluxText(
-                    text = "清晰度",
+                    text = stringResource(R.string.quality_title),
                     modifier = Modifier.padding(bottom = 8.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
                 )
                 if (qualities.isEmpty()) {
                     FluxText(
-                        text = "当前视频无可用清晰度信息",
+                        text = stringResource(R.string.quality_unavailable),
                         color = Color.White.copy(alpha = 0.6f),
                         style = MaterialTheme.typography.bodyMedium,
                     )

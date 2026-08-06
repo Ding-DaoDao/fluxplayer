@@ -45,6 +45,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.feature.player.R as PlayerR
 
 /**
  * 弹幕发送输入叠加层。
@@ -81,17 +82,17 @@ fun DanmakuInputOverlay(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TypeChip(
-                    label = "滚动",
+                    label = stringResource(PlayerR.string.danmaku_mode_scroll),
                     selected = selectedMode == Danmaku.MODE_SCROLL,
                     onClick = { selectedMode = Danmaku.MODE_SCROLL },
                 )
                 TypeChip(
-                    label = "顶部",
+                    label = stringResource(PlayerR.string.danmaku_mode_top),
                     selected = selectedMode == Danmaku.MODE_TOP,
                     onClick = { selectedMode = Danmaku.MODE_TOP },
                 )
                 TypeChip(
-                    label = "底部",
+                    label = stringResource(PlayerR.string.danmaku_mode_bottom),
                     selected = selectedMode == Danmaku.MODE_BOTTOM,
                     onClick = { selectedMode = Danmaku.MODE_BOTTOM },
                 )
@@ -99,7 +100,7 @@ fun DanmakuInputOverlay(
                 IconButton(onClick = onDismiss) {
                     Icon(
                         painter = painterResource(R.drawable.ic_close),
-                        contentDescription = "关闭",
+                        contentDescription = stringResource(PlayerR.string.danmaku_close),
                         tint = Color.White,
                     )
                 }
@@ -117,7 +118,7 @@ fun DanmakuInputOverlay(
                     onValueChange = { text = it },
                     modifier = Modifier.weight(1f),
                     placeholder = {
-                        Text("输入弹幕文字", color = Color.White.copy(alpha = 0.5f))
+                        Text(stringResource(PlayerR.string.danmaku_input_hint), color = Color.White.copy(alpha = 0.5f))
                     },
                     textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
                     singleLine = true,
@@ -154,7 +155,7 @@ fun DanmakuInputOverlay(
                         containerColor = Color(0xFF00A0FF),
                     ),
                 ) {
-                    Text("发送", color = Color.White)
+                    Text(stringResource(PlayerR.string.danmaku_send), color = Color.White)
                 }
             }
         }

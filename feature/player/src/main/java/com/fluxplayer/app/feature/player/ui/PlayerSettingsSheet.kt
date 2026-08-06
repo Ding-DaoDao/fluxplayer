@@ -49,6 +49,7 @@ import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.feature.player.R as PlayerR
 import com.fluxplayer.app.feature.player.extensions.getName
 import com.fluxplayer.app.feature.player.state.SubtitleOptionsEvent
 import com.fluxplayer.app.feature.player.state.rememberSubtitleOptionsState
@@ -300,7 +301,7 @@ private fun BoxScope.SubtitleFileBrowser(
 ) {
     OverlayView(
         show = show,
-        title = "选择字幕文件",
+        title = stringResource(PlayerR.string.subtitle_browser_title),
     ) {
         Column(
             modifier = Modifier
@@ -315,7 +316,11 @@ private fun BoxScope.SubtitleFileBrowser(
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_arrow_left),
-                    contentDescription = if (isAtRoot) "返回设置" else "上级目录",
+                    contentDescription = if (isAtRoot) {
+                        stringResource(PlayerR.string.subtitle_back_to_settings)
+                    } else {
+                        stringResource(PlayerR.string.subtitle_up_dir)
+                    },
                     tint = TextSecondaryColor,
                     modifier = Modifier
                         .size(32.dp)
@@ -347,13 +352,13 @@ private fun BoxScope.SubtitleFileBrowser(
             when {
                 !hasPermission -> {
                     Text(
-                        "需要存储权限才能浏览文件",
+                        stringResource(PlayerR.string.subtitle_permission_required),
                         color = TextSecondaryColor,
                         fontSize = 13.sp,
                         modifier = Modifier.padding(vertical = 16.dp),
                     )
                     DarkChip(
-                        label = "授予权限",
+                        label = stringResource(PlayerR.string.subtitle_grant_permission),
                         selected = true,
                         onClick = onRequestPermission,
                     )
@@ -372,7 +377,7 @@ private fun BoxScope.SubtitleFileBrowser(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "未找到字幕文件",
+                            stringResource(PlayerR.string.subtitle_not_found),
                             color = TextSecondaryColor.copy(alpha = 0.6f),
                             fontSize = 13.sp,
                         )

@@ -17,8 +17,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
+import com.fluxplayer.app.feature.player.R
 import com.fluxplayer.app.feature.player.extensions.noRippleClickable
 import java.io.File
 
@@ -34,10 +36,14 @@ fun BoxScope.VideoInfoView(
     var fileSizeText by remember { mutableStateOf<String?>(null) }
     var playUrl by remember { mutableStateOf<String?>(null) }
 
+    // 在 Composable 上下文取值，供 LaunchedEffect 与渲染使用
+    val unknownText = stringResource(R.string.video_info_unknown)
+    val loadingText = stringResource(R.string.video_info_loading)
+
     LaunchedEffect(show) {
         val uri = player.currentMediaItem?.localConfiguration?.uri
-        playUrl = uri?.toString() ?: "未知"
-        fileSizeText = uri?.let { computeFileSize(it) } ?: "未知"
+        playUrl = uri?.toString() ?: unknownText
+        fileSizeText = uri?.let { computeFileSize(it) } ?: unknownText
     }
 
     Box(
@@ -46,16 +52,16 @@ fun BoxScope.VideoInfoView(
             .noRippleClickable(onClick = onDismiss),
     )
 
-    OverlayView(show = show, title = "视频信息") {
+    OverlayView(show = show, title = stringResource(R.string.video_info_title)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            InfoRow("播放链接", playUrl ?: "加载中...")
-            InfoRow("文件大小", fileSizeText ?: "加载中...")
-            InfoRow("清晰度", qualityLabel ?: "未知")
+            InfoRow(stringResource(R.string.video_info_play_url), playUrl ?: loadingText)
+            InfoRow(stringResource(R.string.video_info_file_size), fileSizeText ?: loadingText)
+            InfoRow(stringResource(R.string.quality_title), qualityLabel ?: unknownText)
         }
     }
 }
@@ -79,14 +85,15 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
-private suspend fun computeFileSize(uri: Uri): String {
+/** @return 格式化后的文件大小字符串；未知/无法访问时返回 null */
+private suspend fun computeFileSize(uri: Uri): String? {
     return try {
-        val path = uri.path ?: return "未知"
+        val path = uri.path ?: return null
         val file = File(path)
-        if (!file.exists()) return "未知"
+        if (!file.exists()) return null
         formatFileSize(file.length())
     } catch (e: Exception) {
-        "未知"
+        null
     }
 }
 

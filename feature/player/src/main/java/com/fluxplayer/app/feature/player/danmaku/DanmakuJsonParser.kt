@@ -23,6 +23,12 @@ private const val TAG = "DanmakuJsonParser"
  */
 object DanmakuJsonParser {
 
+    private const val SECONDS_MS_THRESHOLD = 500.0
+    private const val DEFAULT_COLOR = 0xFFFFFF
+    private const val DEFAULT_FONT_SIZE = 25f
+    private const val FONT_SIZE_MAX = 100f
+    private const val ALPHA_MASK = 0xFF shl 24
+
     private class FieldNames(
         val time: String,
         val text: String,
@@ -187,14 +193,14 @@ object DanmakuJsonParser {
             val rawTime = obj.optDouble(fields.time, -1.0)
             if (rawTime < 0) return null
             // 自动检测单位：> 500 的视为毫秒，否则视为秒
-            val timeMs = if (rawTime > 500.0) rawTime.toLong() else (rawTime * 1000).toLong()
+            val timeMs = if (rawTime > SECONDS_MS_THRESHOLD) rawTime.toLong() else (rawTime * 1000).toLong()
 
             val text = obj.optString(fields.text, "").trim()
             if (text.isEmpty()) return null
 
             val mode = obj.optInt(fields.mode, 1)
-            val colorRgb = obj.optInt(fields.color, 0xFFFFFF)
-            val fontSize = obj.optDouble(fields.size, 25.0).toFloat()
+            val colorRgb = obj.optInt(fields.color, DEFAULT_COLOR)
+            val fontSize = obj.optDouble(fields.size, DEFAULT_FONT_SIZE.toDouble()).toFloat()
 
             Danmaku(
                 timeMs = timeMs,
@@ -205,7 +211,7 @@ object DanmakuJsonParser {
                     else -> Danmaku.MODE_SCROLL
                 },
                 fontSize = fontSize,
-                color = colorRgb or (0xFF shl 24),
+                color = colorRgb or ALPHA_MASK,
                 index = 0,
             )
         } catch (_: Exception) {
@@ -239,26 +245,30 @@ object DanmakuJsonParser {
             val (fontSize, rgb) = if (parts.size >= 4) {
                 val v2 = parts[2].toFloatOrNull()
                 val v3 = parts[3].toFloatOrNull()
-                if (v2 != null && v2 <= 100 && v3 != null) {
+                if (v2 != null && v2 <= FONT_SIZE_MAX && v3 != null) {
                     // 标准 B站：parts[2]=fontSize, parts[3]=color
                     v2 to v3.toInt()
-                } else if (v2 != null && v2 > 100 && v3 == null) {
+                } else if (v2 != null && v2 > FONT_SIZE_MAX && v3 == null) {
                     // iQiyi 变体：parts[2]=color，无 fontSize
-                    25f to v2.toInt()
-                } else if (v2 != null && v2 > 100) {
+                    DEFAULT_FONT_SIZE to v2.toInt()
+                } else if (v2 != null && v2 > FONT_SIZE_MAX) {
                     // iQiyi 变体：parts[2]=color, parts[3] 非数字或未知
-                    25f to v2.toInt()
+                    DEFAULT_FONT_SIZE to v2.toInt()
                 } else {
                     // fallback
-                    25f to 0xFFFFFF
+                    DEFAULT_FONT_SIZE to DEFAULT_COLOR
                 }
             } else {
                 // 只有 3 段：time,mode,color
                 val v2 = parts[2].toFloatOrNull()
-                if (v2 != null && v2 > 100) 25f to v2.toInt() else 25f to 0xFFFFFF
+                if (v2 != null && v2 > FONT_SIZE_MAX) {
+                    DEFAULT_FONT_SIZE to v2.toInt()
+                } else {
+                    DEFAULT_FONT_SIZE to DEFAULT_COLOR
+                }
             }
 
-            val color = rgb or (0xFF shl 24)
+            val color = rgb or ALPHA_MASK
             Log.d(TAG, "parseBilibiliJsonItem: OK time=${timeMs}ms mode=$mode fontSize=$fontSize color=#${rgb.toString(16)}")
             Danmaku(
                 timeMs = timeMs,
