@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -33,7 +34,12 @@ class QiyiDanmakuFetcher(
         return url.contains("iqiyi.com") || url.contains("qiyi.com")
     }
 
-    override suspend fun search(keyword: String): List<AnimeMatch> {
+    override suspend fun search(keyword: String): List<AnimeMatch> = withContext(Dispatchers.IO) {
+        searchImpl(keyword)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun searchImpl(keyword: String): List<AnimeMatch> {
         Log.d(TAG, "========== search START: keyword=$keyword ==========")
         return try {
             val encoded = URLEncoder.encode(keyword, "UTF-8")
@@ -119,7 +125,12 @@ class QiyiDanmakuFetcher(
         }
     }
 
-    override suspend fun getEpisodes(anime: AnimeMatch): List<EpisodeInfo> {
+    override suspend fun getEpisodes(anime: AnimeMatch): List<EpisodeInfo> = withContext(Dispatchers.IO) {
+        getEpisodesImpl(anime)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun getEpisodesImpl(anime: AnimeMatch): List<EpisodeInfo> {
         val url = anime.url ?: run { Log.w(TAG, "getEpisodes: anime.url is null"); return emptyList() }
         val mobileUrl = url.replace("www.", "m.")
         Log.d(TAG, "========== getEpisodes START: url=$url mobileUrl=$mobileUrl ==========")
@@ -378,7 +389,12 @@ class QiyiDanmakuFetcher(
         // unreachable — all branches return above
     }
 
-    override suspend fun fetchDanmaku(url: String): InputStream? {
+    override suspend fun fetchDanmaku(url: String): InputStream? = withContext(Dispatchers.IO) {
+        fetchDanmakuImpl(url)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun fetchDanmakuImpl(url: String): InputStream? {
         Log.d(TAG, "fetchDanmaku called for $url")
         try {
             // Fetch the page HTML

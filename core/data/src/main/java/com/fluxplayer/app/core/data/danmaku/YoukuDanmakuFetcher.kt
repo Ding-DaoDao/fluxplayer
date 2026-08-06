@@ -4,6 +4,8 @@ import android.util.Base64
 import android.util.Log
 import com.fluxplayer.app.core.model.AnimeMatch
 import com.fluxplayer.app.core.model.EpisodeInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -31,7 +33,12 @@ class YoukuDanmakuFetcher(
         return url.contains("youku.com")
     }
 
-    override suspend fun search(keyword: String): List<AnimeMatch> {
+    override suspend fun search(keyword: String): List<AnimeMatch> = withContext(Dispatchers.IO) {
+        searchImpl(keyword)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun searchImpl(keyword: String): List<AnimeMatch> {
         Log.d(TAG, "search: $keyword")
         val results = tryJsonSearch(keyword)
         if (results.isNotEmpty()) {
@@ -255,7 +262,12 @@ class YoukuDanmakuFetcher(
         return results
     }
 
-    override suspend fun getEpisodes(anime: AnimeMatch): List<EpisodeInfo> {
+    override suspend fun getEpisodes(anime: AnimeMatch): List<EpisodeInfo> = withContext(Dispatchers.IO) {
+        getEpisodesImpl(anime)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun getEpisodesImpl(anime: AnimeMatch): List<EpisodeInfo> {
         val url = anime.url ?: run { Log.w(TAG, "getEpisodes: anime.url is null"); return emptyList() }
         val idMatch = Regex("""id_([^\.?\?]+)""").find(url)
         val currentId = idMatch?.groupValues?.get(1) ?: run {
@@ -393,7 +405,12 @@ class YoukuDanmakuFetcher(
         }
     }
 
-    override suspend fun fetchDanmaku(url: String): InputStream? {
+    override suspend fun fetchDanmaku(url: String): InputStream? = withContext(Dispatchers.IO) {
+        fetchDanmakuImpl(url)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun fetchDanmakuImpl(url: String): InputStream? {
         Log.d(TAG, "fetchDanmaku called for $url")
         return try {
             val pathSegments = url.split("/")

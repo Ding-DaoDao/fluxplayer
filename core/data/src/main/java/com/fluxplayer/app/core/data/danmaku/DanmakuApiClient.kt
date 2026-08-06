@@ -5,6 +5,8 @@ import android.util.Log
 import com.fluxplayer.app.core.model.AnimeMatch
 import com.fluxplayer.app.core.model.DanmakuSource
 import com.fluxplayer.app.core.model.EpisodeInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -46,7 +48,12 @@ class DanmakuApiClient(
      * @param keyword 关键词
      * @return 匹配的动漫列表，失败返回空列表
      */
-    suspend fun searchAnime(source: DanmakuSource, keyword: String): List<AnimeMatch> {
+    suspend fun searchAnime(source: DanmakuSource, keyword: String): List<AnimeMatch> = withContext(Dispatchers.IO) {
+        searchAnimeImpl(source, keyword)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun searchAnimeImpl(source: DanmakuSource, keyword: String): List<AnimeMatch> {
         return try {
             val apiPath = "/api/v2/search/anime"
             val url = buildUrl(source, apiPath, mapOf("keyword" to keyword))
@@ -73,7 +80,12 @@ class DanmakuApiClient(
      * @param animeId 动漫 ID
      * @return 剧集列表，失败返回空列表
      */
-    suspend fun getEpisodes(source: DanmakuSource, animeId: Int): List<EpisodeInfo> {
+    suspend fun getEpisodes(source: DanmakuSource, animeId: Int): List<EpisodeInfo> = withContext(Dispatchers.IO) {
+        getEpisodesImpl(source, animeId)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun getEpisodesImpl(source: DanmakuSource, animeId: Int): List<EpisodeInfo> {
         return try {
             val apiPath = "/api/v2/bangumi/$animeId"
             val url = buildUrl(source, apiPath)
@@ -100,7 +112,12 @@ class DanmakuApiClient(
      * @param episodeId 剧集 ID
      * @return 弹幕 XML 输入流，失败返回 null
      */
-    suspend fun downloadDanmaku(source: DanmakuSource, episodeId: Int): InputStream? {
+    suspend fun downloadDanmaku(source: DanmakuSource, episodeId: Int): InputStream? = withContext(Dispatchers.IO) {
+        downloadDanmakuImpl(source, episodeId)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun downloadDanmakuImpl(source: DanmakuSource, episodeId: Int): InputStream? {
         return try {
             val apiPath = "/api/v2/comment/$episodeId"
             val url = buildUrl(source, apiPath, mapOf("withRelated" to "true"))

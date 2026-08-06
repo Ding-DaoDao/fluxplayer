@@ -3,6 +3,8 @@ package com.fluxplayer.app.core.data.danmaku
 import android.util.Log
 import com.fluxplayer.app.core.model.AnimeMatch
 import com.fluxplayer.app.core.model.EpisodeInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.ByteArrayInputStream
@@ -26,7 +28,12 @@ class MgtvDanmakuFetcher(
         return url.contains("mgtv.com")
     }
 
-    override suspend fun fetchDanmaku(url: String): InputStream? {
+    override suspend fun fetchDanmaku(url: String): InputStream? = withContext(Dispatchers.IO) {
+        fetchDanmakuImpl(url)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun fetchDanmakuImpl(url: String): InputStream? {
         Log.d(TAG, "fetchDanmaku called for $url")
         return try {
             val segments = url.split("/")
@@ -52,7 +59,9 @@ class MgtvDanmakuFetcher(
                 if (body != null) {
                     val jsonMatch = Regex("""\{[\S\s]+\}""").find(body)
                     if (jsonMatch != null) {
-                        JSONObject(jsonMatch.value).optJSONObject("data")?.optString("cdn_version", null)
+                        JSONObject(jsonMatch.value).optJSONObject("data")
+                            ?.optString("cdn_version")
+                            ?.takeIf { it.isNotEmpty() }
                     } else null
                 } else null
             } catch (e: Exception) {
@@ -235,7 +244,12 @@ class MgtvDanmakuFetcher(
         return sb.toString()
     }
 
-    override suspend fun search(keyword: String): List<AnimeMatch> {
+    override suspend fun search(keyword: String): List<AnimeMatch> = withContext(Dispatchers.IO) {
+        searchImpl(keyword)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun searchImpl(keyword: String): List<AnimeMatch> {
         Log.d(TAG, "========== search START: keyword=$keyword ==========")
         return try {
             val encoded = URLEncoder.encode(keyword, "UTF-8")
@@ -324,7 +338,12 @@ class MgtvDanmakuFetcher(
         }
     }
 
-    override suspend fun getEpisodes(anime: AnimeMatch): List<EpisodeInfo> {
+    override suspend fun getEpisodes(anime: AnimeMatch): List<EpisodeInfo> = withContext(Dispatchers.IO) {
+        getEpisodesImpl(anime)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun getEpisodesImpl(anime: AnimeMatch): List<EpisodeInfo> {
         val url = anime.url ?: run { Log.w(TAG, "getEpisodes: anime.url is null"); return emptyList() }
         val vid = extractMgtvVid(url) ?: run {
             Log.w(TAG, "getEpisodes: cannot extract vid from url=$url")

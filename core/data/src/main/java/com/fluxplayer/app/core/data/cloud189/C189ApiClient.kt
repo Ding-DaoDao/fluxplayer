@@ -62,6 +62,39 @@ class C189ApiClient(
         return sdf.format(Date())
     }
 
+    // ==================== 会话刷新辅助 ====================
+
+    /**
+     * session 签名类请求（signedGet/signedPost）的过期处理：
+     * 用 accessToken 重新登录获取 session，并同步本地字段保持一致。
+     * @return 是否刷新成功（可重试）
+     */
+    private suspend fun refreshSessionAndSync(): Boolean {
+        return try {
+            login4MergedClient(accessToken)
+            // login4MergedClient 已同步 C189AuthProvider；同步本地字段保持一致
+            sessionKey = C189AuthProvider.sessionKey
+            sessionSecret = C189AuthProvider.sessionSecret
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "refreshSessionAndSync failed", e)
+            false
+        }
+    }
+
+    /**
+     * open API 类请求（openApiPost/openApiGet）的过期处理：
+     * 刷新 accessToken 并同步本地全部字段（含 sessionSecret，缺失会导致后续签名失败）。
+     * @return 是否刷新成功（可重试）
+     */
+    private suspend fun refreshAccessTokenAndSync(): Boolean {
+        if (!refreshAccessToken()) return false
+        accessToken = C189AuthProvider.accessToken
+        sessionKey = C189AuthProvider.sessionKey
+        sessionSecret = C189AuthProvider.sessionSecret
+        return true
+    }
+
     // ==================== API 请求 ====================
 
     /** GET — session HMAC-SHA1 签名 (api.cloud.189.cn) */
@@ -98,14 +131,8 @@ class C189ApiClient(
         if (!resp.isSuccessful) {
             // sessionKey 过期 → 尝试用 accessToken 重新获取 session 后重试
             if (retry && (body.contains("InvalidSessionKey") || body.contains("SessionKeyInvalid"))
-                && accessToken.isNotBlank()) {
-                try {
-                    login4MergedClient(accessToken)
-                    // login4MergedClient 已同步 C189AuthProvider 并通知持久化
-                    return signedGet(path, queryParams, false)
-                } catch (e: Exception) {
-                    Log.w(TAG, "signedGet retry failed", e)
-                }
+                && accessToken.isNotBlank() && refreshSessionAndSync()) {
+                return signedGet(path, queryParams, false)
             }
             throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
         }
@@ -145,14 +172,8 @@ class C189ApiClient(
         val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
         if (!resp.isSuccessful) {
             if (retry && (body.contains("InvalidSessionKey") || body.contains("SessionKeyInvalid"))
-                && accessToken.isNotBlank()) {
-                try {
-                    login4MergedClient(accessToken)
-                    // login4MergedClient 已同步 C189AuthProvider 并通知持久化
-                    return signedPost(path, formParams, false)
-                } catch (e: Exception) {
-                    Log.w(TAG, "signedPost retry failed", e)
-                }
+                && accessToken.isNotBlank() && refreshSessionAndSync()) {
+                return signedPost(path, formParams, false)
             }
             throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
         }
@@ -194,13 +215,8 @@ class C189ApiClient(
 
         if (!resp.isSuccessful) {
             val canRetry = respBody.contains("InvalidAccessToken") || respBody.contains("InvalidSessionKey")
-            if (retry && canRetry) {
-                if (refreshAccessToken()) {
-                    accessToken = C189AuthProvider.accessToken
-                    sessionKey = C189AuthProvider.sessionKey
-                    sessionSecret = C189AuthProvider.sessionSecret
-                    return openApiPost(actionPath, formParams, false)
-                }
+            if (retry && canRetry && refreshAccessTokenAndSync()) {
+                return openApiPost(actionPath, formParams, false)
             }
             throw IllegalStateException("HTTP ${resp.code}: ${respBody.take(200)}")
         }
@@ -235,18 +251,14 @@ class C189ApiClient(
             .header("Accesstoken", at)
             .build()
 
-            val resp = executeRequestAndGetResponse(request)
+        val resp = executeRequestAndGetResponse(request)
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response")
 
-            if (!resp.isSuccessful) {
-            // token/session 过期 → 尝试刷新
+        if (!resp.isSuccessful) {
+            // token/session 过期 → 尝试刷新（需同步全部字段，含 sessionSecret）
             val canRetry = respBody.contains("InvalidAccessToken") || respBody.contains("InvalidSessionKey")
-            if (retry && canRetry) {
-                if (refreshAccessToken()) {
-                    accessToken = C189AuthProvider.accessToken
-                    sessionKey = C189AuthProvider.sessionKey
-                    return openApiGet(actionPath, queryParams, false)
-                }
+            if (retry && canRetry && refreshAccessTokenAndSync()) {
+                return openApiGet(actionPath, queryParams, false)
             }
             throw IllegalStateException("HTTP ${resp.code}: ${respBody.take(200)}")
         }

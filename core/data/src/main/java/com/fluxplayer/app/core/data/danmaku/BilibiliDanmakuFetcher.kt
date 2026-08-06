@@ -3,6 +3,8 @@ package com.fluxplayer.app.core.data.danmaku
 import android.util.Log
 import com.fluxplayer.app.core.model.AnimeMatch
 import com.fluxplayer.app.core.model.EpisodeInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.ByteArrayInputStream
@@ -29,7 +31,12 @@ class BilibiliDanmakuFetcher(
         return url.contains("bilibili.com") || url.contains("b23.tv")
     }
 
-    override suspend fun fetchDanmaku(url: String): InputStream? {
+    override suspend fun fetchDanmaku(url: String): InputStream? = withContext(Dispatchers.IO) {
+        fetchDanmakuImpl(url)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun fetchDanmakuImpl(url: String): InputStream? {
         return try {
             val cid = resolveCid(url) ?: run {
                 Log.w(TAG, "Failed to resolve cid for $url")
@@ -494,7 +501,12 @@ class BilibiliDanmakuFetcher(
         }
     }
 
-    override suspend fun search(keyword: String): List<AnimeMatch> {
+    override suspend fun search(keyword: String): List<AnimeMatch> = withContext(Dispatchers.IO) {
+        searchImpl(keyword)
+    }
+
+    /** 原实现：内部为阻塞网络调用，必须在 IO 线程执行 */
+    private suspend fun searchImpl(keyword: String): List<AnimeMatch> {
         Log.d(TAG, "========== search START: keyword=$keyword ==========")
         return try {
             val encodedKeyword = URLEncoder.encode(keyword, "UTF-8")
