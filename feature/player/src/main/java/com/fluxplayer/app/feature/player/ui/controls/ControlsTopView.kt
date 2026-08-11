@@ -23,11 +23,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.extensions.copy
+import com.fluxplayer.app.feature.player.R as PlayerR
 import com.fluxplayer.app.feature.player.buttons.PlayerButton
 
 @OptIn(UnstableApi::class)
@@ -56,7 +58,7 @@ fun ControlsTopView(
         PlayerButton(onClick = onBackClick) {
             Icon(
                 painter = painterResource(R.drawable.ic_arrow_left),
-                contentDescription = null,
+                contentDescription = stringResource(PlayerR.string.back),
             )
         }
         Column(
@@ -88,7 +90,7 @@ fun ControlsTopView(
             PlayerButton(onClick = onDanmakuSearchClick) {
                 Icon(
                     painter = painterResource(R.drawable.comment_note_24_filled),
-                    contentDescription = null,
+                    contentDescription = stringResource(PlayerR.string.danmaku_search),
                 )
             }
             // 弹幕开关按钮（始终可见，图标同 mpv 的弹幕开关按钮）
@@ -105,20 +107,20 @@ fun ControlsTopView(
                         if (danmakuEnabled && danmakuHasData) R.drawable.ic_danmaku_visible
                         else R.drawable.ic_danmaku_hidden
                     ),
-                    contentDescription = null,
+                    contentDescription = stringResource(PlayerR.string.danmaku_toggle),
                 )
             }
             PlayerButton(onClick = onDanmakuSettingsClick) {
                 Icon(
                     painter = painterResource(R.drawable.ic_danmaku_settings),
-                    contentDescription = null,
+                    contentDescription = stringResource(PlayerR.string.danmaku_settings),
                 )
             }
             // 设置按钮（音轨/字幕）
             PlayerButton(onClick = onSettingsClick) {
                 Icon(
                     painter = painterResource(R.drawable.ic_settings),
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.settings),
                 )
             }
         }

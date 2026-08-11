@@ -86,25 +86,23 @@ class LocalPlaybackHistoryRepository @Inject constructor(
         thumbnailPath: String?,
         parentPath: String?,
     ) {
-        // 新的缩略图优先使用；如果本次未截取，保留数据库中已有的缩略图
-        val finalThumbnailPath = thumbnailPath
-            ?: playbackHistoryDao.getByUri(uriString)?.thumbnailPath
-
-        playbackHistoryDao.upsert(
-            PlaybackHistoryEntity(
-                uriString = uriString,
-                title = title,
-                source = source.name,
-                lastPlayedTime = System.currentTimeMillis(),
-                playbackPosition = position,
-                duration = duration,
-                originalUriString = originalUriString,
-                thumbnailPath = finalThumbnailPath,
-                parentPath = parentPath,
-            ),
+        // 原子写入：thumbnailPath 为 null 时由 SQL 层保留现有值，
+        // 避免退出时多次 recordHistory 并发读-改-写把缩略图覆盖成 null
+        playbackHistoryDao.upsertPreservingThumbnail(
+            uriString = uriString,
+            title = title,
+            source = source.name,
+            lastPlayedTime = System.currentTimeMillis(),
+            playbackPosition = position,
+            duration = duration,
+            originalUriString = originalUriString,
+            thumbnailPath = thumbnailPath,
+            parentPath = parentPath,
         )
         // 只有完全没有缩略图时才异步提取
-        if (finalThumbnailPath == null) {
+        if (thumbnailPath == null &&
+            playbackHistoryDao.getByUri(uriString)?.thumbnailPath == null
+        ) {
             thumbnailScope.launch {
                 val path = thumbnailExtractor.extract(
                     uriString = uriString,

@@ -3,6 +3,7 @@ package com.fluxplayer.app.core.data.extractor
 import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
+import android.util.Log
 import android.net.Uri
 import android.util.Base64
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -116,6 +117,7 @@ class ThumbnailExtractor @Inject constructor(
             }?.forEach { it.delete() }
             outputFile.absolutePath
         } else {
+            Log.w("ThumbnailExtractor", "saveDirect: bitmap write FAILED (uri=$uriString)")
             null
         }
     }

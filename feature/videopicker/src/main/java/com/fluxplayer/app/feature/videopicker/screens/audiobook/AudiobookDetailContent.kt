@@ -82,6 +82,7 @@ import coil3.request.ImageRequest
 import coil3.toBitmap
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.R as coreUiR
+import com.fluxplayer.app.core.ui.components.ChapterDragScrollbar
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
 import com.fluxplayer.app.feature.videopicker.model.AudioChapter
@@ -151,6 +152,13 @@ fun AudiobookDetailContent(
 
     // ── 滚动状态 ──
     val listState = rememberLazyListState()
+    // 已播放章节（显示顺序索引），用于滚动条轨道打点
+    val playedChapterIndexes = remember(book, chapters, chapterProgress) {
+        chapters.mapIndexedNotNull { index, ch ->
+            val progress = chapterProgress[book.chapters.indexOf(ch)]
+            if (progress != null && progress.second > 0 && progress.first > 0) index else null
+        }.toSet()
+    }
     /** 滚动收起进度 0=完全展开 / 1=完全收起 */
     val collapseFraction by remember {
         derivedStateOf {
@@ -569,6 +577,19 @@ fun AudiobookDetailContent(
                 }
             }
         }
+
+        // ── 右侧可拖拽滚动条：拖动 thumb 快速定位章节 ──
+        // LazyColumn 含 header + catalog 两个固定 item，章节从索引 2 开始
+        val listItemOffset = 2
+        ChapterDragScrollbar(
+            listState = listState,
+            totalCount = chapters.size + listItemOffset,
+            itemOffset = listItemOffset,
+            playedChapters = playedChapterIndexes,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 6.dp),
+        )
 
         // ── 悬浮顶栏 — 纯透明悬浮：无背景色块、无分隔线，内容自然从下方滚过 ──
         Row(

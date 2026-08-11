@@ -33,7 +33,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
@@ -121,7 +120,7 @@ fun BoxScope.DanmakuSettingsSheet(
                         setting.options.forEach { option ->
                             val label = setting.valueToString(option)
                             val isSelected = option.first == setting.currentValue(config)
-                            val textColor = if (isSelected) Color(0xFF4CAF50) else Color.White
+                            val textColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
 
                             Text(
                                 text = label,
@@ -187,7 +186,7 @@ private fun DisplayModeSliderRow(
             FluxText(
                 text = label,
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFF4CAF50),
+                color = MaterialTheme.colorScheme.primary,
             )
         }
         Slider(
@@ -197,9 +196,9 @@ private fun DisplayModeSliderRow(
             valueRange = 0f..9f,
             steps = 8,
             colors = SliderDefaults.colors(
-                thumbColor = Color(0xFF4CAF50),
-                activeTrackColor = Color(0xFF4CAF50),
-                inactiveTrackColor = Color.White.copy(alpha = 0.3f),
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
             ),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -229,7 +228,7 @@ private fun SpeedSliderRow(
             FluxText(
                 text = "×${"%.2f".format(sliderValue).trimEnd('0').trimEnd('.')}",
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFF4CAF50),
+                color = MaterialTheme.colorScheme.primary,
             )
         }
         Slider(
@@ -239,9 +238,9 @@ private fun SpeedSliderRow(
             valueRange = 0.5f..4.0f,
             steps = 13, // 0.25 递增：0.5, 0.75, 1.0, ..., 4.0
             colors = SliderDefaults.colors(
-                thumbColor = Color(0xFF4CAF50),
-                activeTrackColor = Color(0xFF4CAF50),
-                inactiveTrackColor = Color.White.copy(alpha = 0.3f),
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
             ),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -295,7 +294,7 @@ private fun BlockKeywordSection(
                 FluxIcon(
                     imageVector = Icons.Filled.Add,
                     contentDescription = stringResource(R.string.danmaku_add_keyword),
-                    tint = Color(0xFF4CAF50),
+                    tint = MaterialTheme.colorScheme.primary,
                 )
             }
         }
@@ -316,13 +315,13 @@ private fun BlockKeywordSection(
                         FluxText(
                             text = keyword,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         FluxIcon(
                             imageVector = Icons.Filled.Close,
                             contentDescription = stringResource(R.string.danmaku_remove_keyword, keyword),
-                            tint = Color.White.copy(alpha = 0.6f),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                             modifier = Modifier.height(16.dp),
                         )
                     }

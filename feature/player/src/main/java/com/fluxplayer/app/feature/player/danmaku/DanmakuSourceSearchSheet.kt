@@ -73,15 +73,23 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.regex.Pattern
 
-// ── 深色主题色 ──
-private val SurfaceColor = Color(0xFF1E1E2E)
-private val SurfaceVariantColor = Color(0xFF2A2A3E)
-private val TextPrimaryColor = Color(0xFFE0E0E0)
-private val TextSecondaryColor = Color(0xFF9CA3AF)
-private val AccentColor = Color(0xFF60A5FA)
-private val AccentDimColor = Color(0xFF1E3A5F)
-private val DividerColor = Color(0xFF374151)
-private val ErrorColor = Color(0xFFF87171)
+// ── 主题色（跟随当前 ColorScheme，弹幕弹窗显示在强制深色的视频页上） ──
+private val SurfaceColor: Color
+    @Composable get() = MaterialTheme.colorScheme.surfaceContainerHigh
+private val SurfaceVariantColor: Color
+    @Composable get() = MaterialTheme.colorScheme.surfaceContainerHighest
+private val TextPrimaryColor: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurface
+private val TextSecondaryColor: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+private val AccentColor: Color
+    @Composable get() = MaterialTheme.colorScheme.primary
+private val AccentDimColor: Color
+    @Composable get() = MaterialTheme.colorScheme.primaryContainer
+private val DividerColor: Color
+    @Composable get() = MaterialTheme.colorScheme.outlineVariant
+private val ErrorColor: Color
+    @Composable get() = MaterialTheme.colorScheme.error
 
 /** 弹幕搜索弹窗的视图模式（跨 show/hide 持久化） */
 enum class DanmakuSearchViewMode { SEARCH, LOCAL_FILE }
@@ -692,7 +700,7 @@ private fun ErrorStep(message: String, onRetry: () -> Unit) {
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = ButtonDefaults.TextButtonContentPadding,
             ) {
-                Text("重试", color = Color.White, fontSize = 12.sp)
+                Text("重试", color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp)
             }
         }
     }

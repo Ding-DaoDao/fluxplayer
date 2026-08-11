@@ -1,9 +1,16 @@
 package com.fluxplayer.app.core.database.entities
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "download_tasks")
+@Entity(
+    tableName = "download_tasks",
+    indices = [
+        // 下载任务列表按 status 过滤，补索引避免全表扫描
+        Index(value = ["status"]),
+    ],
+)
 data class DownloadTaskEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0L,

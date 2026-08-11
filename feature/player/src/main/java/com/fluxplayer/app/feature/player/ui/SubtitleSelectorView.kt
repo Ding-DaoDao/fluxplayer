@@ -238,7 +238,7 @@ internal fun NumberChooserInput(
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_remove),
-                contentDescription = null,
+                contentDescription = stringResource(R.string.delay_decrease),
             )
         }
         OutlinedTextField(
@@ -258,7 +258,7 @@ internal fun NumberChooserInput(
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_add),
-                contentDescription = null,
+                contentDescription = stringResource(R.string.delay_increase),
             )
         }
     }

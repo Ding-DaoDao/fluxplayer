@@ -80,7 +80,7 @@ fun BoxScope.PlaybackSpeedSelectorView(
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_remove),
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.speed_decrease),
                     )
                 }
 
@@ -99,7 +99,7 @@ fun BoxScope.PlaybackSpeedSelectorView(
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_add),
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.speed_increase),
                     )
                 }
             }
@@ -119,7 +119,7 @@ fun BoxScope.PlaybackSpeedSelectorView(
                 FluxIconButton(onClick = { playbackParametersState.setPlaybackSpeed(1f) }) {
                     Icon(
                         painter = painterResource(R.drawable.ic_reset),
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.speed_reset),
                     )
                 }
             }

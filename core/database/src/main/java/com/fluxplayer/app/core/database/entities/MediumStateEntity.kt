@@ -9,6 +9,8 @@ import androidx.room.PrimaryKey
     tableName = "media_state",
     indices = [
         Index(value = ["uri"], unique = true),
+        // deleteStale 按 last_played_time 过滤，补索引避免全表扫描
+        Index(value = ["last_played_time"]),
     ],
 )
 data class MediumStateEntity(

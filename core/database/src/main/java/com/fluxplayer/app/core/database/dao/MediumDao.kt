@@ -23,6 +23,10 @@ interface MediumDao {
     @Query("SELECT * FROM media WHERE uri = :uri")
     suspend fun get(uri: String): MediumEntity?
 
+    /** 批量查询，避免同步时逐条 SELECT 的 N+1 问题 */
+    @Query("SELECT * FROM media WHERE uri IN (:uris)")
+    suspend fun getByUris(uris: List<String>): List<MediumEntity>
+
     @Query("SELECT * FROM media WHERE uri = :uri")
     fun getAsFlow(uri: String): Flow<MediumEntity?>
 

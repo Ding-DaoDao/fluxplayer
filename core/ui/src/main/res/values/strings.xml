@@ -340,6 +340,13 @@
     <string name="backup_description">Settings, WebDAV servers and OpenList configuration will be backed up. Playback history is not included.</string>
     <string name="reset">Reset</string>
     <string name="delay">Delay</string>
+    <string name="speed_decrease">Decrease speed</string>
+    <string name="speed_increase">Increase speed</string>
+    <string name="speed_reset">Reset speed</string>
+    <string name="delay_decrease">Decrease delay</string>
+    <string name="delay_increase">Increase delay</string>
+    <string name="open_menu">Open menu</string>
+    <string name="close_menu">Close menu</string>
     <string name="speed">Speed</string>
     <string name="search">Search</string>
     <string name="search_videos_and_folders">Search videos and folders</string>

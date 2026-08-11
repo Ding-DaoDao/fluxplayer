@@ -2,10 +2,15 @@ package com.fluxplayer.app.core.database.entities
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "playback_history",
+    indices = [
+        // 历史列表按 last_played_time 排序，补索引避免全表扫描
+        Index(value = ["last_played_time"]),
+    ],
 )
 data class PlaybackHistoryEntity(
     @PrimaryKey

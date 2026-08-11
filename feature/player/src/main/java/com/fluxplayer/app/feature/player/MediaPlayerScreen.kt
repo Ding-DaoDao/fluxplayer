@@ -638,7 +638,7 @@ fun MediaPlayerScreen(
                                     ) {
                                         Icon(
                                             painter = painterResource(coreUiR.drawable.ic_screen_rotation),
-                                            contentDescription = null,
+                                            contentDescription = stringResource(coreUiR.string.screen_rotation),
                                             modifier = Modifier.size(24.dp),
                                         )
                                     }

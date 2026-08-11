@@ -2,6 +2,7 @@ package com.fluxplayer.app.core.data.pan123
 
 import android.util.Base64
 import android.util.Log
+import com.fluxplayer.app.core.common.sanitizeUrl
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import kotlinx.coroutines.Dispatchers
@@ -371,10 +372,10 @@ class Pan123ApiClient(
         Log.d(TAG, "getFileDownloadUrl: response code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
         
         val url = json.optJSONObject("data")?.optString("DownloadUrl", "") ?: ""
-        Log.d(TAG, "getFileDownloadUrl: downloadUrl=${url.take(200)}...")
+        Log.d(TAG, "getFileDownloadUrl: downloadUrl=${sanitizeUrl(url)}")
         
         if (url.isBlank()) {
-            Log.e(TAG, "getFileDownloadUrl: URL is BLANK! json=$json")
+            Log.e(TAG, "getFileDownloadUrl: URL is BLANK! code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
             throw IllegalStateException("未获取到下载链接")
         }
         
@@ -407,12 +408,11 @@ class Pan123ApiClient(
 
         Log.d(TAG, "getVideoPlayInfo: Calling apiPost...")
         val json = apiPost(fullUrl)
-        Log.d(TAG, "getVideoPlayInfo: apiPost response code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
-        Log.d(TAG, "getVideoPlayInfo: apiPost response data=${json.optJSONObject("data")?.toString()?.take(500)}")
+        Log.d(TAG, "getVideoPlayInfo: apiPost response code=${json.optInt("code", -1)}, message=${json.optString("message", "")}, dataLen=${json.optJSONObject("data")?.toString()?.length ?: 0}")
 
         val data = json.optJSONObject("data")
         if (data == null) {
-            Log.e(TAG, "getVideoPlayInfo: data is NULL! json=$json")
+            Log.e(TAG, "getVideoPlayInfo: data is NULL! code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
             throw IllegalStateException("无视频信息: code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
         }
 
@@ -421,7 +421,7 @@ class Pan123ApiClient(
 
         // getVideoPlayInfo URL → 原画（默认播放用）
         val videoUrl = data.optString("url", "")
-        Log.d(TAG, "getVideoPlayInfo: original videoUrl=$videoUrl")
+        Log.d(TAG, "getVideoPlayInfo: original videoUrl=${sanitizeUrl(videoUrl)}")
         if (videoUrl.isNotBlank()) {
             urls.add(videoUrl)
             names.add("原画")
@@ -441,7 +441,7 @@ class Pan123ApiClient(
                         continue
                     }
                     val resolution = info.optString("resolution", "转码${i + 1}")
-                    Log.d(TAG, "getVideoPlayInfo: transcode[$i] resolution=$resolution, url=${url.take(100)}...")
+                    Log.d(TAG, "getVideoPlayInfo: transcode[$i] resolution=$resolution, url=${sanitizeUrl(url)}")
                     urls.add(url)
                     names.add(resolution)
                 } catch (e: Exception) {
@@ -479,15 +479,14 @@ class Pan123ApiClient(
         Log.d(TAG, "getFileDownloadInfo: request body=$body")
         
         val json = apiPost(endpoint, body)
-        Log.d(TAG, "getFileDownloadInfo: response code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
-        Log.d(TAG, "getFileDownloadInfo: response data=${json.optJSONObject("data")?.toString()?.take(500)}")
+        Log.d(TAG, "getFileDownloadInfo: response code=${json.optInt("code", -1)}, message=${json.optString("message", "")}, dataLen=${json.optJSONObject("data")?.toString()?.length ?: 0}")
         
         val data = json.getJSONObject("data")
         val downloadUrl = data.optString("DownloadUrl", "")
-        Log.d(TAG, "getFileDownloadInfo: downloadUrl=${downloadUrl.take(200)}...")
+        Log.d(TAG, "getFileDownloadInfo: downloadUrl=${sanitizeUrl(downloadUrl)}")
         
         if (downloadUrl.isBlank()) {
-            Log.e(TAG, "getFileDownloadInfo: DownloadUrl is BLANK! json=$json")
+            Log.e(TAG, "getFileDownloadInfo: DownloadUrl is BLANK! code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
             throw IllegalStateException("未获取到下载链接: code=${json.optInt("code", -1)}, message=${json.optString("message", "")}")
         }
         
@@ -516,7 +515,7 @@ class Pan123ApiClient(
         // Step 1: 获取中间下载 URL（Android API，已有方法）
         val downloadInfo = getFileDownloadInfo(item).getOrThrow()
         val intermediateUrl = downloadInfo.url
-        Log.d(TAG, "resolveDownloadUrlViaHead: intermediateUrl=$intermediateUrl")
+        Log.d(TAG, "resolveDownloadUrlViaHead: intermediateUrl=${sanitizeUrl(intermediateUrl)}")
 
         // Step 2: HEAD 跟随重定向 → 最终 CDN URL（海阔视界: fetch(url, {onlyHeaders:true}).url）
         val headRequest = Request.Builder()
@@ -526,7 +525,7 @@ class Pan123ApiClient(
         val response = client.newCall(headRequest).execute()
         val finalUrl = response.request.url.toString()
         response.close()
-        Log.d(TAG, "resolveDownloadUrlViaHead: finalUrl=$finalUrl")
+        Log.d(TAG, "resolveDownloadUrlViaHead: finalUrl=${sanitizeUrl(finalUrl)}")
 
         if (finalUrl == intermediateUrl) {
             Log.w(TAG, "resolveDownloadUrlViaHead: no redirect, using intermediate URL")

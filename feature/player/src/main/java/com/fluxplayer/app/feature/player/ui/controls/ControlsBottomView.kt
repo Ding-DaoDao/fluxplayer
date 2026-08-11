@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,6 +66,7 @@ import com.fluxplayer.app.core.model.VideoContentScale
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.extensions.copy
 import com.fluxplayer.app.feature.player.LocalUseMaterialYouControls
+import com.fluxplayer.app.feature.player.R as PlayerR
 import com.fluxplayer.app.feature.player.buttons.LoopButton
 import com.fluxplayer.app.feature.player.buttons.PlayerButton
 import com.fluxplayer.app.feature.player.buttons.ShuffleButton
@@ -167,14 +169,14 @@ fun ControlsBottomView(
             ) {
                 Icon(
                     painter = painterResource(videoContentScale.drawableRes()),
-                    contentDescription = null,
+                    contentDescription = stringResource(PlayerR.string.video_content_scale),
                 )
             }
             if (isPipSupported) {
                 PlayerButton(onClick = onPictureInPictureClick) {
                     Icon(
                         painter = painterResource(R.drawable.ic_pip),
-                        contentDescription = null,
+                        contentDescription = stringResource(PlayerR.string.picture_in_picture),
                     )
                 }
             }
@@ -200,7 +202,7 @@ fun ControlsBottomView(
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         painter = painterResource(R.drawable.ic_speed),
-                        contentDescription = null,
+                        contentDescription = stringResource(PlayerR.string.playback_speed),
                         tint = Color.White,
                     )
                     if (currentSpeed != 1.0f) {
@@ -273,7 +275,7 @@ fun ControlsBottomView(
             PlayerButton(onClick = onPlaylistClick) {
                 Icon(
                     painter = painterResource(R.drawable.ic_playlist),
-                    contentDescription = null,
+                    contentDescription = stringResource(PlayerR.string.playlist),
                 )
             }
         }

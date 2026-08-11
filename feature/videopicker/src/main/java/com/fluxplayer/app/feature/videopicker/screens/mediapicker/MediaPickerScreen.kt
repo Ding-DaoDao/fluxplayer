@@ -616,7 +616,9 @@ internal fun MediaPickerScreen(
                         }
                         Icon(
                             imageVector = icon,
-                            contentDescription = null,
+                            contentDescription = stringResource(
+                                if (isFabExpanded) R.string.close_menu else R.string.open_menu
+                            ),
                             modifier = Modifier.animateIcon(checkedProgress = { checkedProgress }),
                         )
                     }

@@ -81,7 +81,7 @@ class PlaybackPersistence(
                 parentPath = parentPath,
             )
         }
-        Log.d(TAG, "recordHistory: uri=$uri position=$position")
+        Log.d(TAG, "recordHistory: uri=$uri position=$position thumbnailPath=${preCapturedPath ?: "<none>"}")
     }
 
     private fun computeParentPath(uriString: String, source: VideoSource): String? {

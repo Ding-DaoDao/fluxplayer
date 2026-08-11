@@ -17,6 +17,7 @@ import com.fluxplayer.app.core.common.extensions.deleteMedia
 import com.fluxplayer.app.core.common.extensions.getPath
 import com.fluxplayer.app.core.common.extensions.updateMedia
 import java.io.File
+import java.lang.ref.WeakReference
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -32,14 +33,20 @@ class LocalMediaService @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : MediaService {
 
-    private lateinit var activity: Activity
+    // 使用 WeakReference 避免单例长期持有 Activity 导致泄漏
+    private var activityRef: WeakReference<Activity>? = null
     private val contentResolver = context.contentResolver
     private var resultOkCallback: () -> Unit = {}
     private var resultCancelledCallback: () -> Unit = {}
     private var mediaRequestLauncher: ActivityResultLauncher<IntentSenderRequest>? = null
 
+    private val activity: Activity?
+        get() = activityRef?.get()
+
     override fun initialize(activity: ComponentActivity) {
-        this.activity = activity
+        this.activityRef = WeakReference(activity)
+        // 每次都重新注册到当前 Activity 的 registry，保证结果回调分发到正确的 Activity；
+        // 旧 launcher 随旧 Activity 一起被回收，不持有强引用
         mediaRequestLauncher = activity.registerForActivityResult(
             ActivityResultContracts.StartIntentSenderForResult(),
         ) { result ->
@@ -75,7 +82,7 @@ class LocalMediaService @Inject constructor(
             },
             null,
         )
-        activity.startActivity(intent)
+        activity?.startActivity(intent)
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
@@ -111,6 +118,14 @@ class LocalMediaService @Inject constructor(
             onResultOk = { continuation.resume(true) },
             onResultCanceled = { continuation.resume(false) },
         )
+        // 协程被取消时避免挂起永不恢复
+        continuation.invokeOnCancellation {
+            try {
+                if (continuation.isActive) continuation.resume(false)
+            } catch (_: IllegalStateException) {
+                // 已恢复，忽略
+            }
+        }
     }
 
     private suspend fun deleteMediaBelowR(uris: List<Uri>): Boolean {

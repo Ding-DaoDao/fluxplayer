@@ -158,9 +158,11 @@ class OpenListApiClient(
             error("listFiles rejected: code=$code $responseBody")
         }
 
+        // 防御式解析：data 或 content 可能为 null（空目录/响应结构变化），返回空列表而非崩溃
         val content = jsonObj
-            .getJSONObject("data")
-            .getJSONArray("content")
+            .optJSONObject("data")
+            ?.optJSONArray("content")
+            ?: JSONArray()
 
         (0 until content.length()).map { i ->
             val item = content.getJSONObject(i)

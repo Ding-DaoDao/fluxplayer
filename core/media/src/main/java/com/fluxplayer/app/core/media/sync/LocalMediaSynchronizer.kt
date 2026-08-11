@@ -66,6 +66,8 @@ class LocalMediaSynchronizer @Inject constructor(
 
     override fun stopSync() {
         mediaSyncingJob?.cancel()
+        // 置 null，使 startSync 可以在停止后再次启动
+        mediaSyncingJob = null
     }
 
     private suspend fun updateDirectories(media: List<MediaVideo>) =
@@ -114,9 +116,16 @@ class LocalMediaSynchronizer @Inject constructor(
     }
 
     private suspend fun updateMedia(media: List<MediaVideo>) = withContext(Dispatchers.Default) {
+        if (media.isEmpty()) return@withContext
+
+        // 批量查询已有实体，避免逐条 SELECT 的 N+1 问题
+        val uris = media.map { it.uri.toString() }
+        val existing = mediumDao.getByUris(uris).associateBy { it.uriString }
+
         val mediumEntities = media.map {
             val file = File(it.data)
-            val mediumEntity = mediumDao.get(it.uri.toString())
+            val uriString = it.uri.toString()
+            val mediumEntity = existing[uriString]
             mediumEntity?.copy(
                 path = file.path,
                 name = file.name,
@@ -128,7 +137,7 @@ class LocalMediaSynchronizer @Inject constructor(
                 modified = it.dateModified,
                 parentPath = file.parent!!,
             ) ?: MediumEntity(
-                uriString = it.uri.toString(),
+                uriString = uriString,
                 path = it.data,
                 name = file.name,
                 parentPath = file.parent!!,

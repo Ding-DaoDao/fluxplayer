@@ -8,6 +8,7 @@ import com.fluxplayer.app.core.common.CloudPlaylistCache
 import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.Pan123FallbackCache
 import com.fluxplayer.app.core.common.VideoQualityCache
+import com.fluxplayer.app.core.common.sanitizeUrl
 import com.fluxplayer.app.core.data.aliyun.AliyunApiClient
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189ApiClient
@@ -241,7 +242,7 @@ class CloudUriResolver @Inject constructor(
                 var headUrl: String? = null
                 if (headUrlResult.isSuccess) {
                     headUrl = headUrlResult.getOrThrow()
-                    Log.d(TAG, "resolvePan123: resolveDownloadUrlViaHead SUCCESS url=${headUrl.take(150)}")
+                    Log.d(TAG, "resolvePan123: resolveDownloadUrlViaHead SUCCESS url=${sanitizeUrl(headUrl)}")
                     val dlHeaders = client.buildDownloadHeaders(headUrl)
                     Pan123AuthProvider.referer = dlHeaders["Referer"] ?: Pan123AuthProvider.referer
                     val host = try { java.net.URI(headUrl).host ?: "" } catch (_: Exception) { "" }
@@ -260,7 +261,7 @@ class CloudUriResolver @Inject constructor(
                     Log.d(TAG, "resolvePan123: getVideoPlayInfo SUCCESS - urls size=${playResult.urls.size}")
                     playResult.urls.forEachIndexed { index, url ->
                         val isHls = url.contains(".m3u8") || url.contains("/hls/")
-                        Log.d(TAG, "  [$index] isHls=$isHls url=${url.take(150)}")
+                        Log.d(TAG, "  [$index] isHls=$isHls url=${sanitizeUrl(url)}")
                     }
                     if (playResult.urls.isNotEmpty()) {
                         val allUrls = playResult.urls.toMutableList()
@@ -276,7 +277,7 @@ class CloudUriResolver @Inject constructor(
                         Pan123FallbackCache.put(fileId, hlsUrl)
                     }
                     val bestUrl = mp4Url ?: playResult.urls.first()
-                    Log.d(TAG, "resolvePan123: selected URL isMp4=${bestUrl == mp4Url} isHead=${bestUrl == headUrl} url=${bestUrl.take(150)}")
+                    Log.d(TAG, "resolvePan123: selected URL isMp4=${bestUrl == mp4Url} isHead=${bestUrl == headUrl} url=${sanitizeUrl(bestUrl)}")
                     Log.d(TAG, "========== resolvePan123 END ==========")
                     return@coroutineScope bestUrl
                 }
@@ -326,7 +327,7 @@ class CloudUriResolver @Inject constructor(
 
         val playResult = client.getVideoPlayInfo(fileId).getOrNull()
         if (playResult != null && playResult.urls.isNotEmpty()) {
-            Log.d(TAG, "resolveQuark: playUrl=${playResult.urls.first()}, qualities=${playResult.urls.size}")
+            Log.d(TAG, "resolveQuark: playUrl=${sanitizeUrl(playResult.urls.first())}, qualities=${playResult.urls.size}")
             // 缓存所有清晰度选项，供播放器切换
             if (playResult.urls.size > 1) {
                 val options = playResult.urls.zip(playResult.names).map { (u, n) ->
@@ -391,7 +392,7 @@ class CloudUriResolver @Inject constructor(
             sessionSecret = C189AuthProvider.sessionSecret
         }
         val url = client.getVideoPlayUrl(fileId).getOrNull()
-        Log.d(TAG, "resolveCloud189 fileId=$fileId url=$url")
+        Log.d(TAG, "resolveCloud189 fileId=$fileId url=${url?.let(::sanitizeUrl)}")
         if (url != null) return url + "#189Play=true#"
         return null
     }

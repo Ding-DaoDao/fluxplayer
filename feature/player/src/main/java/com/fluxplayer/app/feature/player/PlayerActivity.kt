@@ -248,7 +248,14 @@ class PlayerActivity : ComponentActivity() {
                     }
                     }
                 } else {
-                    NextPlayerTheme(darkTheme = true) {
+                    // 视频页保持深色观影体系（黑底），但跟随用户的主题色与引擎设置，
+                    // 使弹幕/设置等面板的强调色与主界面一致
+                    NextPlayerTheme(
+                        darkTheme = true,
+                        dynamicColor = appPrefs?.useDynamicColors ?: true,
+                        customSeedColor = appPrefs?.customSeedColor ?: 0,
+                        composeEngine = appPrefs?.composeEngine ?: ComposeEngine.MATERIAL,
+                    ) {
                         MediaPlayerScreen(
                             player = player,
                             viewModel = viewModel,
@@ -395,30 +402,35 @@ class PlayerActivity : ComponentActivity() {
             // 书籍封面：供通知栏/锁屏展示
             val coverArtworkUri = intent.getStringExtra("cover_uri")?.let { Uri.parse(it) }
 
-            // 从 URI 的父目录扫描所有音频文件
+            // 从 URI 的父目录扫描所有音频文件（文件 IO 移出主线程，避免启动卡顿）
             val bookDir = File(chapterPath).parentFile
-            var chapterFiles = scanAudioFiles(bookDir)
-            val startIndex = chapterFiles.indexOfFirst { it.absolutePath == chapterPath }
-                .coerceAtLeast(0)
+            val scanned = withContext(Dispatchers.IO) {
+                val files = scanAudioFiles(bookDir)
+                val startIdx = files.indexOfFirst { it.absolutePath == chapterPath }.coerceAtLeast(0)
+                // 在此构建媒体项与章节信息，减少主线程后续工作
+                val items = files.mapIndexed { index, file ->
+                    MediaItem.Builder()
+                        .setUri(Uri.fromFile(file))
+                        .setMediaId(file.absolutePath)
+                        .setMediaMetadata(
+                            MediaMetadata.Builder().apply {
+                                val itemTitle = if (index == startIdx) (title ?: file.nameWithoutExtension) else file.nameWithoutExtension
+                                setTitle(itemTitle)
+                                coverArtworkUri?.let { setArtworkUri(it) }
+                            }.build(),
+                        )
+                        .build()
+                }
+                Triple(files, startIdx, items)
+            }
+            val chapterFiles = scanned.first
+            val startIndex = scanned.second
+            val mediaItems = scanned.third
 
             // 最终安全检查：如果仍然没有文件，直接返回
             if (chapterFiles.isEmpty()) {
                 Log.e("PlayerActivity", "无法找到任何音频文件: chapterPath=$chapterPath")
                 return
-            }
-
-            val mediaItems = chapterFiles.mapIndexed { index, file ->
-                MediaItem.Builder()
-                    .setUri(Uri.fromFile(file))
-                    .setMediaId(file.absolutePath)
-                    .setMediaMetadata(
-                        MediaMetadata.Builder().apply {
-                            val itemTitle = if (index == startIndex) (title ?: file.nameWithoutExtension) else file.nameWithoutExtension
-                            setTitle(itemTitle)
-                            coverArtworkUri?.let { setArtworkUri(it) }
-                        }.build(),
-                    )
-                    .build()
             }
 
             // 提取章节名列表供播放器 UI 使用
@@ -635,7 +647,13 @@ class PlayerActivity : ComponentActivity() {
             // 退出时通过 PixelCopy 截取 SurfaceView 当前帧作为缩略图
             val sv = playerSurfaceView
             val uri = mediaController?.currentMediaItem?.mediaId
-            if (uri != null && sv != null && sv.width > 0 && sv.height > 0) {
+            if (uri == null) {
+                Log.w("PlayerActivity", "thumbnail capture SKIPPED: mediaId is null")
+            } else if (sv == null) {
+                Log.w("PlayerActivity", "thumbnail capture SKIPPED: playerSurfaceView is null (uri=$uri)")
+            } else if (sv.width <= 0 || sv.height <= 0) {
+                Log.w("PlayerActivity", "thumbnail capture SKIPPED: SurfaceView size invalid ${sv.width}x${sv.height}")
+            } else {
                 try {
                     val bitmap = Bitmap.createBitmap(
                         sv.width, sv.height, Bitmap.Config.ARGB_8888,
@@ -658,12 +676,17 @@ class PlayerActivity : ComponentActivity() {
                         }
                         if (path != null) {
                             PlayerFrameCapture.put(uri, path)
+                            Log.d("PlayerActivity", "thumbnail captured & cached: uri=$uri path=$path")
+                        } else {
+                            Log.w("PlayerActivity", "thumbnail capture FAILED: saveDirect returned null (uri=$uri)")
                         }
                     } else {
+                        Log.w("PlayerActivity", "thumbnail capture FAILED: PixelCopy result=$copyResult (uri=$uri)")
                         bitmap.recycle()
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
                     // 截图失败不影响退出
+                    Log.w("PlayerActivity", "thumbnail capture EXCEPTION: ${e.javaClass.simpleName}: ${e.message} (uri=$uri)")
                 }
             }
             // 音频模式：只停播放+清空列表，保留 Service 热连接（下次播放秒开）

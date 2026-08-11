@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -71,6 +72,7 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import coil3.compose.AsyncImage
 import com.fluxplayer.app.core.model.FluxMessageEvent
+import com.fluxplayer.app.core.ui.components.ChapterDragScrollbar
 import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
 import com.fluxplayer.app.core.ui.components.FluxNotificationState
 import com.fluxplayer.app.feature.player.state.rememberMediaPresentationState
@@ -641,6 +643,12 @@ fun AudioPlaybackScreen(
 
     // ── 播放列表弹窗 ──
     if (showPlaylistSheet && chapterNames.isNotEmpty()) {
+        // 播放列表滚动状态 + 已播章节（进度打点）
+        val playlistListState = rememberLazyListState()
+        val playedChapterIndexes = remember(localProgress) {
+            localProgress.filterValues { (pos, dur) -> dur > 0 && pos > 0 }.keys
+        }
+
         ModalBottomSheet(
             onDismissRequest = { showPlaylistSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
@@ -652,17 +660,19 @@ fun AudioPlaybackScreen(
                     modifier = Modifier.padding(horizontal = 24.dp),
                 )
                 Spacer(modifier = Modifier.height(20.dp))
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
-                ) {
-                    itemsIndexed(chapterNames) { index, name ->
-                        val isActive = index == player.currentMediaItemIndex
-                        val progress = localProgress[index]
-                        val progressText = if (progress != null && progress.second > 0) {
-                            val pct = (progress.first * 100 / progress.second).coerceIn(0, 100)
-                            stringResource(R.string.audio_played_percent, pct)
-                        } else null
+                Box(modifier = Modifier.weight(1f)) {
+                    LazyColumn(
+                        state = playlistListState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+                    ) {
+                        itemsIndexed(chapterNames) { index, name ->
+                            val isActive = index == player.currentMediaItemIndex
+                            val progress = localProgress[index]
+                            val progressText = if (progress != null && progress.second > 0) {
+                                val pct = (progress.first * 100 / progress.second).coerceIn(0, 100)
+                                stringResource(R.string.audio_played_percent, pct)
+                            } else null
 
                         Surface(
                             onClick = {
@@ -707,6 +717,16 @@ fun AudioPlaybackScreen(
                             }
                         }
                     }
+                }
+                    // 右侧可拖拽滚动条（共享组件：胶囊 + 已播打点）
+                    ChapterDragScrollbar(
+                        listState = playlistListState,
+                        totalCount = chapterNames.size,
+                        playedChapters = playedChapterIndexes,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 6.dp),
+                    )
                 }
                 Spacer(modifier = Modifier.height(40.dp))
             }
@@ -865,7 +885,7 @@ private fun AlbumCover(artworkUri: Uri?, modifier: Modifier = Modifier) {
         } else {
             Icon(
                 painter = painterResource(coreUiR.drawable.ic_file_audio),
-                contentDescription = null,
+                contentDescription = stringResource(R.string.audio_album_cover),
                 tint = FluxTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                 modifier = Modifier.size(56.dp),
             )

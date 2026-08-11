@@ -259,14 +259,24 @@ class BackupManager @Inject constructor(
                         )
                     }
                     entry.name.startsWith("openlist_data/") -> {
-                        val fileName = entry.name.removePrefix("openlist_data/")
-                            .replace("..", "")
-                            .trim('/')
-                        if (fileName.isNotBlank()) {
+                        val fileName = entry.name.removePrefix("openlist_data/").trim('/')
+                        // Zip Slip 防护：拒绝路径分隔符与 ".."，并用 canonicalPath 兜底
+                        if (fileName.isNotBlank() &&
+                            !fileName.contains("..") &&
+                            !fileName.contains('\\') &&
+                            !fileName.startsWith('/')
+                        ) {
                             val destDir = context.filesDir.resolve("openlist_data")
                                 .apply { mkdirs() }
                             val destFile = File(destDir, fileName)
-                            destFile.outputStream().use { zip.copyTo(it) }
+                            // 解析后路径必须仍位于目标目录内，防 "....//" 等变体绕过
+                            val canonicalDest = destFile.canonicalPath
+                            val canonicalDir = destDir.canonicalPath
+                            if (canonicalDest == canonicalDir ||
+                                canonicalDest.startsWith(canonicalDir + File.separator)
+                            ) {
+                                destFile.outputStream().use { zip.copyTo(it) }
+                            }
                         }
                     }
                 }

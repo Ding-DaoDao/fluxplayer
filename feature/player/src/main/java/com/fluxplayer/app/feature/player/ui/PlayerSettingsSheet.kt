@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,13 +60,19 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.regex.Pattern
 
-// ── Dark theme colors ──
-private val SurfaceVariantColor = Color(0xFF2A2A3E)
-private val TextPrimaryColor = Color(0xFFE0E0E0)
-private val TextSecondaryColor = Color(0xFF9CA3AF)
-private val AccentColor = Color(0xFF60A5FA)
-private val AccentDimColor = Color(0xFF1E3A5F)
-private val DividerColor = Color(0xFF374151)
+// ── Theme colors（跟随当前 ColorScheme） ──
+private val SurfaceVariantColor: Color
+    @Composable get() = MaterialTheme.colorScheme.surfaceContainerHighest
+private val TextPrimaryColor: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurface
+private val TextSecondaryColor: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+private val AccentColor: Color
+    @Composable get() = MaterialTheme.colorScheme.primary
+private val AccentDimColor: Color
+    @Composable get() = MaterialTheme.colorScheme.primaryContainer
+private val DividerColor: Color
+    @Composable get() = MaterialTheme.colorScheme.outlineVariant
 
 // ── Preset values ──
 private val SUBTITLE_DELAY_PRESETS = longArrayOf(

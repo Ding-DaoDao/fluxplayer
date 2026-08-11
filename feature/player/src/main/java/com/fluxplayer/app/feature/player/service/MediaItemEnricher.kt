@@ -16,6 +16,7 @@ import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.extensions.getFilenameFromUri
 import com.fluxplayer.app.core.common.extensions.getLocalSubtitles
 import com.fluxplayer.app.core.common.extensions.getPath
+import com.fluxplayer.app.core.common.sanitizeUrl
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.repository.MediaRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
@@ -77,7 +78,7 @@ class MediaItemEnricher(
                         val resolved = cloudUriResolver.resolve(uri)
                         if (resolved != null) {
                             cacheKeyRegistry.register(resolved.toString(), uri.toString())
-                            Log.d(TAG, "Pre-resolved cloud URI: $uri -> $resolved")
+                            Log.d(TAG, "Pre-resolved cloud URI: $uri -> ${sanitizeUrl(resolved.toString())}")
                         }
                         resolved
                     } catch (e: Exception) {

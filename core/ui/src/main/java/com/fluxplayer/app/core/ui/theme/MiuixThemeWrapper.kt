@@ -1,6 +1,5 @@
 package com.fluxplayer.app.core.ui.theme
 
-import android.os.Build
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -20,10 +19,10 @@ fun MiuixThemeWrapper(
     m3ColorScheme: ColorScheme,
     content: @Composable () -> Unit,
 ) {
+    // Miuix 使用内置默认色，保持其独立的 MIUI 视觉体系（不接入种子色/动态色）
+    // 使其与 MD3 引擎在配色上有明显差异
     val colorSchemeMode = if (isDark) ColorSchemeMode.Dark else ColorSchemeMode.Light
 
-    // Miuix 使用内置默认色，不传 keyColor/paletteStyle/colorSpec
-    // 这与 Legado 的 useMiuixMonet=false 行为一致
     val controller = remember(colorSchemeMode, isDark) {
         ThemeController(
             colorSchemeMode = colorSchemeMode,

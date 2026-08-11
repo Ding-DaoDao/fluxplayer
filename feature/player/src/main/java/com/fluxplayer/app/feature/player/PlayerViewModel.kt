@@ -184,7 +184,10 @@ class PlayerViewModel @Inject constructor(
         val uri = _danmakuFileUri.value
         if (uri != null) {
             viewModelScope.launch {
-                DanmakuParser.appendToXml(context, uri, danmaku)
+                // 文件追加写入移到 IO 线程，避免阻塞主线程
+                withContext(Dispatchers.IO) {
+                    DanmakuParser.appendToXml(context, uri, danmaku)
+                }
             }
         }
     }
@@ -367,11 +370,6 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
-     * 是否已有弹幕数据（搜索/本地加载过）。
-     */
-    fun hasAnyDanmaku(): Boolean = _danmakuList.value != null
-
-    /**
      * 清空弹幕（切集时调用）。
      * 关闭显示，同时把下载状态回退到剧集列表（而非 "弹幕已加载"）。
      */
@@ -528,78 +526,6 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
-     * 通过平台源搜索弹幕。
-     */
-    fun searchPlatformDanmaku(context: Context, source: DanmakuSource, keyword: String) {
-        currentSource = source
-        _danmakuDownloadState.value = DanmakuDownloadState.Searching(source)
-        viewModelScope.launch(Dispatchers.IO) {
-            val animes = danmakuRepository.searchPlatformAnime(keyword, source)
-            if (animes.isEmpty()) {
-                _danmakuDownloadState.value = DanmakuDownloadState.Error(
-                    context.getString(R.string.danmaku_error_no_result), source,
-                )
-            } else {
-                val result = DanmakuDownloadState.SearchResult(animes, source)
-                lastSearchResults = result
-                _danmakuDownloadState.value = result
-            }
-        }
-    }
-
-    /**
-     * 通过视频 URL 抓取弹幕（平台源自动匹配）。
-     */
-    fun fetchDanmakuByUrl(context: Context, videoUrl: String) {
-        _danmakuDownloadState.value = DanmakuDownloadState.Downloading(DanmakuSource.DANDANPLAY)
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val uri = danmakuRepository.fetchDanmakuByUrl(videoUrl)
-                if (uri != null) {
-                    val file = java.io.File(uri.path!!)
-                    if (file.exists()) {
-                        val list = DanmakuParser.parseBilibiliXml(file.inputStream())
-                        if (list.isNotEmpty()) {
-                            _danmakuList.value = list
-                            _danmakuFileUri.value = uri
-                            danmakuEnabled.value = true
-                            danmakuForCurrentEpisode.value = true
-                            _danmakuDownloadState.value = DanmakuDownloadState.Ready(uri.toString())
-                            withContext(Dispatchers.Main) {
-                                notifier.success(context.getString(R.string.danmaku_loaded_toast, list.size))
-                            }
-                            return@launch
-                        }
-                    }
-                }
-                _danmakuDownloadState.value = DanmakuDownloadState.Error(
-                    context.getString(R.string.danmaku_error_platform_fetch), DanmakuSource.DANDANPLAY,
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "fetchDanmakuByUrl failed", e)
-                _danmakuDownloadState.value = DanmakuDownloadState.Error(
-                    e.message ?: context.getString(R.string.danmaku_error_unknown), DanmakuSource.DANDANPLAY,
-                )
-            }
-        }
-    }
-
-    /**
-     * 更新播放速度。
-     */
-    fun updatePlaybackSpeed(speed: Float) {
-        playbackSpeed.value = speed
-    }
-
-    /**
-     * 处理清晰度选择。
-     */
-    fun onQualitySelected(option: com.fluxplayer.app.feature.player.ui.QualityOption) {
-        // 清晰度切换由外部通过 Player 直接 seekTo 实现
-        // 此处保留为占位，具体实现在 MediaPlayerScreen 中处理
-    }
-
-    /**
      * 更新弹幕源列表。
      */
     fun updateDanmakuSources(sources: List<DanmakuSource>) {
@@ -608,19 +534,6 @@ class PlayerViewModel @Inject constructor(
                 it.copy(danmakuSources = sources)
             }
             danmakuSources.value = sources
-        }
-    }
-
-    /**
-     * 更新弹幕缓存映射（已下载的 episodeId → 本地路径）。
-     */
-    private fun updateCacheMap(episodeId: Int, localPath: String) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences { prefs ->
-                prefs.copy(
-                    danmakuCacheMap = prefs.danmakuCacheMap + (episodeId.toString() to localPath),
-                )
-            }
         }
     }
 

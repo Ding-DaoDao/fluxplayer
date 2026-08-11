@@ -77,7 +77,7 @@ fun DanmakuSourceManageSheet(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .height(480.dp)
-                .background(Color(0xFF1A1A2E), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                 .padding(16.dp),
         ) {
             Row(
@@ -87,16 +87,16 @@ fun DanmakuSourceManageSheet(
                 FluxText(
                     text = "弹幕源管理",
                     style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                 )
                 if (!showAddForm) {
                     Button(
                         onClick = { showAddForm = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A0FF)),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         shape = RoundedCornerShape(8.dp),
                     ) {
-                        FluxText(stringResource(R.string.danmaku_source_add), color = Color.White)
+                        FluxText(stringResource(R.string.danmaku_source_add), color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
             }
@@ -150,20 +150,20 @@ private fun AddSourceForm(
     var url by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(stringResource(R.string.danmaku_source_add_custom_title), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text(stringResource(R.string.danmaku_source_add_custom_title), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 15.sp)
         Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { FluxText(stringResource(R.string.danmaku_source_name), color = Color.White.copy(alpha = 0.5f)) },
-            textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+            placeholder = { FluxText(stringResource(R.string.danmaku_source_name), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) },
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFF00A0FF),
-                unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
-                cursorColor = Color(0xFF00A0FF),
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                cursorColor = MaterialTheme.colorScheme.primary,
             ),
         )
 
@@ -173,13 +173,13 @@ private fun AddSourceForm(
             value = url,
             onValueChange = { url = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { FluxText(stringResource(R.string.danmaku_source_api_hint), color = Color.White.copy(alpha = 0.5f)) },
-            textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+            placeholder = { FluxText(stringResource(R.string.danmaku_source_api_hint), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) },
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFF00A0FF),
-                unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
-                cursorColor = Color(0xFF00A0FF),
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                cursorColor = MaterialTheme.colorScheme.primary,
             ),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
@@ -195,10 +195,10 @@ private fun AddSourceForm(
             Button(
                 onClick = { onAdd(name, url) },
                 enabled = name.isNotBlank() && url.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A0FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 shape = RoundedCornerShape(8.dp),
             ) {
-                FluxText("确认添加", color = Color.White)
+                FluxText("确认添加", color = MaterialTheme.colorScheme.onPrimary)
             }
         }
     }
@@ -219,13 +219,13 @@ private fun SourceItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = source.name,
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Medium,
                 fontSize = 15.sp,
             )
             Text(
                 text = source.baseUrl,
-                color = Color.White.copy(alpha = 0.4f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                 fontSize = 12.sp,
                 maxLines = 1,
             )
@@ -238,11 +238,11 @@ private fun SourceItem(
             if (source.type == DanmakuSourceType.CUSTOM) {
                 Button(
                     onClick = onDelete,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4444)),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     shape = RoundedCornerShape(6.dp),
                     contentPadding = ButtonDefaults.TextButtonContentPadding,
                 ) {
-                    Text(stringResource(R.string.danmaku_source_delete), color = Color.White, fontSize = 12.sp)
+                    Text(stringResource(R.string.danmaku_source_delete), color = MaterialTheme.colorScheme.onError, fontSize = 12.sp)
                 }
             }
         }
@@ -252,6 +252,6 @@ private fun SourceItem(
 @Composable
 private fun TextButton(text: String, onClick: () -> Unit) {
     androidx.compose.material3.TextButton(onClick = onClick) {
-        FluxText(text, color = Color(0xFF00A0FF))
+        FluxText(text, color = MaterialTheme.colorScheme.primary)
     }
 }

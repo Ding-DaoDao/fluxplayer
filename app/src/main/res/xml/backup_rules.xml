@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older that API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+   Backup rules (API <= 30)：排除含云盘凭证/密码的 SharedPreferences 与 DataStore 文件，
+   避免凭证通过 Google Auto Backup 外泄。
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="openlist_prefs.xml"/>
+    <exclude domain="sharedpref" path="alipan.xml"/>
+    <exclude domain="sharedpref" path="cloud189.xml"/>
+    <exclude domain="sharedpref" path="pan123.xml"/>
+    <exclude domain="sharedpref" path="quark.xml"/>
+    <exclude domain="sharedpref" path="uc.xml"/>
+    <exclude domain="sharedpref" path="yun139.xml"/>
+    <exclude domain="file" path="datastore/webdav_servers.json"/>
+    <exclude domain="file" path="datastore/backup_webdav.json"/>
 </full-backup-content>
