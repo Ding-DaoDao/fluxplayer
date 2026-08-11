@@ -725,7 +725,6 @@ class PlayerService : MediaSessionService() {
 
         mediaSourceFactory = CloudAwareMediaSourceFactory(
             authAwareFactory = AuthAwareDataSourceFactory(applicationContext),
-            cloudUriResolver = cloudUriResolver,
             cacheKeyRegistry = cacheKeyRegistry,
             playbackCacheManager = playbackCacheManager,
         ).also {
@@ -759,7 +758,11 @@ class PlayerService : MediaSessionService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val player = mediaSession?.player!!
+        // mediaSession 可能为 null（服务已销毁或重建中），强解会导致 NPE
+        val player = mediaSession?.player ?: run {
+            stopSelf()
+            return
+        }
         if (!player.playWhenReady || player.mediaItemCount == 0 || player.playbackState == Player.STATE_ENDED) {
             stopSelf()
         }

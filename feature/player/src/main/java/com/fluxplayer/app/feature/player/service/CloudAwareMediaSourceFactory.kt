@@ -13,11 +13,9 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import com.fluxplayer.app.core.common.CloudAwareCacheKeyRegistry
 import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.data.cache.PlaybackCacheManager
-import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 
 class CloudAwareMediaSourceFactory(
     private val authAwareFactory: DataSource.Factory,
-    private val cloudUriResolver: CloudUriResolver,
     private val cacheKeyRegistry: CloudAwareCacheKeyRegistry? = null,
     private val playbackCacheManager: PlaybackCacheManager? = null,
 ) : MediaSource.Factory {
@@ -69,25 +67,15 @@ class CloudAwareMediaSourceFactory(
         val uri = mediaItem.localConfiguration?.uri ?: Uri.EMPTY
         Log.d(TAG, "createMediaSource: uri=$uri, fragment=${uri.fragment}, mediaId=${mediaItem.mediaId}")
 
-        // 云盘 URI (cloud://) 需要先解析为真实的 HTTP URL
+        // 云盘 URI (cloud://) 理论上已被 MediaItemEnricher 预解析为 HTTP URL。
+        // 若仍出现 cloud URI，说明 enricher 未覆盖的异常路径，此时不能在主线程
+        // runBlocking 解析（网络 IO 阻塞 → ANR），记录错误日志并交给下游兜底处理。
         if (CloudUriScheme.isCloudUri(uri)) {
-            val resolvedUri = kotlinx.coroutines.runBlocking {
-                cloudUriResolver.resolve(uri)
-            }
-            if (resolvedUri == null) {
-                Log.e(TAG, "Failed to resolve cloud URI: $uri, falling back to default")
-                return nonCachedFactory.createMediaSource(mediaItem)
-            }
-            Log.d(TAG, "Resolved $uri -> $resolvedUri")
-
-            // 注册缓存键映射（解析后 URL -> 原始 cloud URI）
-            cacheKeyRegistry?.register(resolvedUri.toString(), uri.toString())
-
-            val resolvedMediaItem = mediaItem.buildUpon()
-                .setUri(resolvedUri)
-                .setMediaId(mediaItem.mediaId)
-                .build()
-            return cachedFactory.createMediaSource(resolvedMediaItem)
+            Log.e(
+                TAG,
+                "createMediaSource: cloud URI not pre-resolved (enricher should have handled it): $uri",
+            )
+            return nonCachedFactory.createMediaSource(mediaItem)
         }
 
         // 非云盘 URI：本地文件使用 nonCachedFactory，网络文件使用 cachedFactory

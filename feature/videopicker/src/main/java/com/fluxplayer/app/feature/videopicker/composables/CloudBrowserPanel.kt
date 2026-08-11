@@ -1,6 +1,5 @@
 package com.fluxplayer.app.feature.videopicker.composables
 
-import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.EaseOutCubic
@@ -100,35 +99,6 @@ fun <T> CloudBrowserPanel(
     LaunchedEffect(navigationStack.map { it.key }) {
         val currentKeys = navigationStack.map { it.key }.toSet()
         listStateCache.keys.filter { it !in currentKeys }.forEach { listStateCache.remove(it) }
-    }
-
-    SideEffect {
-        if (cloudProviderKey == "webdav" || cloudProviderKey == "openlist") {
-            val videoItems = curItems.filter { it.isVideo }
-            val matchedCount = videoItems.count { item ->
-                item.path in playedUriSet ||
-                (cloudProviderKey.isNotEmpty() && "cloud://$cloudProviderKey/${item.path}" in playedUriSet)
-            }
-            Log.d(
-                "CloudBrowserPanel",
-                "[Match] provider=$cloudProviderKey videoItems=${videoItems.size} matchedItems=$matchedCount " +
-                "playedUriSetSize=${playedUriSet.size}"
-            )
-            val unmatched = videoItems.filter { item ->
-                item.path !in playedUriSet &&
-                !(cloudProviderKey.isNotEmpty() && "cloud://$cloudProviderKey/${item.path}" in playedUriSet)
-            }.take(3)
-            if (unmatched.isNotEmpty()) {
-                Log.d(
-                    "CloudBrowserPanel",
-                    "[Match] unmatched paths: ${unmatched.joinToString("|") { it.path }}"
-                )
-            }
-            if (playedUriSet.isNotEmpty()) {
-                val sampleUris = playedUriSet.take(5).joinToString("|")
-                Log.d("CloudBrowserPanel", "[Match] sample played uris: $sampleUris")
-            }
-        }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -274,7 +244,7 @@ fun <T> CloudBrowserPanel(
                                     modifier = Modifier.fillMaxSize(),
                                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 80.dp)
                                 ) {
-                                    itemsIndexed(curItems) { index, item ->
+                                    itemsIndexed(curItems, key = { _, item -> item.path }) { index, item ->
                                         val isPlayed = !item.isDirectory && (
                                             item.path in playedUriSet ||
                                             (cloudProviderKey.isNotEmpty() && "cloud://$cloudProviderKey/${item.path}" in playedUriSet)
@@ -554,7 +524,7 @@ private fun DirectoryStackContent(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 80.dp),
                     ) {
-                        itemsIndexed(entry.items) { index, item ->
+                        itemsIndexed(entry.items, key = { _, item -> item.path }) { index, item ->
                             val isPlayed = !item.isDirectory && (
                                 item.path in playedUriSet ||
                                 (cloudProviderKey.isNotEmpty() && "cloud://$cloudProviderKey/${item.path}" in playedUriSet)

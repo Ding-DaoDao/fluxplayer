@@ -46,6 +46,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -222,14 +224,19 @@ fun MediaPlayerScreen(
     // Intro/Outro 状态
     val introOutroState = rememberIntroOutroState()
 
-    // 自动重试
-    var hasAutoRetried by remember { mutableStateOf(false) }
+    // 自动重试（rememberSaveable：旋转/重建后不重复触发重试）
+    var hasAutoRetried by rememberSaveable { mutableStateOf(false) }
 
     // 清晰度选项和标签
     var qualityOptions by remember { mutableStateOf<List<QualityOption>>(emptyList()) }
-    var videoResolution by remember { mutableStateOf(Pair(0, 0)) }
-    var selectedQualityLabel by remember { mutableStateOf<String?>(null) }
-    var isSwitchingQuality by remember { mutableStateOf(false) }
+    var videoResolution by rememberSaveable(
+        stateSaver = listSaver(
+            save = { listOf(it.first, it.second) },
+            restore = { Pair(it[0], it[1]) },
+        ),
+    ) { mutableStateOf(Pair(0, 0)) }
+    var selectedQualityLabel by rememberSaveable { mutableStateOf<String?>(null) }
+    var isSwitchingQuality by rememberSaveable { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     // 当前播放速度追踪
@@ -399,7 +406,8 @@ fun MediaPlayerScreen(
     }
 
     // 播放过程中检测是否到达片尾，自动跳过（保留设置跨剧集生效）
-    var lastSkippedOutroIndex by remember { mutableStateOf(-1) }
+    // rememberSaveable：旋转/重建后保留已跳过标记，避免片尾重复触发
+    var lastSkippedOutroIndex by rememberSaveable { mutableStateOf(-1) }
     LaunchedEffect(Unit) {
         while (isActive) {
             delay(500)
@@ -419,10 +427,10 @@ fun MediaPlayerScreen(
 
     var overlayView by remember { mutableStateOf<OverlayView?>(null) }
 
-    // 倍速横条显隐
-    var showSpeedBar by remember { mutableStateOf(false) }
+    // 倍速横条显隐（rememberSaveable：旋转/重建后保持 UI 状态）
+    var showSpeedBar by rememberSaveable { mutableStateOf(false) }
     // 自定义倍速弹窗
-    var showCustomSpeedDialog by remember { mutableStateOf(false) }
+    var showCustomSpeedDialog by rememberSaveable { mutableStateOf(false) }
 
     // 同步 controls 自动隐藏状态：显示倍速相关组件时保持 controls 显示
     LaunchedEffect(showSpeedBar, showCustomSpeedDialog) {

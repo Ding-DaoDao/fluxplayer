@@ -146,12 +146,13 @@ class PlayerActivity : ComponentActivity() {
 
             LifecycleStartEffect(Unit) {
                 maybeInitControllerFuture()
-                lifecycleScope.launch {
+                val job = lifecycleScope.launch {
                     player = controllerFuture?.await()
                 }
+                // 取消未完成的协程，避免多次 start/stop 累积多个 await 协程；
                 // 不设 player = null，保留引用避免 Crossfade 销毁 MediaPlayerScreen
                 // 导致 remember 状态（IntroOutroState/弹幕渲染等）丢失
-                onStopOrDispose { /* keep player alive */ }
+                onStopOrDispose { job.cancel() }
             }
 
             val danmakuList by viewModel.danmakuList.collectAsStateWithLifecycle()
@@ -331,7 +332,9 @@ class PlayerActivity : ComponentActivity() {
             viewModel.playWhenReady = playWhenReady
             removeListener(playbackStateListener)
         }
-        val shouldPlayInBackground = playInBackground || playerPreferences?.autoBackgroundPlay == true
+        // 听书（audio_only）始终允许后台/息屏播放（类似音乐 App），不受"后台播放"设置限制
+        val isAudioOnly = intent.getBooleanExtra("audio_only", false)
+        val shouldPlayInBackground = playInBackground || playerPreferences?.autoBackgroundPlay == true || isAudioOnly
         if (subtitleFileSuspendLauncher.isAwaitingResult || !shouldPlayInBackground) {
             mediaController?.pause()
         }
@@ -389,6 +392,8 @@ class PlayerActivity : ComponentActivity() {
         if (isAudioOnly) {
             val title = playerApi.title
             val chapterPath = uri.path ?: ""
+            // 书籍封面：供通知栏/锁屏展示
+            val coverArtworkUri = intent.getStringExtra("cover_uri")?.let { Uri.parse(it) }
 
             // 从 URI 的父目录扫描所有音频文件
             val bookDir = File(chapterPath).parentFile
@@ -410,6 +415,7 @@ class PlayerActivity : ComponentActivity() {
                         MediaMetadata.Builder().apply {
                             val itemTitle = if (index == startIndex) (title ?: file.nameWithoutExtension) else file.nameWithoutExtension
                             setTitle(itemTitle)
+                            coverArtworkUri?.let { setArtworkUri(it) }
                         }.build(),
                     )
                     .build()

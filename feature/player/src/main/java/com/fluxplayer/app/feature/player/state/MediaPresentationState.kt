@@ -21,7 +21,9 @@ import kotlinx.coroutines.launch
 @UnstableApi
 @Composable
 fun rememberMediaPresentationState(player: Player): MediaPresentationState {
-    val mediaPresentationState = remember { MediaPresentationState(player) }
+    // 以 player 作为 key：player 实例变化（如 PiP 切换、服务重建）时重建 state，
+    // 避免旧实例的 observe 轮询与新实例并存
+    val mediaPresentationState = remember(player) { MediaPresentationState(player) }
     LaunchedEffect(player) { mediaPresentationState.observe() }
     return mediaPresentationState
 }

@@ -6,15 +6,18 @@ import com.fluxplayer.app.core.database.dao.DownloadTaskDao
 import com.fluxplayer.app.core.database.entities.DownloadStatus
 import com.fluxplayer.app.core.database.entities.DownloadTaskEntity
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,7 +33,16 @@ class CloudDownloadRepository @Inject constructor(
     companion object {
         private const val TAG = "CloudDownloadRepo"
         private const val DEFAULT_DOWNLOAD_PATH = "/storage/emulated/0/Download/"
+
+        /** 进度写库节流间隔（毫秒），避免进度回调每秒触发数十次 DB 写入 */
+        private const val PROGRESS_WRITE_INTERVAL_MS = 500L
     }
+
+    /** 进度写库专用协程作用域（应用级，伴随 Repository 生命周期） */
+    private val progressScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** 上次写库时间戳，用于节流 */
+    private val lastProgressWriteMs = AtomicLong(0L)
 
     /** 下载进度事件 */
     private val _downloadEvents = MutableSharedFlow<DownloadEvent>(extraBufferCapacity = 64)
@@ -112,15 +124,20 @@ class CloudDownloadRepository @Inject constructor(
                 targetDir = targetDir,
                 headers = headers,
                 onProgress = { progress ->
-                    runBlocking {
-                        downloadTaskDao.update(
-                            task.copy(
-                                id = taskId,
-                                status = DownloadStatus.DOWNLOADING,
-                                downloadedBytes = progress.downloadedBytes,
-                                fileSize = if (progress.totalBytes > 0) progress.totalBytes else 0L
+                    // 进度写库做节流，避免阻塞下载线程（进度回调运行在 IO 线程，不能 runBlocking）
+                    val now = System.currentTimeMillis()
+                    if (now - lastProgressWriteMs.get() >= PROGRESS_WRITE_INTERVAL_MS) {
+                        lastProgressWriteMs.set(now)
+                        progressScope.launch {
+                            downloadTaskDao.update(
+                                task.copy(
+                                    id = taskId,
+                                    status = DownloadStatus.DOWNLOADING,
+                                    downloadedBytes = progress.downloadedBytes,
+                                    fileSize = if (progress.totalBytes > 0) progress.totalBytes else 0L
+                                )
                             )
-                        )
+                        }
                     }
                     _downloadEvents.tryEmit(
                         DownloadEvent.Progress(

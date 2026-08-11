@@ -3,14 +3,28 @@ package com.fluxplayer.app.core.data
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 
+/**
+ * 全局 CookieJar。
+ *
+ * OkHttp 的 [CookieJar] 会被多个调度线程并发调用（saveFromResponse / loadForRequest），
+ * 因此内部存储必须线程安全：
+ * - [store] 使用 ConcurrentHashMap + CopyOnWriteArrayList
+ * - [quarkCookie] / [ucCookie] 使用 @Volatile 保证可见性
+ */
 object GlobalCookieJar : CookieJar {
-    private val store = mutableMapOf<String, MutableList<Cookie>>()
+    private val store = ConcurrentHashMap<String, CopyOnWriteArrayList<Cookie>>()
+
+    @Volatile
     private var quarkCookie = ""
+
+    @Volatile
     private var ucCookie = ""
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-        store[url.host] = cookies.toMutableList()
+        store[url.host] = CopyOnWriteArrayList(cookies)
     }
 
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
@@ -41,7 +55,10 @@ object GlobalCookieJar : CookieJar {
     fun getUcCookie(): String = ucCookie
 
     fun setCookie(host: String, name: String, value: String) {
-        store.getOrPut(host) { mutableListOf() }.add(
+        // 用 computeIfAbsent（原子）而非 getOrPut（非原子，并发首插会互相覆盖丢数据）
+        val cookies = store.computeIfAbsent(host) { CopyOnWriteArrayList() }
+            ?: CopyOnWriteArrayList<Cookie>()
+        cookies.add(
             Cookie.Builder()
                 .name(name).value(value)
                 .hostOnlyDomain(host)

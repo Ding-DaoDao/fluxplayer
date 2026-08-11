@@ -68,6 +68,9 @@ private class AuthAwareDataSource(
 
     companion object {
         private const val TAG = "AuthAwareDataSource"
+
+        /** 重试间隔基础值（毫秒） */
+        private const val RETRY_DELAY_MS = 300L
     }
 
     override fun addTransferListener(transferListener: TransferListener) {
@@ -117,7 +120,14 @@ private class AuthAwareDataSource(
                 // 416 on seek: throw immediately so ExoPlayer can handle it fast
                 if (e.responseCode == 416 && dataSpec.position > 0) throw e
                 if (attempt < maxAttempts - 1) {
-                    Thread.sleep(((attempt + 1) * 1000).toLong())
+                    if (Thread.currentThread().isInterrupted) throw e
+                    try {
+                        // 短延迟重试；响应线程中断（ExoPlayer release 时会中断加载线程）
+                        Thread.sleep((attempt + 1) * RETRY_DELAY_MS)
+                    } catch (ie: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        throw e
+                    }
                 } else {
                     throw e
                 }
@@ -125,7 +135,13 @@ private class AuthAwareDataSource(
                 lastException = e
                 Log.w(TAG, "openWithRetry: attempt=$attempt ${e.javaClass.simpleName} ${e.message}")
                 if (attempt < maxAttempts - 1) {
-                    Thread.sleep(((attempt + 1) * 1000).toLong())
+                    if (Thread.currentThread().isInterrupted) throw e
+                    try {
+                        Thread.sleep((attempt + 1) * RETRY_DELAY_MS)
+                    } catch (ie: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        throw e
+                    }
                 } else {
                     throw e
                 }
@@ -149,7 +165,8 @@ private class AuthAwareDataSource(
         
         for ((key, value) in headers) {
             http.setRequestProperty(key, value)
-            Log.d(TAG, "applyCloudPlayHeaders: Set header $key=${value.take(50)}...")
+            // 不打印 value：Authorization/Cookie 等敏感信息不应进入 logcat
+            Log.d(TAG, "applyCloudPlayHeaders: Set header $key (value hidden)")
         }
     }
 
@@ -169,7 +186,7 @@ private class AuthAwareDataSource(
             http.setRequestProperty("Cookie", QuarkAuthProvider.cookie)
             http.setRequestProperty("Referer", QuarkAuthProvider.referer)
             http.setRequestProperty("User-Agent", QuarkAuthProvider.userAgent)
-            Log.d(TAG, "applyHttpAuth: Quark/UC headers set - Cookie=${QuarkAuthProvider.cookie.take(50)}..., Referer=${QuarkAuthProvider.referer}")
+            // 不打印 Cookie 值（敏感信息）
             return
         }
 

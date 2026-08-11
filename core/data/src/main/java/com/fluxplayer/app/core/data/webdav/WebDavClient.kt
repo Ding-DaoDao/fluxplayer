@@ -471,10 +471,12 @@ class WebDavClient(
                 .build()
 
             val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                Result.success(response.body?.bytes() ?: ByteArray(0))
-            } else {
-                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            response.use { resp ->
+                if (resp.isSuccessful) {
+                    Result.success(resp.body?.bytes() ?: ByteArray(0))
+                } else {
+                    Result.failure(WebDavException("HTTP ${resp.code}: ${resp.message}"))
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "get failed for path=$path", e)

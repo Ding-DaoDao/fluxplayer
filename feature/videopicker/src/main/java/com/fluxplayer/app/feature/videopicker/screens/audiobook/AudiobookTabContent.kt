@@ -35,7 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.R as coreUiR
@@ -67,7 +68,7 @@ fun AudiobookTabContent(
     onShowingDetailChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // 选中的书籍（非 null 时显示详情页）
@@ -139,11 +140,41 @@ fun AudiobookTabContent(
     } else {
         when (val state = uiState.scanState) {
             is DataState.Loading -> {
-                Box(
-                    modifier = modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
+                val partialBooks = uiState.partialBooks
+                if (partialBooks.isEmpty()) {
+                    // 尚未扫到任何书：全屏转圈
+                    Box(
+                        modifier = modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    // 已扫到部分书：立即展示书架，顶部提示扫描进度
+                    Column(modifier = modifier.fillMaxSize()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "扫描中… 已发现 ${partialBooks.size} 本",
+                                style = FluxTheme.typography.bodySmall,
+                                color = FluxTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        BookshelfList(
+                            books = partialBooks,
+                            onBookClick = { selectedBook = it },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
 
@@ -340,8 +371,12 @@ private fun BookListItem(
                 contentAlignment = Alignment.Center,
             ) {
                 if (book.coverUri != null) {
+                    // 显式限定解码尺寸（2x 显示尺寸），避免大封面全尺寸解码拖慢列表
                     AsyncImage(
-                        model = book.coverUri,
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(book.coverUri)
+                            .size(144, 192)
+                            .build(),
                         contentDescription = book.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),

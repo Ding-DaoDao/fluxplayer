@@ -12,6 +12,9 @@ import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
 import com.fluxplayer.app.feature.videopicker.model.AudioChapter
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -75,10 +78,13 @@ class AudiobookViewModel @Inject constructor(
 
     fun scanBooks(rootUri: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(scanState = DataState.Loading) }
+            _uiState.update { it.copy(scanState = DataState.Loading, partialBooks = emptyList()) }
             try {
                 val books = withContext(Dispatchers.IO) {
-                    scanDirectory(rootUri)
+                    // 并行扫描，每扫完一本立即回调发布（增量填充书架）
+                    scanDirectory(rootUri) { book ->
+                        _uiState.update { it.copy(partialBooks = it.partialBooks + book) }
+                    }
                 }
                 _uiState.update { it.copy(scanState = DataState.Success(books)) }
             } catch (e: Exception) {
@@ -94,16 +100,27 @@ class AudiobookViewModel @Inject constructor(
 
     /**
      * 扫描根目录：遍历一级子文件夹，每个子文件夹 = 一本书。
+     * 并发扫描（IO 密集任务并行收益明显），每本书扫描完成即回调 [onBookScanned]。
      */
-    private fun scanDirectory(rootUriStr: String): List<AudioBook> {
+    private suspend fun scanDirectory(
+        rootUriStr: String,
+        onBookScanned: (AudioBook) -> Unit,
+    ): List<AudioBook> {
         val rootDir = uriToFile(rootUriStr) ?: return emptyList()
         if (!rootDir.isDirectory) return emptyList()
 
-        return rootDir.listFiles()
+        val folders = rootDir.listFiles()
             ?.filter { it.isDirectory && !it.name.startsWith(".") }
             ?.sortedBy { it.name }
-            ?.map { folder -> scanBookFolder(folder) }
             ?: emptyList()
+
+        return coroutineScope {
+            folders.map { folder ->
+                async(Dispatchers.IO) {
+                    scanBookFolder(folder).also { onBookScanned(it) }
+                }
+            }.awaitAll()
+        }
     }
 
     /**
@@ -218,6 +235,8 @@ class AudiobookViewModel @Inject constructor(
 data class AudiobookUiState(
     val rootUri: String? = null,
     val scanState: DataState<List<AudioBook>> = DataState.Loading,
+    /** 扫描过程中的部分结果：边扫边填充，供 UI 在 Loading 时提前展示书架 */
+    val partialBooks: List<AudioBook> = emptyList(),
     val resumeStates: Map<String, String> = emptyMap(),
     /** key: "bookPath|chapterIndex", value: "positionMs|durationMs" */
     val chapterProgress: Map<String, String> = emptyMap(),

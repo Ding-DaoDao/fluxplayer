@@ -145,16 +145,6 @@ fun AudiobookDetailContent(
     // 拦截系统返回键，统一走 onBackClick 正确清掉状态
     BackHandler(onBack = onBackClick)
 
-    // 状态栏图标颜色：详情页头部为彩色，始终使用白色图标
-    val view = LocalView.current
-    SideEffect {
-        if (!view.isInEditMode) {
-            val window = (view.context as Activity).window
-            window.statusBarColor = Color.Transparent.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
-        }
-    }
-
     val density = LocalDensity.current
     val statusBarTop = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
     val topBarHeight = 48.dp
@@ -174,16 +164,13 @@ fun AudiobookDetailContent(
         }
     }
 
-    // ── 目录区域可见比例（控制顶栏背景变化） ──
-    val catalogVisibleFraction by remember {
-        derivedStateOf {
-            if (listState.firstVisibleItemIndex >= 1) {
-                1f
-            } else {
-                val itemHeight = with(density) { 120.dp.toPx() }
-                val offset = listState.firstVisibleItemScrollOffset
-                (offset / itemHeight).coerceIn(0f, 1f)
-            }
+    // 状态栏图标颜色：头部区域透明背景用白色图标；滚动到目录区后顶栏背景与页面一致（浅色），切深色图标
+    val view = LocalView.current
+    SideEffect {
+        if (!view.isInEditMode) {
+            val window = (view.context as Activity).window
+            window.statusBarColor = Color.Transparent.toArgb()
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = collapseFraction > 0.5f
         }
     }
 
@@ -211,26 +198,19 @@ fun AudiobookDetailContent(
         label = "barTitle",
     )
 
-    // ── 顶栏颜色动画 ──
-    // 未滚动时完全透明（融入头部渐变），滚动到目录区域后渐变为毛玻璃感的表面色
-    val topBarBgAlpha = (catalogVisibleFraction * 1.15f).coerceIn(0f, 0.94f)
-    val topBarBgColor by animateColorAsState(
-        targetValue = if (topBarBgAlpha > 0.02f) {
-            fluxColors.surface.copy(alpha = topBarBgAlpha)
-        } else {
-            Color.Transparent
-        },
-        animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
-        label = "topBarBg",
-    )
-    val topBarDividerAlpha = ((catalogVisibleFraction - 0.4f) * 3f).coerceIn(0f, 0.35f)
+    // 背景渐变使用的主色：优先使用封面提取色，否则使用主题 primary
+    val gradientPrimary = paletteColor ?: fluxColors.primary
+
+    // ── 顶栏元素颜色 ──
+    // 顶栏纯透明悬浮（无背景色块/分隔线），内容自然从下方滚过；
+    // 图标/书名：封面区域（透明背景）白色 → 目录区（浅色内容上）深色，与背景同步过渡
     val topBarIconTint by animateColorAsState(
-        targetValue = if (catalogVisibleFraction > 0.35f) fluxColors.onSurface else Color(0xFFFFFFFF),
+        targetValue = if (collapseFraction > 0.35f) fluxColors.onSurface else Color.White,
         animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
         label = "topBarIcon",
     )
     val topBarTitleColor by animateColorAsState(
-        targetValue = if (catalogVisibleFraction > 0.35f) fluxColors.onSurface else Color(0xFFFFFFFF),
+        targetValue = if (collapseFraction > 0.35f) fluxColors.onSurface else Color.White,
         animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
         label = "topBarTitleColor",
     )
@@ -243,9 +223,6 @@ fun AudiobookDetailContent(
         animationSpec = spring(stiffness = 400f, dampingRatio = 0.5f),
         label = "favScale",
     )
-
-    // 背景渐变使用的主色：优先使用封面提取色，否则使用主题 primary
-    val gradientPrimary = paletteColor ?: fluxColors.primary
 
     Box(
         modifier = modifier
@@ -593,71 +570,56 @@ fun AudiobookDetailContent(
             }
         }
 
-        // ── 悬浮顶栏 — 融入式设计：未滚动时透明融入渐变背景，滚动后渐变出毛玻璃表面 ──
-        Box(
+        // ── 悬浮顶栏 — 纯透明悬浮：无背景色块、无分隔线，内容自然从下方滚过 ──
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(topBarHeight + statusBarTop),
+                .height(topBarHeight + statusBarTop)
+                .padding(top = statusBarTop, start = 4.dp, end = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 顶栏背景
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(topBarBgColor),
-            )
-            // 底部分隔线（仅在滚动到目录区域后显示，视觉上连接顶栏与下方内容）
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(0.5.dp)
-                    .background(fluxColors.outlineVariant.copy(alpha = topBarDividerAlpha)),
-            )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = statusBarTop, start = 4.dp, end = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // 左侧返回
-                IconButton(onClick = onBackClick) {
-                    Icon(
-                        painter = painterResource(coreUiR.drawable.ic_arrow_left),
-                        contentDescription = "返回",
-                        tint = topBarIconTint,
-                    )
-                }
-
-                // 中间书名（滚动后渐显）
-                Text(
-                    text = book.title,
-                    color = topBarTitleColor.copy(alpha = topBarTitleAlpha),
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .padding(horizontal = 8.dp),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            // 左侧返回
+            IconButton(onClick = onBackClick) {
+                Icon(
+                    painter = painterResource(coreUiR.drawable.ic_arrow_left),
+                    contentDescription = "返回",
+                    tint = topBarIconTint,
                 )
+            }
 
-                // 右侧收藏（带点击微交互）
-                IconButton(
-                    onClick = { /* 收藏 - 开发中 */ },
-                    modifier = Modifier.graphicsLayer {
-                        scaleX = favScale
-                        scaleY = favScale
-                    },
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.FavoriteBorder,
-                        contentDescription = "收藏",
-                        tint = topBarIconTint,
+            // 中间书名（滚动后渐显，悬浮胶囊衬底保证内容穿过时可读）
+            Text(
+                text = book.title,
+                color = topBarTitleColor.copy(alpha = topBarTitleAlpha),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .padding(horizontal = 8.dp)
+                    .background(
+                        fluxColors.surfaceVariant.copy(alpha = topBarTitleAlpha * 0.5f),
+                        RoundedCornerShape(16.dp),
                     )
-                }
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+
+            // 右侧收藏（带点击微交互）
+            IconButton(
+                onClick = { /* 收藏 - 开发中 */ },
+                modifier = Modifier.graphicsLayer {
+                    scaleX = favScale
+                    scaleY = favScale
+                },
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.FavoriteBorder,
+                    contentDescription = "收藏",
+                    tint = topBarIconTint,
+                )
             }
         }
     }

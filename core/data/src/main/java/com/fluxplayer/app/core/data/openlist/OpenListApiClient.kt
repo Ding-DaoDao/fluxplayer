@@ -48,18 +48,21 @@ class OpenListApiClient(
      */
     suspend fun adminLogin(password: String): Result<String> = runCatching {
         Log.d(TAG, "adminLogin: password=${password.take(4)}..., baseUrl=$baseUrl")
-        val body = """{"username":"admin","password":"$password"}"""
+        val body = JSONObject().put("username", "admin").put("password", password).toString()
         val request = Request.Builder()
             .url("$baseUrl/api/auth/login")
             .post(body.toRequestBody(MEDIA_TYPE_JSON))
             .build()
 
-        val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
-        val responseBody = response.body?.string() ?: error("Empty response")
-        Log.d(TAG, "adminLogin response: HTTP ${response.code}, body=${responseBody.take(300)}")
-
-        if (!response.isSuccessful) {
-            error("Login failed: HTTP ${response.code} $responseBody")
+        val responseBody = withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { resp ->
+                val respBody = resp.body?.string() ?: error("Empty response")
+                Log.d(TAG, "adminLogin response: HTTP ${resp.code}, body=${respBody.take(300)}")
+                if (!resp.isSuccessful) {
+                    error("Login failed: HTTP ${resp.code} $respBody")
+                }
+                respBody
+            }
         }
 
         val jsonObj = JSONObject(responseBody)
@@ -91,7 +94,11 @@ class OpenListApiClient(
             .head()
             .build()
 
-        client.newCall(request).execute().isSuccessful
+        withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { resp ->
+                resp.isSuccessful
+            }
+        }
     }
 
     // ====================================================================
@@ -131,23 +138,18 @@ class OpenListApiClient(
         val request = requestBuilder.build()
 
         Log.d(TAG, "executing request...")
-        val (response, responseBody) = try {
-            withContext(Dispatchers.IO) {
-                val resp = client.newCall(request).execute()
+        val responseBody = withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { resp ->
                 val body = resp.body?.string()
-                Pair(resp, body)
+                Log.d(TAG, "response: HTTP ${resp.code}, body=${body?.take(200)}")
+                if (body == null) {
+                    error("Empty response body (HTTP ${resp.code})")
+                }
+                if (!resp.isSuccessful) {
+                    error("listFiles failed: HTTP ${resp.code} $body")
+                }
+                body
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "execute/body.string() threw: ${e.javaClass.name}: msg='${e.message}'", e)
-            throw e
-        }
-        Log.d(TAG, "response: HTTP ${response.code}, body=${responseBody?.take(200)}")
-        if (responseBody == null) {
-            error("Empty response body (HTTP ${response.code})")
-        }
-
-        if (!response.isSuccessful) {
-            error("listFiles failed: HTTP ${response.code} $responseBody")
         }
 
         val jsonObj = JSONObject(responseBody)
@@ -204,8 +206,11 @@ class OpenListApiClient(
             .post(body.toString().toRequestBody(MEDIA_TYPE_JSON))
             .build()
 
-        val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
-        val responseBody = response.body?.string() ?: error("Empty response")
+        val responseBody = withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { resp ->
+                resp.body?.string() ?: error("Empty response")
+            }
+        }
         val jsonObj = JSONObject(responseBody)
         val code = jsonObj.optLong("code", -1)
         if (code != 200L) {
@@ -227,8 +232,11 @@ class OpenListApiClient(
             .header("Authorization", "Bearer ${adminToken ?: error("Not logged in")}")
             .build()
 
-        val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: error("Empty response")
+        val responseBody = withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { resp ->
+                resp.body?.string() ?: error("Empty response")
+            }
+        }
         val jsonObj = JSONObject(responseBody)
 
         val content = jsonObj
@@ -248,32 +256,38 @@ class OpenListApiClient(
             .post(config.toRequestBody(MEDIA_TYPE_JSON))
             .build()
 
-        val response = client.newCall(request).execute()
-        val jsonObj = JSONObject(response.body?.string() ?: error("Empty response"))
-        jsonObj.optLong("code", -1) == 200L
+        val code = withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { resp ->
+                JSONObject(resp.body?.string() ?: error("Empty response")).optLong("code", -1)
+            }
+        }
+        code == 200L
     }
 
     /**
      * 删除存储后端。
      */
     suspend fun deleteStorage(storageId: String): Result<Boolean> = runCatching {
-        val body = """{"id":"$storageId"}"""
+        val body = JSONObject().put("id", storageId).toString()
         val request = Request.Builder()
             .url("$baseUrl/api/admin/storage/delete")
             .header("Authorization", "Bearer ${adminToken ?: error("Not logged in")}")
             .post(body.toRequestBody(MEDIA_TYPE_JSON))
             .build()
 
-        val response = client.newCall(request).execute()
-        val jsonObj = JSONObject(response.body?.string() ?: error("Empty response"))
-        jsonObj.optLong("code", -1) == 200L
+        val code = withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { resp ->
+                JSONObject(resp.body?.string() ?: error("Empty response")).optLong("code", -1)
+            }
+        }
+        code == 200L
     }
 
     /**
      * 修改管理员密码（PUT /api/auth/admin）。
      */
     suspend fun changePassword(newPassword: String): Result<Boolean> = runCatching {
-        val body = """{"password":"$newPassword"}"""
+        val body = JSONObject().put("password", newPassword).toString()
         Log.d(TAG, "changePassword: token=${adminToken?.take(10)}..., url=$baseUrl/api/auth/admin")
         val request = Request.Builder()
             .url("$baseUrl/api/auth/admin")
@@ -281,12 +295,15 @@ class OpenListApiClient(
             .put(body.toRequestBody(MEDIA_TYPE_JSON))
             .build()
 
-        val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
-        val responseBody = response.body?.string() ?: error("Empty response")
-        Log.d(TAG, "changePassword response: HTTP ${response.code}, body=${responseBody.take(500)}")
-
-        if (!response.isSuccessful) {
-            error("HTTP ${response.code}: $responseBody")
+        val responseBody = withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { resp ->
+                val respBody = resp.body?.string() ?: error("Empty response")
+                Log.d(TAG, "changePassword response: HTTP ${resp.code}, body=${respBody.take(500)}")
+                if (!resp.isSuccessful) {
+                    error("HTTP ${resp.code}: $respBody")
+                }
+                respBody
+            }
         }
 
         val jsonObj = JSONObject(responseBody)
