@@ -174,7 +174,7 @@ fun DanmakuSearchSheet(
                 .padding(top = 80.dp, end = 12.dp)
                 .widthIn(max = 320.dp)
                 .heightIn(max = 480.dp),
-            shape = RoundedCornerShape(16.dp),
+            shape = MaterialTheme.shapes.medium,
             colors = CardDefaults.cardColors(containerColor = SurfaceColor),
             elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
         ) {

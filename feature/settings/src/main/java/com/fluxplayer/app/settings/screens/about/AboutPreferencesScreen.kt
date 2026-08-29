@@ -156,7 +156,7 @@ fun AboutApp(
             appIcon?.let {
                 Image(
                     bitmap = it,
-                    contentDescription = "App Logo",
+                    contentDescription = stringResource(R.string.app_logo_desc),
                     modifier = Modifier.size(48.dp).clip(CircleShape),
                 )
             }

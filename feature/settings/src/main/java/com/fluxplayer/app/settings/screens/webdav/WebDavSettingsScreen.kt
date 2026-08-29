@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -66,7 +67,7 @@ fun WebDavSettingsScreen(
     // Add dialog
     if (uiState.showAddDialog) {
         ServerEditDialog(
-            title = "添加 WebDAV 服务器",
+            title = stringResource(R.string.add_webdav_server),
             server = uiState.editingServer,
             onNameChange = viewModel::updateEditingName,
             onUrlChange = viewModel::updateEditingUrl,
@@ -83,7 +84,7 @@ fun WebDavSettingsScreen(
     // Edit dialog
     uiState.showEditDialog?.let {
         ServerEditDialog(
-            title = "编辑 WebDAV 服务器",
+            title = stringResource(R.string.edit_webdav_server),
             server = uiState.editingServer,
             onNameChange = viewModel::updateEditingName,
             onUrlChange = viewModel::updateEditingUrl,
@@ -103,19 +104,19 @@ fun WebDavSettingsScreen(
             onDismissRequest = viewModel::dismissDialog,
             title = {
                 Text(
-                    text = "删除服务器",
+                    text = stringResource(R.string.delete_server),
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
             confirmButton = {
                 TextButton(onClick = { viewModel.deleteServer(server) }) {
-                    Text(text = "删除")
+                    Text(text = stringResource(R.string.delete))
                 }
             },
             dismissButton = { CancelButton(onClick = viewModel::dismissDialog) },
             content = {
                 Text(
-                    text = "确定要删除「${server.name}」吗？",
+                    text = stringResource(R.string.delete_server_named, server.name),
                     style = MaterialTheme.typography.titleSmall,
                 )
             },
@@ -144,11 +145,11 @@ private fun WebDavSettingsContent(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
         ) {
-            ListSectionTitle(text = "服务器列表")
+            ListSectionTitle(text = stringResource(R.string.server_list))
 
             if (uiState.servers.isEmpty()) {
                 Text(
-                    text = "暂无服务器，点击下方按钮添加",
+                    text = stringResource(R.string.no_servers_hint),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 16.dp),
@@ -175,7 +176,7 @@ private fun WebDavSettingsContent(
             Spacer(modifier = Modifier.height(16.dp))
 
             ClickablePreferenceItem(
-                title = "添加服务器",
+                title = stringResource(R.string.add_server),
                 icon = NextIcons.FileOpen,
                 onClick = onAddClick,
                 isFirstItem = true,
@@ -232,7 +233,7 @@ private fun ServerCard(
                 IconButton(onClick = onDelete) {
                     Icon(
                         imageVector = NextIcons.Delete,
-                        contentDescription = "删除",
+                        contentDescription = stringResource(R.string.delete),
                         tint = MaterialTheme.colorScheme.error,
                     )
                 }
@@ -270,8 +271,8 @@ private fun ServerEditDialog(
             OutlinedTextField(
                 value = server.name,
                 onValueChange = onNameChange,
-                label = { Text("名称") },
-                placeholder = { Text("例如：我的NAS") },
+                label = { Text(stringResource(R.string.webdav_field_name)) },
+                placeholder = { Text(stringResource(R.string.webdav_name_placeholder)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -279,8 +280,8 @@ private fun ServerEditDialog(
             OutlinedTextField(
                 value = server.url,
                 onValueChange = onUrlChange,
-                label = { Text("服务器地址") },
-                placeholder = { Text("http://192.168.1.100:5005") },
+                label = { Text(stringResource(R.string.server_url)) },
+                placeholder = { Text(stringResource(R.string.webdav_url_placeholder)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -288,7 +289,7 @@ private fun ServerEditDialog(
             OutlinedTextField(
                 value = server.username,
                 onValueChange = onUsernameChange,
-                label = { Text("用户名") },
+                label = { Text(stringResource(R.string.webdav_field_username)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -296,7 +297,7 @@ private fun ServerEditDialog(
             OutlinedTextField(
                 value = server.password,
                 onValueChange = onPasswordChange,
-                label = { Text("密码") },
+                label = { Text(stringResource(R.string.webdav_field_password)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
@@ -318,12 +319,12 @@ private fun ServerEditDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                     }
-                    Text("测试连接")
+                    Text(stringResource(R.string.test_connection))
                 }
                 testResult?.let { result ->
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (result == "ok") "✓ 连接成功" else "✗ $result",
+                        text = if (result == "ok") stringResource(R.string.webdav_connection_ok) else stringResource(R.string.webdav_connection_failed, result),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (result == "ok")
                             MaterialTheme.colorScheme.primary

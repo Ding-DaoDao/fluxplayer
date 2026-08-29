@@ -7,6 +7,8 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -15,7 +17,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.fluxplayer.app.core.model.AccentPreset
 import com.fluxplayer.app.core.model.ComposeEngine
+import com.fluxplayer.app.core.model.ThemeStyle
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamicColorScheme
 
@@ -254,9 +258,20 @@ fun NextPlayerTheme(
     dynamicColor: Boolean = true,
     customSeedColor: Int = 0,
     composeEngine: ComposeEngine = ComposeEngine.MATERIAL,
+    themeStyle: ThemeStyle = ThemeStyle.TONAL,
+    accentPreset: AccentPreset = AccentPreset.Default,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = resolveColorScheme(darkTheme, highContrastDarkTheme, dynamicColor, customSeedColor)
+    val colorScheme = resolveColorScheme(
+        darkTheme = darkTheme,
+        highContrastDarkTheme = highContrastDarkTheme,
+        dynamicColor = dynamicColor,
+        customSeedColor = customSeedColor,
+        themeStyle = themeStyle,
+        accentPreset = accentPreset,
+    )
+    val typography = if (themeStyle == ThemeStyle.INK) InkTypography else Typography
+    val shapes = if (themeStyle == ThemeStyle.INK) InkShapes else Shapes()
 
     CompositionLocalProvider(LocalComposeEngine provides composeEngine) {
         when (composeEngine) {
@@ -268,6 +283,8 @@ fun NextPlayerTheme(
             )
             ComposeEngine.MATERIAL -> MaterialThemeWrapper(
                 colorScheme = colorScheme,
+                typography = typography,
+                shapes = shapes,
                 content = content,
             )
         }
@@ -280,7 +297,14 @@ private fun resolveColorScheme(
     highContrastDarkTheme: Boolean,
     dynamicColor: Boolean,
     customSeedColor: Int,
+    themeStyle: ThemeStyle,
+    accentPreset: AccentPreset,
 ): ColorScheme = when {
+    // 墨 · 极简风格优先：中性灰底 + 强调色派生，忽略 tonal 体系下的动态取色 / 自定义 seed
+    themeStyle == ThemeStyle.INK -> inkColorScheme(
+        accent = accentPreset.colorFor(darkTheme),
+        dark = darkTheme,
+    )
     // 自定义主题色优先级最高
     customSeedColor != 0 -> {
         val scheme = dynamicColorScheme(
@@ -340,10 +364,12 @@ private fun resolveColorScheme(
 @Composable
 private fun MaterialThemeWrapper(
     colorScheme: ColorScheme,
+    typography: Typography,
+    shapes: Shapes,
     content: @Composable () -> Unit,
 ) {
     val fluxColorScheme = colorScheme.toFluxColorScheme()
-    val fluxTypography = Typography.toFluxTypography()
+    val fluxTypography = typography.toFluxTypography()
 
     CompositionLocalProvider(
         LocalFluxColorScheme provides fluxColorScheme,
@@ -351,7 +377,8 @@ private fun MaterialThemeWrapper(
     ) {
         MaterialExpressiveTheme(
             colorScheme = colorScheme,
-            typography = Typography,
+            typography = typography,
+            shapes = shapes,
             motionScheme = MotionScheme.expressive(),
             content = content,
         )

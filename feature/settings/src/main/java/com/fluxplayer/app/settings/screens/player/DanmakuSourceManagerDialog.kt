@@ -27,10 +27,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.model.DanmakuSource
+import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.model.DanmakuSourceType
 import java.util.UUID
 
@@ -50,7 +52,7 @@ fun DanmakuSourceManagerDialog(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "弹幕源管理",
+                    text = stringResource(R.string.danmaku_sources),
                     style = MaterialTheme.typography.headlineSmall,
                     modifier = Modifier.weight(1f),
                 )
@@ -59,7 +61,7 @@ fun DanmakuSourceManagerDialog(
                         onClick = { showAddForm = true },
                         shape = RoundedCornerShape(8.dp),
                     ) {
-                        Text("添加")
+                        Text(stringResource(R.string.add))
                     }
                 }
             }
@@ -81,7 +83,7 @@ fun DanmakuSourceManagerDialog(
                 )
             } else {
                 if (sources.isEmpty()) {
-                    Text("还没有弹幕源。点击「添加」按钮添加自定义弹幕源。")
+                    Text(stringResource(R.string.danmaku_source_empty_hint))
                 } else {
                     LazyColumn(
                         modifier = Modifier
@@ -111,7 +113,7 @@ fun DanmakuSourceManagerDialog(
         },
         confirmButton = {
             Button(onClick = onDismiss) {
-                Text("完成")
+                Text(stringResource(R.string.done))
             }
         },
     )
@@ -127,7 +129,7 @@ private fun AddSourceForm(
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "添加自定义弹幕源",
+            text = stringResource(R.string.danmaku_add_custom_title),
             fontWeight = FontWeight.Bold,
         )
         Spacer(modifier = Modifier.height(12.dp))
@@ -135,7 +137,7 @@ private fun AddSourceForm(
             value = name,
             onValueChange = { name = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("名称，如「我的源」") },
+            placeholder = { Text(stringResource(R.string.danmaku_name_placeholder)) },
             singleLine = true,
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -143,7 +145,7 @@ private fun AddSourceForm(
             value = url,
             onValueChange = { url = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("API 地址，如 https://api.dandanplay.net") },
+            placeholder = { Text(stringResource(R.string.danmaku_url_placeholder)) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
@@ -153,7 +155,7 @@ private fun AddSourceForm(
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onCancel) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(
@@ -161,7 +163,7 @@ private fun AddSourceForm(
                 enabled = name.isNotBlank() && url.isNotBlank(),
                 shape = RoundedCornerShape(8.dp),
             ) {
-                Text("确认添加")
+                Text(stringResource(R.string.confirm_add))
             }
         }
     }
@@ -199,7 +201,7 @@ private fun SourceRow(
                 )
                 if (source.type == DanmakuSourceType.CUSTOM) {
                     TextButton(onClick = onDelete) {
-                        Text("删除", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }

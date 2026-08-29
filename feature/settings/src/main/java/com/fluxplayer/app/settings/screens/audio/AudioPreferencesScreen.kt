@@ -50,7 +50,8 @@ private fun AudioPreferencesContent(
     onEvent: (AudioPreferencesUiEvent) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
-    val languages = remember { listOf(Pair("None", "")) + LocalesHelper.getAvailableLocales() }
+    val noLanguage = stringResource(R.string.no_language)
+    val languages = remember { listOf(Pair(noLanguage, "")) + LocalesHelper.getAvailableLocales() }
 
     FluxSettingsScaffold(
         title = stringResource(id = R.string.audio),

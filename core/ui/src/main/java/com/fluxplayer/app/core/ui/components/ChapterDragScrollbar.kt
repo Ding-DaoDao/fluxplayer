@@ -2,6 +2,7 @@ package com.fluxplayer.app.core.ui.components
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
@@ -11,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -135,20 +136,23 @@ fun ChapterDragScrollbar(
                     .clip(RoundedCornerShape(1.dp))
                     .background(thumbColorStatic.copy(alpha = trackAlpha)),
             )
-            // 已播章节打点（进度地图）
-            playedChapters.forEach { chapterIndex ->
-                val dotTop = with(density) {
-                    (trackHeightPx * (chapterIndex + itemOffset) / totalCount).toDp()
+            // 已播章节打点（进度地图）：单 Canvas 绘制，避免数百个 Box 节点拖慢弹窗首帧
+            Canvas(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(6.dp)
+                    .fillMaxHeight(),
+            ) {
+                val dotRadius = 3.dp.toPx()
+                val centerX = dotRadius
+                playedChapters.forEach { chapterIndex ->
+                    val dotTop = size.height * (chapterIndex + itemOffset) / totalCount
+                    drawCircle(
+                        color = colors.primary.copy(alpha = 0.55f),
+                        radius = dotRadius,
+                        center = Offset(centerX, dotTop),
+                    )
                 }
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .offset(y = dotTop - 3.dp)
-                        .width(6.dp)
-                        .height(6.dp)
-                        .clip(CircleShape)
-                        .background(colors.primary.copy(alpha = 0.55f)),
-                )
             }
             // thumb（可拖拽，圆润胶囊 + 动画，无投影避免浅色背景下出现杂边）
             Box(
@@ -157,7 +161,7 @@ fun ChapterDragScrollbar(
                     .offset(y = thumbTop)
                     .width(thumbWidth)
                     .height(thumbHeight)
-                    .clip(RoundedCornerShape(4.dp))
+                     .clip(RoundedCornerShape(4.dp))
                     .background(colors.onSurfaceVariant.copy(alpha = thumbAlpha)),
             )
         }

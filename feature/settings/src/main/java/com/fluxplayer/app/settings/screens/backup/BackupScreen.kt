@@ -369,7 +369,7 @@ fun BackupScreen(
                         TextButton(onClick = { directoryPickerLauncher.launch(null) }) {
                             Icon(NextIcons.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("浏览目录")
+                            Text(stringResource(R.string.browse_directory))
                         }
                     }
                 },

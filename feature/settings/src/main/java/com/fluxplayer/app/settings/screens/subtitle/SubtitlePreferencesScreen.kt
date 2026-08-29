@@ -63,7 +63,8 @@ private fun SubtitlePreferencesContent(
     onEvent: (SubtitlePreferencesUiEvent) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
-    val languages = remember { listOf(Pair("None", "")) + LocalesHelper.getAvailableLocales() }
+    val noLanguage = stringResource(R.string.no_language)
+    val languages = remember { listOf(Pair(noLanguage, "")) + LocalesHelper.getAvailableLocales() }
     val charsetResource = stringArrayResource(id = R.array.charsets_list)
     val context = LocalContext.current
 
@@ -143,7 +144,7 @@ private fun SubtitlePreferencesContent(
                         ) {
                             Icon(
                                 imageVector = NextIcons.History,
-                                contentDescription = stringResource(id = R.string.reset_seek_increment),
+                                contentDescription = stringResource(id = R.string.reset_subtitle_text_size),
                             )
                         }
                     },
@@ -162,6 +163,7 @@ private fun SubtitlePreferencesContent(
                     title = stringResource(R.string.embedded_styles),
                     description = stringResource(R.string.embedded_styles_desc),
                     icon = NextIcons.Style,
+                    enabled = uiState.preferences.useSystemCaptionStyle.not(),
                     isChecked = uiState.preferences.applyEmbeddedStyles,
                     onClick = { onEvent(SubtitlePreferencesUiEvent.ToggleApplyEmbeddedStyles) },
                     isLastItem = true

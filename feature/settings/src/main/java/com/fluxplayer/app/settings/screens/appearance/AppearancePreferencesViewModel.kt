@@ -5,10 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.model.AccentPreset
 import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.model.StartupPage
 import com.fluxplayer.app.core.model.ThemeConfig
+import com.fluxplayer.app.core.model.ThemeStyle
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,6 +53,8 @@ class AppearancePreferencesViewModel @Inject constructor(
             is AppearancePreferencesEvent.UpdateBottomBarBlurRadius -> updateBottomBarBlurRadius(event.value)
             is AppearancePreferencesEvent.UpdateBottomBarBlurAlpha -> updateBottomBarBlurAlpha(event.value)
             is AppearancePreferencesEvent.UpdateComposeEngine -> updateComposeEngine(event.composeEngine)
+            is AppearancePreferencesEvent.UpdateThemeStyle -> updateThemeStyle(event.themeStyle)
+            is AppearancePreferencesEvent.UpdateAccentPreset -> updateAccentPreset(event.accentPreset)
             is AppearancePreferencesEvent.UpdateCustomSeedColor -> updateCustomSeedColor(event.value)
             is AppearancePreferencesEvent.UpdateTopBarOpacity -> updateTopBarOpacity(event.value)
             is AppearancePreferencesEvent.UpdateBottomBarOpacity -> updateBottomBarOpacity(event.value)
@@ -175,6 +179,31 @@ class AppearancePreferencesViewModel @Inject constructor(
         }
     }
 
+    private fun updateThemeStyle(themeStyle: ThemeStyle) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(
+                    themeStyle = themeStyle,
+                    // 墨 · 极简是 Material 3 专属风格（Miuix 引擎使用内置默认色，
+                    // 不接收墨色方案），选墨色时引擎自动切回 Material 3。
+                    composeEngine = if (themeStyle == ThemeStyle.INK) {
+                        ComposeEngine.MATERIAL
+                    } else {
+                        it.composeEngine
+                    },
+                )
+            }
+        }
+    }
+
+    private fun updateAccentPreset(accentPreset: AccentPreset) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences {
+                it.copy(accentPreset = accentPreset)
+            }
+        }
+    }
+
     private fun updateCustomSeedColor(value: Int) {
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences {
@@ -213,7 +242,7 @@ class AppearancePreferencesViewModel @Inject constructor(
     private fun toggleShowVideosTab() {
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences {
-                it.copy(showVideosTab = !it.showVideosTab)
+                ensureValidStartupPage(it.copy(showVideosTab = !it.showVideosTab))
             }
         }
     }
@@ -221,7 +250,7 @@ class AppearancePreferencesViewModel @Inject constructor(
     private fun toggleShowBrowseTab() {
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences {
-                it.copy(showBrowseTab = !it.showBrowseTab)
+                ensureValidStartupPage(it.copy(showBrowseTab = !it.showBrowseTab))
             }
         }
     }
@@ -229,7 +258,7 @@ class AppearancePreferencesViewModel @Inject constructor(
     private fun toggleShowHistoryTab() {
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences {
-                it.copy(showHistoryTab = !it.showHistoryTab)
+                ensureValidStartupPage(it.copy(showHistoryTab = !it.showHistoryTab))
             }
         }
     }
@@ -237,9 +266,26 @@ class AppearancePreferencesViewModel @Inject constructor(
     private fun toggleShowAudiobookTab() {
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences {
-                it.copy(showAudiobookTab = !it.showAudiobookTab)
+                ensureValidStartupPage(it.copy(showAudiobookTab = !it.showAudiobookTab))
             }
         }
+    }
+
+    /**
+     * 启动页必须指向仍可见的 tab：当前启动页被隐藏时，自动回退到第一个可见 tab。
+     */
+    private fun ensureValidStartupPage(preferences: ApplicationPreferences): ApplicationPreferences {
+        val visiblePages = buildList {
+            if (preferences.showVideosTab) add(StartupPage.VIDEOS)
+            if (preferences.showBrowseTab) add(StartupPage.BROWSE)
+            if (preferences.showHistoryTab) add(StartupPage.HISTORY)
+            if (preferences.showAudiobookTab) add(StartupPage.AUDIOBOOK)
+        }
+        val startupPage = preferences.startupPage
+            .takeIf { it in visiblePages }
+            ?: visiblePages.firstOrNull()
+            ?: StartupPage.VIDEOS
+        return preferences.copy(startupPage = startupPage)
     }
 
     private fun updateStartupPage(startupPage: StartupPage) {
@@ -272,6 +318,8 @@ sealed interface AppearancePreferencesEvent {
     data class UpdateBottomBarBlurRadius(val value: Int) : AppearancePreferencesEvent
     data class UpdateBottomBarBlurAlpha(val value: Int) : AppearancePreferencesEvent
     data class UpdateComposeEngine(val composeEngine: ComposeEngine) : AppearancePreferencesEvent
+    data class UpdateThemeStyle(val themeStyle: ThemeStyle) : AppearancePreferencesEvent
+    data class UpdateAccentPreset(val accentPreset: AccentPreset) : AppearancePreferencesEvent
     data class UpdateCustomSeedColor(val value: Int) : AppearancePreferencesEvent
     data class UpdateTopBarOpacity(val value: Int) : AppearancePreferencesEvent
     data class UpdateBottomBarOpacity(val value: Int) : AppearancePreferencesEvent
@@ -286,5 +334,6 @@ sealed interface AppearancePreferencesEvent {
 sealed interface AppearancePreferenceDialog {
     data object Theme : AppearancePreferenceDialog
     data object ComposeEngine : AppearancePreferenceDialog
+    data object ThemeStyle : AppearancePreferenceDialog
     data object StartupPage : AppearancePreferenceDialog
 }

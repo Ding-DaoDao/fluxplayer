@@ -5,6 +5,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -39,9 +41,11 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fluxplayer.app.core.model.AccentPreset
 import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.model.StartupPage
 import com.fluxplayer.app.core.model.ThemeConfig
+import com.fluxplayer.app.core.model.ThemeStyle
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.PreferenceItem
@@ -52,6 +56,8 @@ import com.fluxplayer.app.core.ui.components.PreferenceSwitchWithDivider
 import com.fluxplayer.app.core.ui.components.RadioTextButton
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
+import com.fluxplayer.app.core.ui.theme.colorFor
+import com.fluxplayer.app.core.ui.theme.onAccent
 import com.fluxplayer.app.core.ui.theme.supportsDynamicTheming
 import com.fluxplayer.app.settings.composables.OptionsDialog
 import com.fluxplayer.app.settings.extensions.name
@@ -90,6 +96,33 @@ private fun AppearancePreferencesContent(
         ) {
             ListSectionTitle(text = stringResource(id = R.string.appearance_name))
             Column {
+                // 主题风格是最高层级的风格选择：INK（墨·极简）会覆盖其下的
+                // 动态取色 / 主题色 / 高对比深色，因此这些选项在 INK 下隐藏。
+                val isInkStyle = uiState.preferences.themeStyle == ThemeStyle.INK
+                // 高对比深色只在当前实际为深色时有效，浅色模式下禁用。
+                val isDarkNow = when (uiState.preferences.themeConfig) {
+                    ThemeConfig.ON -> true
+                    ThemeConfig.OFF -> false
+                    ThemeConfig.SYSTEM -> isSystemInDarkTheme()
+                }
+                PreferenceItem(
+                    title = stringResource(R.string.theme_style),
+                    description = uiState.preferences.themeStyle.name(),
+                    icon = NextIcons.Appearance,
+                    enabled = true,
+                    onClick = { onEvent(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.ThemeStyle)) },
+                    isFirstItem = true,
+                    isLastItem = false
+                )
+                if (isInkStyle) {
+                    HorizontalDivider()
+                    AccentPresetPicker(
+                        selected = uiState.preferences.accentPreset,
+                        isDark = isDarkNow,
+                        onSelect = { onEvent(AppearancePreferencesEvent.UpdateAccentPreset(it)) },
+                    )
+                }
+                HorizontalDivider()
                 PreferenceSwitchWithDivider(
                     title = stringResource(id = R.string.dark_theme),
                     description = uiState.preferences.themeConfig.name(),
@@ -97,39 +130,42 @@ private fun AppearancePreferencesContent(
                     onChecked = { onEvent(AppearancePreferencesEvent.ToggleDarkTheme) },
                     icon = NextIcons.DarkMode,
                     onClick = { onEvent(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.Theme)) },
-                    isFirstItem = true
+                    isFirstItem = false,
+                    isLastItem = isInkStyle || !supportsDynamicTheming()
                 )
-                HorizontalDivider()
-                PreferenceSwitch(
-                    title = stringResource(R.string.high_contrast_dark_theme),
-                    description = stringResource(R.string.high_contrast_dark_theme_desc),
-                    icon = NextIcons.Contrast,
-                    isChecked = uiState.preferences.useHighContrastDarkTheme,
-                    onClick = { onEvent(AppearancePreferencesEvent.ToggleUseHighContrastDarkTheme) },
-                    isLastItem = !supportsDynamicTheming()
-                )
-                if (supportsDynamicTheming()) {
+                if (!isInkStyle) {
                     HorizontalDivider()
                     PreferenceSwitch(
-                        title = stringResource(id = R.string.dynamic_theme),
-                        description = stringResource(id = R.string.dynamic_theme_description),
-                        icon = NextIcons.Appearance,
-                        isChecked = uiState.preferences.useDynamicColors,
-                        onClick = { onEvent(AppearancePreferencesEvent.ToggleUseDynamicColors) },
-                        isLastItem = false
+                        title = stringResource(R.string.high_contrast_dark_theme),
+                        description = stringResource(R.string.high_contrast_dark_theme_desc),
+                        icon = NextIcons.Contrast,
+                        enabled = isDarkNow,
+                        isChecked = uiState.preferences.useHighContrastDarkTheme,
+                        onClick = { onEvent(AppearancePreferencesEvent.ToggleUseHighContrastDarkTheme) },
+                        isLastItem = !supportsDynamicTheming()
                     )
-                }
-                if (!uiState.preferences.useDynamicColors) {
-                    HorizontalDivider()
-                    ThemeColorPicker(
-                        selectedColor = uiState.preferences.customSeedColor,
-                        onColorSelected = { color ->
-                            onEvent(AppearancePreferencesEvent.UpdateCustomSeedColor(color))
-                        },
-                    )
+                    if (supportsDynamicTheming()) {
+                        HorizontalDivider()
+                        PreferenceSwitch(
+                            title = stringResource(id = R.string.dynamic_theme),
+                            description = stringResource(id = R.string.dynamic_theme_description),
+                            icon = NextIcons.Appearance,
+                            isChecked = uiState.preferences.useDynamicColors,
+                            onClick = { onEvent(AppearancePreferencesEvent.ToggleUseDynamicColors) },
+                            isLastItem = false
+                        )
+                    }
+                    if (!uiState.preferences.useDynamicColors) {
+                        HorizontalDivider()
+                        ThemeColorPicker(
+                            selectedColor = uiState.preferences.customSeedColor,
+                            onColorSelected = { color ->
+                                onEvent(AppearancePreferencesEvent.UpdateCustomSeedColor(color))
+                            },
+                        )
+                    }
                 }
                 HorizontalDivider()
-                val isMiuix = uiState.preferences.composeEngine == ComposeEngine.MIUIX
                 PreferenceSwitch(
                     title = stringResource(R.string.floating_bottom_bar),
                     description = stringResource(R.string.floating_bottom_bar_description),
@@ -153,7 +189,8 @@ private fun AppearancePreferencesContent(
                     title = stringResource(R.string.compose_engine),
                     description = uiState.preferences.composeEngine.name(),
                     icon = NextIcons.Appearance,
-                    enabled = true,
+                    // 墨·极简是 Material 3 专属风格，INK 下不允许切到 Miuix。
+                    enabled = !isInkStyle,
                     onClick = { onEvent(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.ComposeEngine)) },
                     isLastItem = false
                 )
@@ -324,6 +361,23 @@ private fun AppearancePreferencesContent(
                         }
                     }
                 }
+                AppearancePreferenceDialog.ThemeStyle -> {
+                    OptionsDialog(
+                        text = stringResource(id = R.string.theme_style),
+                        onDismissClick = { onEvent(AppearancePreferencesEvent.ShowDialog(null)) },
+                    ) {
+                        items(ThemeStyle.entries.toTypedArray()) {
+                            RadioTextButton(
+                                text = it.name(),
+                                selected = (it == uiState.preferences.themeStyle),
+                                onClick = {
+                                    onEvent(AppearancePreferencesEvent.UpdateThemeStyle(it))
+                                    onEvent(AppearancePreferencesEvent.ShowDialog(null))
+                                },
+                            )
+                        }
+                    }
+                }
                 AppearancePreferenceDialog.StartupPage -> {
                     OptionsDialog(
                         text = stringResource(id = R.string.startup_page),
@@ -349,17 +403,17 @@ private fun AppearancePreferencesContent(
 /**
  * 预设主题色选择卡
  */
-private data class PresetColor(val color: Int, val label: String)
+private data class PresetColor(val color: Int)
 
 private val presetColors = listOf(
-    PresetColor(0xFF3482FF.toInt(), "Blue"),
-    PresetColor(0xFFE53935.toInt(), "Red"),
-    PresetColor(0xFF43A047.toInt(), "Green"),
-    PresetColor(0xFF8E24AA.toInt(), "Purple"),
-    PresetColor(0xFFFB8C00.toInt(), "Orange"),
-    PresetColor(0xFFD81B60.toInt(), "Pink"),
-    PresetColor(0xFF00897B.toInt(), "Teal"),
-    PresetColor(0xFF3949AB.toInt(), "Indigo"),
+    PresetColor(0xFF3482FF.toInt()),
+    PresetColor(0xFFE53935.toInt()),
+    PresetColor(0xFF43A047.toInt()),
+    PresetColor(0xFF8E24AA.toInt()),
+    PresetColor(0xFFFB8C00.toInt()),
+    PresetColor(0xFFD81B60.toInt()),
+    PresetColor(0xFF00897B.toInt()),
+    PresetColor(0xFF3949AB.toInt()),
 )
 
 @Composable
@@ -403,6 +457,77 @@ private fun ThemeColorPicker(
                                 .background(Color.White),
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 墨 · 极简风格下的强调色选择：7 色圆点 + 名字，选中高亮描边。
+ * 圆点颜色跟随当前明暗（夜间显示更亮的深色变体），点击立即全局生效。
+ */
+@Composable
+private fun AccentPresetPicker(
+    selected: AccentPreset,
+    isDark: Boolean,
+    onSelect: (AccentPreset) -> Unit,
+) {
+    Column(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.accent_color),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            AccentPreset.entries.forEach { preset ->
+                val isSelected = preset == selected
+                val accentColor = preset.colorFor(isDark)
+                val borderColor = if (isSelected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant
+                }
+                val borderWidth = if (isSelected) 3.dp else 1.dp
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(accentColor)
+                            .border(borderWidth, borderColor, CircleShape)
+                            .clickable { onSelect(preset) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (isSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .clip(CircleShape)
+                                    .background(accentColor.onAccent()),
+                            )
+                        }
+                    }
+                    Text(
+                        text = preset.name(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
                 }
             }
         }

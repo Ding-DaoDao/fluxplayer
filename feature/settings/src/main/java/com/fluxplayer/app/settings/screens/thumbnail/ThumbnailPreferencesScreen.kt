@@ -151,7 +151,7 @@ private fun ThumbnailPreferencesContent(
                     ) {
                         Icon(
                             imageVector = NextIcons.History,
-                            contentDescription = stringResource(id = R.string.reset_seek_sensitivity),
+                            contentDescription = stringResource(id = R.string.reset_thumbnail_frame_position),
                         )
                     }
                 },

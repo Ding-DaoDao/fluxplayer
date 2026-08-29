@@ -9,7 +9,6 @@ import com.fluxplayer.app.core.common.CloudAwareCacheKeyRegistry
 import com.fluxplayer.app.core.data.cache.PlaybackCacheManager
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.CacheMaxSize
-import com.fluxplayer.app.core.model.ControlButtonsPosition
 import com.fluxplayer.app.core.model.DanmakuSource
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.model.Resume
@@ -53,7 +52,6 @@ class PlayerPreferencesViewModel @Inject constructor(
             PlayerPreferencesUiEvent.ToggleRememberBrightnessLevel -> toggleRememberBrightnessLevel()
             PlayerPreferencesUiEvent.ToggleRememberSelections -> toggleRememberSelections()
             is PlayerPreferencesUiEvent.UpdatePreferredPlayerOrientation -> updatePreferredPlayerOrientation(event.value)
-            is PlayerPreferencesUiEvent.UpdatePreferredControlButtonsPosition -> updatePreferredControlButtonsPosition(event.value)
             is PlayerPreferencesUiEvent.UpdateDefaultPlaybackSpeed -> updateDefaultPlaybackSpeed(event.value)
             is PlayerPreferencesUiEvent.UpdateControlAutoHideTimeout -> updateControlAutoHideTimeout(event.value)
             PlayerPreferencesUiEvent.ToggleUseMaterialYouControls -> toggleUseMaterialYouControls()
@@ -129,14 +127,6 @@ class PlayerPreferencesViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.updatePlayerPreferences {
                 it.copy(playerScreenOrientation = value)
-            }
-        }
-    }
-
-    private fun updatePreferredControlButtonsPosition(value: ControlButtonsPosition) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(controlButtonsPosition = value)
             }
         }
     }
@@ -250,7 +240,6 @@ data class PlayerPreferencesUiState(
 sealed interface PlayerPreferenceDialog {
     data object ResumeDialog : PlayerPreferenceDialog
     data object PlayerScreenOrientationDialog : PlayerPreferenceDialog
-    data object ControlButtonsDialog : PlayerPreferenceDialog
     data object DanmakuSourceManagerDialog : PlayerPreferenceDialog
     data object LocalDanmakuPathDialog : PlayerPreferenceDialog
     data object CacheMaxSizeDialog : PlayerPreferenceDialog
@@ -268,7 +257,6 @@ sealed interface PlayerPreferencesUiEvent {
     data object ToggleRememberBrightnessLevel : PlayerPreferencesUiEvent
     data object ToggleRememberSelections : PlayerPreferencesUiEvent
     data class UpdatePreferredPlayerOrientation(val value: ScreenOrientation) : PlayerPreferencesUiEvent
-    data class UpdatePreferredControlButtonsPosition(val value: ControlButtonsPosition) : PlayerPreferencesUiEvent
     data class UpdateDefaultPlaybackSpeed(val value: Float) : PlayerPreferencesUiEvent
     data class UpdateControlAutoHideTimeout(val value: Int) : PlayerPreferencesUiEvent
     data object ToggleUseMaterialYouControls : PlayerPreferencesUiEvent

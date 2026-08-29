@@ -77,7 +77,7 @@ fun DanmakuSourceManageSheet(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .height(480.dp)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.shapes.medium)
                 .padding(16.dp),
         ) {
             Row(

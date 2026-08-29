@@ -32,6 +32,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -57,7 +58,6 @@ fun OpenListSettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showChangePasswordDialog by rememberSaveable { mutableStateOf(false) }
-    var showAddStorageSheet by rememberSaveable { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -173,7 +173,7 @@ internal fun ServiceControlCard(
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    text = "服务状态",
+                    text = stringResource(R.string.openlist_service_status),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -197,7 +197,7 @@ internal fun ServiceControlCard(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("开机自启", modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.openlist_auto_start), modifier = Modifier.weight(1f))
                 Switch(checked = isAutoStart, onCheckedChange = onAutoStartChange)
             }
         }
@@ -231,9 +231,9 @@ internal fun StatusRow(state: OpenListServerState) {
         }
         else -> {
             val (label, color) = when (state) {
-                is OpenListServerState.Stopped -> "已停止" to MaterialTheme.colorScheme.outline
-                is OpenListServerState.Starting -> "启动中" to MaterialTheme.colorScheme.tertiary
-                is OpenListServerState.Running -> "运行中 (http://127.0.0.1:${state.port})" to MaterialTheme.colorScheme.primary
+                is OpenListServerState.Stopped -> stringResource(R.string.openlist_stopped) to MaterialTheme.colorScheme.outline
+                is OpenListServerState.Starting -> stringResource(R.string.openlist_starting) to MaterialTheme.colorScheme.tertiary
+                is OpenListServerState.Running -> stringResource(R.string.openlist_running, state.port) to MaterialTheme.colorScheme.primary
                 else -> return
             }
             Text(label, color = color, style = MaterialTheme.typography.bodyMedium)
@@ -254,7 +254,7 @@ internal fun AdminSection(
         ),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("账户 & 密码", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.openlist_admin_section), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -263,7 +263,7 @@ internal fun AdminSection(
                 Text("admin", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = password ?: "未设置",
+                    text = password ?: stringResource(R.string.not_set),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -276,8 +276,8 @@ internal fun AdminSection(
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onChangePassword) { Text("修改密码") }
-                OutlinedButton(onClick = onRandomPassword) { Text("随机密码") }
+                OutlinedButton(onClick = onChangePassword) { Text(stringResource(R.string.openlist_change_password)) }
+                OutlinedButton(onClick = onRandomPassword) { Text(stringResource(R.string.openlist_random_password)) }
             }
         }
     }
@@ -293,12 +293,12 @@ internal fun ChangePasswordDialog(
     var password by rememberSaveable { mutableStateOf("") }
     NextDialog(
         onDismissRequest = onDismiss,
-        title = { Text("修改密码") },
+        title = { Text(stringResource(R.string.openlist_change_password)) },
         content = {
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
-                label = { Text("新密码") },
+                label = { Text(stringResource(R.string.openlist_new_password)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -307,7 +307,7 @@ internal fun ChangePasswordDialog(
             TextButton(
                 enabled = password.isNotBlank(),
                 onClick = { onConfirm(password) },
-            ) { Text("确认") }
+            ) { Text(stringResource(R.string.confirm)) }
         },
         dismissButton = { CancelButton(onClick = onDismiss) },
     )

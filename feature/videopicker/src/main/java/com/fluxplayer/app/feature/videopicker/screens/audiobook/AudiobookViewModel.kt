@@ -99,6 +99,31 @@ class AudiobookViewModel @Inject constructor(
     }
 
     /**
+     * 下拉刷新：保留当前书架直到新结果到达（旧列表不闪空），
+     * 完成后整体替换列表；刷新期间由 [AudiobookUiState.isRefreshing] 驱动下拉指示器。
+     */
+    fun refreshBooks() {
+        val root = _uiState.value.rootUri ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshing = true) }
+            try {
+                val books = withContext(Dispatchers.IO) {
+                    scanDirectory(root, onBookScanned = {})
+                }
+                _uiState.update {
+                    it.copy(
+                        isRefreshing = false,
+                        scanState = DataState.Success(books),
+                        partialBooks = emptyList(),
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isRefreshing = false, scanState = DataState.Error(e)) }
+            }
+        }
+    }
+
+    /**
      * 扫描根目录：遍历一级子文件夹，每个子文件夹 = 一本书。
      * 并发扫描（IO 密集任务并行收益明显），每本书扫描完成即回调 [onBookScanned]。
      */
@@ -237,6 +262,8 @@ data class AudiobookUiState(
     val scanState: DataState<List<AudioBook>> = DataState.Loading,
     /** 扫描过程中的部分结果：边扫边填充，供 UI 在 Loading 时提前展示书架 */
     val partialBooks: List<AudioBook> = emptyList(),
+    /** 下拉刷新进行中（列表保持显示，顶部指示器驱动） */
+    val isRefreshing: Boolean = false,
     val resumeStates: Map<String, String> = emptyMap(),
     /** key: "bookPath|chapterIndex", value: "positionMs|durationMs" */
     val chapterProgress: Map<String, String> = emptyMap(),

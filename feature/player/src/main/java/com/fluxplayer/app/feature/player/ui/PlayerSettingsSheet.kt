@@ -453,9 +453,9 @@ private fun DarkChip(
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(bg, RoundedCornerShape(16.dp))
-            .border(borderWidth, border, RoundedCornerShape(16.dp))
+            .clip(MaterialTheme.shapes.medium)
+            .background(bg, MaterialTheme.shapes.medium)
+            .border(borderWidth, border, MaterialTheme.shapes.medium)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,

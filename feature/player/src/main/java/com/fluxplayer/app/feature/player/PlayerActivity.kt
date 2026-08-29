@@ -54,8 +54,10 @@ import com.fluxplayer.app.feature.player.service.stopPlayerSession
 import com.fluxplayer.app.feature.player.utils.PlayerApi
 import com.fluxplayer.app.core.data.extractor.ThumbnailExtractor
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.model.AccentPreset
 import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.model.ThemeConfig
+import com.fluxplayer.app.core.model.ThemeStyle
 import com.fluxplayer.app.core.model.VideoSource
 import android.util.Log
 import java.io.File
@@ -189,6 +191,8 @@ class PlayerActivity : ComponentActivity() {
                         darkTheme = shouldUseDarkTheme,
                         dynamicColor = appPrefs?.useDynamicColors ?: true,
                         composeEngine = appPrefs?.composeEngine ?: ComposeEngine.MATERIAL,
+                        themeStyle = appPrefs?.themeStyle ?: ThemeStyle.TONAL,
+                        accentPreset = appPrefs?.accentPreset ?: AccentPreset.Default,
                     ) {
                         val mp = player
                         // 从路径提取书名，供 loading 界面使用
@@ -205,6 +209,7 @@ class PlayerActivity : ComponentActivity() {
                                     player = currentPlayer,
                                     coverArtworkUri = coverArtworkUri,
                                     bookPath = bookPath,
+                                    bookName = bookTitle,
                                     chapterNames = viewModel.audioChapterNames,
                                     chapterPaths = audioBookChapterPaths,
                                     chapterProgress = chapterProgress,
@@ -255,6 +260,8 @@ class PlayerActivity : ComponentActivity() {
                         dynamicColor = appPrefs?.useDynamicColors ?: true,
                         customSeedColor = appPrefs?.customSeedColor ?: 0,
                         composeEngine = appPrefs?.composeEngine ?: ComposeEngine.MATERIAL,
+                        themeStyle = appPrefs?.themeStyle ?: ThemeStyle.TONAL,
+                        accentPreset = appPrefs?.accentPreset ?: AccentPreset.Default,
                     ) {
                         MediaPlayerScreen(
                             player = player,

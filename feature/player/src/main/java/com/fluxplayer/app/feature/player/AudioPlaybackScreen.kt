@@ -3,19 +3,26 @@ package com.fluxplayer.app.feature.player
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -26,13 +33,11 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Forward10
-import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.AccessTime
-import androidx.compose.material3.ripple
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -56,19 +61,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.media3.common.Player
 import coil3.compose.AsyncImage
 import com.fluxplayer.app.core.model.FluxMessageEvent
@@ -81,41 +92,11 @@ import com.fluxplayer.app.core.ui.R as coreUiR
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.R
 import androidx.compose.ui.res.stringResource
-import androidx.compose.material.icons.Icons.AutoMirrored
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.List
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-
-/**
- * 通用整数输入框：只允许数字、最多 4 位、0 显示为空。
- * 用于片头/片尾秒数、定时关闭分钟数等输入场景。
- */
-@Composable
-private fun NumberInputField(
-    value: Int,
-    onValueChange: (Int) -> Unit,
-    placeholder: String,
-    containerColor: Color,
-    modifier: Modifier = Modifier,
-) {
-    OutlinedTextField(
-        value = if (value == 0) "" else value.toString(),
-        onValueChange = { v -> onValueChange(v.filter(Char::isDigit).take(4).toIntOrNull() ?: 0) },
-        placeholder = { Text(placeholder, color = playerOnSurfaceVariant().copy(alpha = 0.5f)) },
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = playerOnSurface(),
-            unfocusedTextColor = playerOnSurface(),
-            focusedContainerColor = containerColor,
-            unfocusedContainerColor = containerColor,
-            focusedBorderColor = playerPrimary(),
-            unfocusedBorderColor = playerOutline(),
-        ),
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = modifier,
-    )
-}
+import kotlin.math.roundToInt
 
 // region ── 播放器主题颜色（如 FluxTheme.colorScheme 获取，自动适配 MD3 / MIUIX 双引擎） ──
 // 播放器始终使用暗色模式（NextPlayerTheme(darkTheme = true)），但具体暗色值由引擎决定
@@ -169,6 +150,7 @@ fun AudioPlaybackScreen(
     onBackClick: () -> Unit,
     coverArtworkUri: Uri? = null,
     bookPath: String? = null,
+    bookName: String? = null,
     chapterNames: List<String> = emptyList(),
     chapterPaths: List<String> = emptyList(),
     introSkipSeconds: Int = 0,
@@ -197,20 +179,54 @@ fun AudioPlaybackScreen(
     var currentSpeed by remember { mutableStateOf(player.playbackParameters.speed) }
     LaunchedEffect(player.playbackParameters) { currentSpeed = player.playbackParameters.speed }
 
-    // ── 自定义倍速 ──
-    var showCustomSpeed by remember { mutableStateOf(false) }
-    var customSpeedText by remember { mutableStateOf("") }
-
     // ── 定时关闭 ──
     var sleepRemaining by remember { mutableIntStateOf(0) }  // 剩余秒数�?0=未激�?
-    var sleepCustomMins by remember { mutableIntStateOf(0) }  // 自定义分钟数
+    var sleepEpisodes by remember { mutableIntStateOf(0) }  // 剩余集数（按集数定时）
+    var sleepStartEpisode by remember { mutableIntStateOf(-1) }  // 按集数定时的起始集索引
     var showSleepSheet by remember { mutableStateOf(false) }
+    var sleepModeMinutes by remember { mutableStateOf(true) }  // 定时弹窗：true=按分钟，false=按集数
+    var sleepHourIdx by remember { mutableIntStateOf(0) }  // 定时弹窗：小时滚轮索引
+    var sleepMinIdx by remember { mutableIntStateOf(0) }  // 定时弹窗：分钟滚轮索引
+    var sleepEpisodeIdx by remember { mutableIntStateOf(0) }  // 定时弹窗：集数滚轮索引
+    LaunchedEffect(showSleepSheet) {
+        if (showSleepSheet) {
+            // 打开弹窗时回显：按当前激活状态设置模式与滚轮位置
+            when {
+                sleepRemaining > 0 && sleepEpisodes == 0 -> {
+                    sleepModeMinutes = true
+                    sleepHourIdx = (sleepRemaining / 3600).toInt().coerceIn(0, 23)
+                    sleepMinIdx = ((sleepRemaining % 3600) / 60).toInt().coerceIn(0, 59)
+                }
+                sleepEpisodes > 0 -> {
+                    sleepModeMinutes = false
+                    sleepEpisodeIdx = sleepEpisodes.coerceIn(0, 10)
+                }
+                else -> {
+                    sleepModeMinutes = true
+                    sleepHourIdx = 0
+                    sleepMinIdx = 0
+                }
+            }
+        }
+    }
     LaunchedEffect(sleepRemaining) {
         if (sleepRemaining > 0) {
             delay(1000)
             sleepRemaining -= 1
             if (sleepRemaining == 0) {
                 player.pause()
+            }
+        }
+    }
+
+    // 按集数定时：当前集数达到 起始集 + N 时暂停
+    LaunchedEffect(player.currentMediaItemIndex) {
+        if (sleepEpisodes > 0) {
+            if (sleepStartEpisode < 0) sleepStartEpisode = player.currentMediaItemIndex
+            if (player.currentMediaItemIndex >= sleepStartEpisode + sleepEpisodes) {
+                player.pause()
+                sleepEpisodes = 0
+                sleepStartEpisode = -1
             }
         }
     }
@@ -242,83 +258,102 @@ fun AudioPlaybackScreen(
     // ── 播放列表弹窗 ──
     var showPlaylistSheet by remember { mutableStateOf(false) }
 
-    // 倍速弹窗
+    // 倍速弹窗（居中 Dialog：预设 + 大数字 + 滑块 0.1 粒度，滑动即生效）
     if (showSpeedSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showSpeedSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
-            containerColor = playerSurfaceContainer(),
-        ) {
+        Dialog(onDismissRequest = { showSpeedSheet = false }) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 40.dp),
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(playerSurfaceContainer())
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
             ) {
-                Text(stringResource(R.string.audio_playback_speed), color = playerOnSurface(), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(20.dp))
-                // Pill 按钮网格
-                val allSpeeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f)
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // 两行网格
-                    allSpeeds.chunked(4).forEach { row ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            row.forEach { speed ->
-                                val isActive = (currentSpeed - speed) in -0.05f..0.05f
-                                Surface(
-                                    onClick = {
-                                        player.setPlaybackSpeed(speed)
-                                        currentSpeed = speed
-                                        onSpeedChanged(speed)
-                                        showSpeedSheet = false
-                                    },
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = if (isActive) playerPrimary() else playerSurface(),
-                                    border = if (isActive) null else BorderStroke(0.5.dp, playerOutline()),
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text(
-                                        text = "${speed}x",
-                                        color = if (isActive) playerOnPrimary() else playerOnSurface(),
-                                        fontSize = 14.sp,
-                                        fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Medium,
-                                        modifier = Modifier.padding(vertical = 10.dp),
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                // 自定义倍速
-                Surface(
-                    onClick = {
-                        customSpeedText = "${currentSpeed}"
-                        showSpeedSheet = false
-                        showCustomSpeed = true
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    color = playerSurface(),
-                    border = BorderStroke(0.5.dp, playerOutline()),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(stringResource(R.string.audio_custom_speed), color = playerOnSurface(), fontSize = 14.sp)
-                        Spacer(modifier = Modifier.weight(1f))
+                // 标题栏
+                SheetHeader(
+                    title = stringResource(R.string.audio_playback_speed),
+                    icon = {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            painter = painterResource(R.drawable.ic_player_speed_btn),
                             contentDescription = null,
-                            tint = playerOnSurfaceVariant(),
-                            modifier = Modifier.size(20.dp),
+                            tint = playerPrimary(),
+                            modifier = Modifier.size(18.dp),
                         )
-                    }
+                    },
+                    onDismiss = { showSpeedSheet = false },
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 预设倍速（点选即生效）
+                PresetChips(
+                    options = listOf("1.0x", "1.25x", "1.5x", "2.0x"),
+                    selected = when (currentSpeed) {
+                        1.0f -> "1.0x"
+                        1.25f -> "1.25x"
+                        1.5f -> "1.5x"
+                        2.0f -> "2.0x"
+                        else -> null
+                    },
+                    onSelect = { label ->
+                        val speed = when (label) {
+                            "1.0x" -> 1.0f
+                            "1.25x" -> 1.25f
+                            "1.5x" -> 1.5f
+                            else -> 2.0f
+                        }
+                        currentSpeed = speed
+                        player.setPlaybackSpeed(speed)
+                        onSpeedChanged(speed)
+                    },
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 大数字实时显示当前倍速
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = formatSpeed(currentSpeed),
+                        color = playerPrimary(),
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "x",
+                        color = playerOnSurfaceVariant(),
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(start = 2.dp),
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // 滑块（0.5~3.0，粒度 0.1，拖动即生效）
+                CompactSlider(
+                    value = currentSpeed,
+                    onValueChange = { speed ->
+                        currentSpeed = speed
+                        player.setPlaybackSpeed(speed)
+                        onSpeedChanged(speed)
+                    },
+                    onValueChangeFinished = {},
+                    valueRange = 0.5f..3.0f,
+                    steps = 24,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // 两端刻度
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(text = "0.5x", fontSize = 11.sp, color = playerOnSurfaceVariant())
+                    Text(text = "3.0x", fontSize = 11.sp, color = playerOnSurfaceVariant())
                 }
             }
         }
@@ -326,21 +361,19 @@ fun AudioPlaybackScreen(
 
     // 鈹€鈹€ 閫熷害鑿滃崟 鈹€鈹€
 
-    // ── 片头跳过 ──
-    var introApplied by remember { mutableStateOf(false) }
-    LaunchedEffect(mediaState.isPlaying) {
-        if (!introApplied && mediaState.isPlaying && introSkipSeconds > 0) {
-            delay(400) // 如 ExoPlayer 缓冲就绪（含续播 seek 完成�?
-            // 当前已在片头之后（续�?/拖拽等场景）如 不跳
+    // ── 片头跳过（设置变化 / 切集 / 恢复播放时重新应用，保证设置即时生效） ──
+    LaunchedEffect(introSkipSeconds, mediaState.isPlaying, player.currentMediaItemIndex) {
+        if (mediaState.isPlaying && introSkipSeconds > 0) {
+            delay(400) // 如 ExoPlayer 缓冲就绪（含续播 seek 完成）
+            // 当前已在片头之后（续播/拖拽等场景）则不跳
             if (player.currentPosition < introSkipSeconds * 1000L) {
                 player.seekTo(introSkipSeconds * 1000L)
             }
-            introApplied = true
         }
     }
 
-    // ── 片尾跳过 ──
-    LaunchedEffect(mediaState.position, mediaState.duration) {
+    // ── 片尾跳过（设置变化立即生效） ──
+    LaunchedEffect(outroSkipSeconds, mediaState.position, mediaState.duration) {
         if (outroSkipSeconds > 0 && mediaState.duration > 0) {
             val outroMs = outroSkipSeconds * 1000L
             val threshold = (mediaState.duration - outroMs).coerceAtLeast(0)
@@ -350,295 +383,294 @@ fun AudioPlaybackScreen(
         }
     }
 
-    // ── 片头片尾设置弹窗 ──
+    // ── 片头片尾设置弹窗（居中 Dialog：预设 + 双滑块，滑动即生效） ──
     var showSkipSheet by remember { mutableStateOf(false) }
     var editIntro by remember { mutableIntStateOf(introSkipSeconds) }
     var editOutro by remember { mutableIntStateOf(outroSkipSeconds) }
-        if (showSkipSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showSkipSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
-            containerColor = playerSurfaceContainer(),
-        ) {
+    if (showSkipSheet) {
+        Dialog(onDismissRequest = { showSkipSheet = false }) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 40.dp),
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(playerSurfaceContainer())
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
             ) {
-                Text(
-                    text = stringResource(R.string.audio_skip_title),
-                    color = playerOnSurface(),
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                // 内容区用 weight 撑开，确保保存按钮在底部
-                Column(
-                    modifier = Modifier.weight(1f, fill = false),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    // 片头
-                    Column {
-                        Text(stringResource(R.string.audio_skip_intro), color = playerOnSurfaceVariant(), fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(3, 5, 10, 15, 30).forEach { sec ->
-                                Surface(
-                                    onClick = { editIntro = sec },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (editIntro == sec) playerPrimary() else playerSurface(),
-                                    border = if (editIntro == sec) null else BorderStroke(0.5.dp, playerOutline()),
-                                ) {
-                                    Text(
-                                        text = "${sec}s",
-                                        color = if (editIntro == sec) playerOnPrimary() else playerOnSurfaceVariant(),
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        NumberInputField(
-                            value = editIntro,
-                            onValueChange = { editIntro = it },
-                            placeholder = stringResource(R.string.audio_custom_seconds),
-                            containerColor = playerSurfaceVariant(),
-                            modifier = Modifier.fillMaxWidth(),
+                // 标题栏
+                SheetHeader(
+                    title = stringResource(R.string.audio_skip_title),
+                    icon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_player_skip_btn),
+                            contentDescription = null,
+                            tint = playerPrimary(),
+                            modifier = Modifier.size(18.dp),
                         )
-                    }
-                    // 片尾
-                    Column {
-                        Text(stringResource(R.string.audio_skip_outro), color = playerOnSurfaceVariant(), fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(3, 5, 10, 15, 30).forEach { sec ->
-                                Surface(
-                                    onClick = { editOutro = sec },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (editOutro == sec) playerPrimary() else playerSurface(),
-                                    border = if (editOutro == sec) null else BorderStroke(0.5.dp, playerOutline()),
-                                ) {
-                                    Text(
-                                        text = "${sec}s",
-                                        color = if (editOutro == sec) playerOnPrimary() else playerOnSurfaceVariant(),
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        NumberInputField(
-                            value = editOutro,
-                            onValueChange = { editOutro = it },
-                            placeholder = stringResource(R.string.audio_custom_seconds),
-                            containerColor = playerSurfaceVariant(),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(
-                    onClick = {
-                        onSkipSettingsChanged(editIntro, editOutro)
-                        showSkipSheet = false
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = playerPrimary()),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Text(stringResource(R.string.audio_save), color = playerOnPrimary(), fontSize = 16.sp)
-                }
+                    onDismiss = { showSkipSheet = false },
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // 跳过片头滑块（滑动即生效）
+                SliderBlock(
+                    title = stringResource(R.string.audio_skip_intro),
+                    valueText = if (editIntro > 0) {
+                        stringResource(R.string.audio_seconds_format, editIntro)
+                    } else {
+                        null
+                    },
+                    value = editIntro.toFloat(),
+                    onValueChange = { editIntro = it.toInt() },
+                    onValueChangeFinished = { onSkipSettingsChanged(editIntro, editOutro) },
+                    valueRange = 0f..180f,
+                    steps = 35,
+                    startLabel = "0秒",
+                    endLabel = "180秒",
+                )
+                // 片头预设
+                Spacer(modifier = Modifier.height(8.dp))
+                PresetChips(
+                    options = listOf("10秒", "30秒", "60秒", "120秒"),
+                    selected = if (editIntro in listOf(10, 30, 60, 120)) "${editIntro}秒" else null,
+                    onSelect = { label ->
+                        editIntro = when (label) {
+                            "10秒" -> 10
+                            "30秒" -> 30
+                            "60秒" -> 60
+                            else -> 120
+                        }
+                        onSkipSettingsChanged(editIntro, editOutro)
+                    },
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 跳过片尾滑块（滑动即生效）
+                SliderBlock(
+                    title = stringResource(R.string.audio_skip_outro),
+                    valueText = if (editOutro > 0) {
+                        stringResource(R.string.audio_seconds_format, editOutro)
+                    } else {
+                        null
+                    },
+                    value = editOutro.toFloat(),
+                    onValueChange = { editOutro = it.toInt() },
+                    onValueChangeFinished = { onSkipSettingsChanged(editIntro, editOutro) },
+                    valueRange = 0f..180f,
+                    steps = 35,
+                    startLabel = "0秒",
+                    endLabel = "180秒",
+                )
+                // 片尾预设
+                Spacer(modifier = Modifier.height(8.dp))
+                PresetChips(
+                    options = listOf("10秒", "30秒", "60秒", "120秒"),
+                    selected = if (editOutro in listOf(10, 30, 60, 120)) "${editOutro}秒" else null,
+                    onSelect = { label ->
+                        editOutro = when (label) {
+                            "10秒" -> 10
+                            "30秒" -> 30
+                            "60秒" -> 60
+                            else -> 120
+                        }
+                        onSkipSettingsChanged(editIntro, editOutro)
+                    },
+                )
             }
         }
     }
 
-    // ── 定时关闭弹窗 ──
-        if (showSleepSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showSleepSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
-            containerColor = playerSurfaceContainer(),
-        ) {
+    // ── 定时关闭弹窗（居中 Dialog：预设 + 小时/分钟双滑块，滑动即生效） ──
+    if (showSleepSheet) {
+        Dialog(onDismissRequest = { showSleepSheet = false }) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 40.dp),
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(playerSurfaceContainer())
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
             ) {
-                Text(stringResource(R.string.audio_sleep_timer), color = playerOnSurface(), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(20.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Radio 样式选项
-                    val sleepOption = when {
-                        sleepCustomMins > 0 -> -1
-                        sleepRemaining == 15 * 60 -> 15
-                        sleepRemaining == 30 * 60 -> 30
-                        sleepRemaining == 45 * 60 -> 45
-                        sleepRemaining == 60 * 60 -> 60
-                        else -> -1
-                    }
-                    val timerOptions = listOf(
-                        15 to stringResource(R.string.audio_minutes_format, 15),
-                        30 to stringResource(R.string.audio_minutes_format, 30),
-                        45 to stringResource(R.string.audio_minutes_format, 45),
-                        60 to stringResource(R.string.audio_minutes_format, 60),
-                    )
-                    timerOptions.forEach { (mins, label) ->
-                        val selected = sleepOption == mins
-                        Surface(
-                            onClick = {
-                                sleepRemaining = mins * 60
-                                sleepCustomMins = 0
-                                showSleepSheet = false
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (selected) playerPrimary().copy(alpha = 0.08f) else playerSurface(),
-                            border = BorderStroke(
-                                if (selected) 1.dp else 0.5.dp,
-                                if (selected) playerPrimary() else playerOutline(),
-                            ),
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = label,
-                                    color = if (selected) playerPrimary() else playerOnSurface(),
-                                    fontSize = 15.sp,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                )
-                                Spacer(modifier = Modifier.weight(1f))
-                                // Radio circle
-                                Surface(
-                                    shape = CircleShape,
-                                    color = if (selected) playerPrimary() else Color.Transparent,
-                                    border = if (!selected) BorderStroke(1.5.dp, playerOutline()) else null,
-                                    modifier = Modifier.size(20.dp),
-                                ) {
-                                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                        if (selected) {
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = playerOnPrimary(),
-                                                modifier = Modifier.size(8.dp),
-                                            ) {}
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                // 标题栏
+                SheetHeader(
+                    title = stringResource(R.string.audio_sleep_timer),
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Outlined.AccessTime,
+                            contentDescription = null,
+                            tint = playerPrimary(),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                    onDismiss = { showSleepSheet = false },
+                )
+
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(stringResource(R.string.audio_custom_minutes), color = playerOnSurfaceVariant(), fontSize = 13.sp)
-                Spacer(modifier = Modifier.height(6.dp))
+
+                // 预设值（点选即生效，并同步滑块位置）
+                if (sleepModeMinutes) {
+                    PresetChips(
+                        options = listOf("30分钟", "1小时", "2小时", "3小时"),
+                        selected = when (sleepRemaining) {
+                            1800 -> "30分钟"
+                            3600 -> "1小时"
+                            7200 -> "2小时"
+                            10800 -> "3小时"
+                            else -> null
+                        },
+                        onSelect = { label ->
+                            sleepRemaining = when (label) {
+                                "30分钟" -> 1800
+                                "1小时" -> 3600
+                                "2小时" -> 7200
+                                else -> 10800
+                            }
+                            sleepEpisodes = 0
+                            sleepHourIdx = sleepRemaining / 3600
+                            sleepMinIdx = (sleepRemaining % 3600) / 60
+                        },
+                    )
+                } else {
+                    PresetChips(
+                        options = listOf("2集", "5集", "10集"),
+                        selected = when (sleepEpisodes) {
+                            2 -> "2集"
+                            5 -> "5集"
+                            10 -> "10集"
+                            else -> null
+                        },
+                        onSelect = { label ->
+                            sleepEpisodes = when (label) {
+                                "2集" -> 2
+                                "5集" -> 5
+                                else -> 10
+                            }
+                            sleepRemaining = 0
+                            sleepEpisodeIdx = sleepEpisodes
+                            if (sleepEpisodes > 0) sleepStartEpisode = player.currentMediaItemIndex
+                        },
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // 分段切换：按分钟 / 按集数
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(playerSurfaceVariant()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    NumberInputField(
-                        value = sleepCustomMins,
-                        onValueChange = { sleepCustomMins = it },
-                        placeholder = stringResource(R.string.audio_input_minutes),
-                        containerColor = playerSurface(),
+                    SleepModeTab(
+                        text = stringResource(R.string.audio_sleep_tab_minutes),
+                        selected = sleepModeMinutes,
+                        onClick = { sleepModeMinutes = true },
                         modifier = Modifier.weight(1f),
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Button(
-                        onClick = {
-                            if (sleepCustomMins > 0) {
-                                sleepRemaining = sleepCustomMins * 60
-                                showSleepSheet = false
-                            }
-                        },
-                        enabled = sleepCustomMins > 0,
-                        colors = ButtonDefaults.buttonColors(containerColor = playerPrimary()),
-                        shape = RoundedCornerShape(10.dp),
-                    ) {
-                        Text(stringResource(R.string.audio_start), color = playerOnPrimary(), fontSize = 14.sp)
-                    }
+                    SleepModeTab(
+                        text = stringResource(R.string.audio_sleep_tab_episodes),
+                        selected = !sleepModeMinutes,
+                        onClick = { sleepModeMinutes = false },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                if (sleepRemaining > 0) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Surface(
-                        onClick = { sleepRemaining = 0; showSleepSheet = false },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        color = FluxTheme.colorScheme.error.copy(alpha = 0.15f),
-                        border = BorderStroke(0.5.dp, FluxTheme.colorScheme.error.copy(alpha = 0.3f)),
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (sleepModeMinutes) {
+                    // 滑块容器（圆角浅灰底）：小时滑块 + 分钟滑块，滑动即生效
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(playerSurfaceVariant())
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
                     ) {
-                        Text(
-                            text = stringResource(R.string.audio_cancel_timer),
-                            color = FluxTheme.colorScheme.error,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
+                        SliderBlock(
+                            title = stringResource(R.string.audio_unit_hours),
+                            valueText = stringResource(R.string.audio_sleep_hours_format, sleepHourIdx),
+                            value = sleepHourIdx.toFloat(),
+                            onValueChange = { sleepHourIdx = it.toInt() },
+                            onValueChangeFinished = {
+                                sleepRemaining = sleepHourIdx * 3600 + sleepMinIdx * 60
+                                sleepEpisodes = 0
+                            },
+                            valueRange = 0f..23f,
+                            steps = 22,
+                            startLabel = "0小时",
+                            endLabel = "23小时",
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        SliderBlock(
+                            title = stringResource(R.string.audio_unit_minutes),
+                            valueText = stringResource(R.string.audio_sleep_minutes_format, sleepMinIdx),
+                            value = sleepMinIdx.toFloat(),
+                            onValueChange = { sleepMinIdx = it.toInt() },
+                            onValueChangeFinished = {
+                                sleepRemaining = sleepHourIdx * 3600 + sleepMinIdx * 60
+                                sleepEpisodes = 0
+                            },
+                            valueRange = 0f..59f,
+                            steps = 58,
+                            startLabel = "0分钟",
+                            endLabel = "59分钟",
+                        )
+                    }
+                } else {
+                    // 集数单滑块（容器）
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(playerSurfaceVariant())
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                    ) {
+                        SliderBlock(
+                            title = stringResource(R.string.audio_unit_episodes),
+                            valueText = if (sleepEpisodeIdx > 0) {
+                                stringResource(R.string.audio_sleep_episodes_format, sleepEpisodeIdx)
+                            } else {
+                                null
+                            },
+                            value = sleepEpisodeIdx.toFloat(),
+                            onValueChange = { sleepEpisodeIdx = it.toInt() },
+                            onValueChangeFinished = {
+                                sleepEpisodes = sleepEpisodeIdx
+                                sleepRemaining = 0
+                                if (sleepEpisodes > 0) sleepStartEpisode = player.currentMediaItemIndex
+                            },
+                            valueRange = 0f..10f,
+                            steps = 9,
+                            startLabel = "0集",
+                            endLabel = "10集",
                         )
                     }
                 }
+
+                // 取消定时（仅已激活时显示）
+                val hasSleepActive = sleepRemaining > 0 || sleepEpisodes > 0
+                if (hasSleepActive) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = stringResource(R.string.audio_cancel_timer),
+                        color = FluxTheme.colorScheme.error,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                sleepRemaining = 0
+                                sleepEpisodes = 0
+                                showSleepSheet = false
+                            }
+                            .padding(vertical = 8.dp),
+                    )
+                }
             }
         }
-    }
-
-    // ── 自定义倍速弹如 ──
-    if (showCustomSpeed) {
-        AlertDialog(
-            onDismissRequest = { showCustomSpeed = false },
-            title = { Text(stringResource(R.string.audio_custom_speed), color = playerOnSurface()) },
-            text = {
-                OutlinedTextField(
-                    value = customSpeedText,
-                    onValueChange = { value ->
-                        val filtered = value.filter { it.isDigit() || it == '.' }
-                        if (filtered.count { it == '.' } <= 1) {
-                            customSpeedText = filtered
-                        }
-                    },
-                    placeholder = { Text(stringResource(R.string.audio_input_speed), color = playerOnSurfaceVariant().copy(alpha = 0.4f)) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = playerOnSurface(),
-                        unfocusedTextColor = playerOnSurface(),
-                        focusedBorderColor = playerPrimary(),
-                        unfocusedBorderColor = playerOutline(),
-                    ),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val speed = customSpeedText.toFloatOrNull()
-                        if (speed != null && speed in 0.25f..16f) {
-                            player.setPlaybackSpeed(speed)
-                            currentSpeed = speed
-                            onSpeedChanged(speed)
-                            showCustomSpeed = false
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = playerPrimary()),
-                    enabled = customSpeedText.toFloatOrNull()?.let { it in 0.25f..16f } == true,
-                ) {
-                    Text(stringResource(R.string.audio_confirm), color = playerOnPrimary())
-                }
-            },
-            dismissButton = {
-                Button(
-                    onClick = { showCustomSpeed = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = playerSurfaceVariant()),
-                ) {
-                    Text(stringResource(R.string.audio_cancel), color = playerOnSurface())
-                }
-            },
-            containerColor = playerSurfaceContainer(),
-        )
     }
 
     // ── 播放列表弹窗 ──
@@ -648,18 +680,40 @@ fun AudioPlaybackScreen(
         val playedChapterIndexes = remember(localProgress) {
             localProgress.filterValues { (pos, dur) -> dur > 0 && pos > 0 }.keys
         }
+        val playlistScope = rememberCoroutineScope()
+        val playlistCurrentIndex = player.currentMediaItemIndex.coerceAtLeast(0)
+
+        // 打开弹窗自动滚动定位到当前播放集（等全屏展开动画进入尾声再滚，避免动画+跳转叠加掉帧）
+        LaunchedEffect(showPlaylistSheet) {
+            if (showPlaylistSheet) {
+                delay(300)
+                playlistListState.scrollToItem(playlistCurrentIndex)
+            }
+        }
 
         ModalBottomSheet(
             onDismissRequest = { showPlaylistSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+            // 直接全屏展开，跳过半屏停靠
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = playerSurfaceContainer(),
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    stringResource(R.string.audio_playlist), color = playerOnSurface(), fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                // 统一标题栏（含总集数）
+                SheetHeader(
+                    title = stringResource(R.string.audio_playlist),
+                    subtitle = stringResource(R.string.audio_playlist_count, chapterNames.size),
+                    icon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_player_list_btn),
+                            contentDescription = null,
+                            tint = playerPrimary(),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                    onDismiss = { showPlaylistSheet = false },
                     modifier = Modifier.padding(horizontal = 24.dp),
                 )
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 Box(modifier = Modifier.weight(1f)) {
                     LazyColumn(
                         state = playlistListState,
@@ -674,50 +728,68 @@ fun AudioPlaybackScreen(
                                 stringResource(R.string.audio_played_percent, pct)
                             } else null
 
-                        Surface(
-                            onClick = {
-                                player.seekToDefaultPosition(index)
-                                player.playWhenReady = true
-                                showPlaylistSheet = false
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isActive) playerPrimary().copy(alpha = 0.3f) else Color.Transparent,
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                            Surface(
+                                onClick = {
+                                    player.seekToDefaultPosition(index)
+                                    player.playWhenReady = true
+                                    showPlaylistSheet = false
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isActive) playerPrimary().copy(alpha = 0.3f) else Color.Transparent,
                             ) {
-                                Text(
-                                    text = "${index + 1}",
-                                    color = if (isActive) playerPrimary() else playerOnSurfaceVariant(),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.width(28.dp),
-                                )
-                                Text(
-                                    text = name,
-                                    color = if (isActive) playerOnSurface() else playerOnSurfaceVariant(),
-                                    fontSize = 15.sp,
-                                    fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false),
-                                )
-                                if (progressText != null) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    // 当前集：主色播放小圆标
+                                    if (isActive) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(16.dp)
+                                                .clip(CircleShape)
+                                                .background(playerPrimary()),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(coreUiR.drawable.ic_play),
+                                                contentDescription = null,
+                                                tint = playerOnPrimary(),
+                                                modifier = Modifier.size(9.dp),
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
                                     Text(
-                                        text = progressText,
+                                        text = "${index + 1}",
                                         color = if (isActive) playerPrimary() else playerOnSurfaceVariant(),
-                                        fontSize = 12.sp,
-                                        modifier = Modifier.padding(start = 8.dp),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.width(28.dp),
                                     )
+                                    Text(
+                                        text = name,
+                                        color = if (isActive) playerOnSurface() else playerOnSurfaceVariant(),
+                                        fontSize = 15.sp,
+                                        fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                    if (progressText != null) {
+                                        Text(
+                                            text = progressText,
+                                            color = if (isActive) playerPrimary() else playerOnSurfaceVariant(),
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.padding(start = 8.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                }
                     // 右侧可拖拽滚动条（共享组件：胶囊 + 已播打点）
                     ChapterDragScrollbar(
                         listState = playlistListState,
@@ -727,8 +799,35 @@ fun AudioPlaybackScreen(
                             .align(Alignment.CenterEnd)
                             .padding(end = 6.dp),
                     )
+                    // 圆形导航按钮组：顶部 / 当前 / 底部（右下角，避开滚动条）
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 58.dp, bottom = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        CircleNavButton(
+                            text = stringResource(R.string.audio_nav_top),
+                            onClick = { playlistScope.launch { playlistListState.scrollToItem(0) } },
+                        )
+                        CircleNavButton(
+                            text = stringResource(R.string.audio_nav_current),
+                            selected = true,
+                            onClick = {
+                                playlistScope.launch { playlistListState.scrollToItem(playlistCurrentIndex) }
+                            },
+                        )
+                        CircleNavButton(
+                            text = stringResource(R.string.audio_nav_bottom),
+                            onClick = {
+                                playlistScope.launch {
+                                    playlistListState.scrollToItem(chapterNames.lastIndex)
+                                }
+                            },
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.height(40.dp))
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }
@@ -766,16 +865,18 @@ fun AudioPlaybackScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // ── 书名 ──
+            // ── 书名（单行跑马灯，超出宽度自动滚动） ──
             Text(
                 text = title,
                 color = playerOnSurface(),
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .basicMarquee(),
             )
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -785,7 +886,7 @@ fun AudioPlaybackScreen(
                 Text(
                     text = chapterTitle,
                     color = playerOnSurfaceVariant(),
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Normal,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
@@ -796,9 +897,37 @@ fun AudioPlaybackScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.weight(0.25f))
+            // ── 书名（整本书名字，封面下侧最底部） ──
+            if (!bookName.isNullOrEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = bookName,
+                    color = playerOnSurfaceVariant().copy(alpha = 0.8f),
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                )
+            }
 
-            // ── 底部控件如 ──
+            Spacer(modifier = Modifier.weight(0.2f))
+
+            // ── 功能按钮行（对齐小梨：进度条上方，marginTop 32） ──
+            BottomFunctionRow(
+                currentSpeed = currentSpeed,
+                sleepRemaining = sleepRemaining,
+                onSleepClick = { showSleepSheet = true },
+                onSkipClick = { showSkipSheet = true },
+                onSpeedClick = { showSpeedSheet = true },
+                onPlaylistClick = { showPlaylistSheet = true },
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── 进度条 ──
             AudioSeekbar(
                 position = displayPosition,
                 duration = mediaState.duration.toFloat(),
@@ -809,20 +938,10 @@ fun AudioPlaybackScreen(
                 },
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
+            // ── 控制条（最底部） ──
             TransportRow(player = player, isPlaying = mediaState.isPlaying)
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            BottomFunctionRow(
-                currentSpeed = currentSpeed,
-                onSpeedClick = { showSpeedSheet = true },
-                onSkipClick = { showSkipSheet = true },
-                onSleepClick = { showSleepSheet = true },
-                onPlaylistClick = { showPlaylistSheet = true },
-                sleepRemaining = sleepRemaining,
-            )
 
             Spacer(modifier = Modifier.height(32.dp))
         }
@@ -847,15 +966,282 @@ fun AudioPlaybackScreen(
 
 // region ── 子组如 ──
 
+/**
+ * 统一弹窗标题栏：图标圆 + 标题 + 副标题 + 右上角关闭。
+ */
+@Composable
+private fun SheetHeader(
+    title: String,
+    icon: @Composable () -> Unit,
+    onDismiss: () -> Unit,
+    subtitle: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = playerPrimary().copy(alpha = 0.12f),
+            modifier = Modifier.size(36.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                icon()
+            }
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Column {
+            Text(
+                text = title,
+                color = playerOnSurface(),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    color = playerOnSurfaceVariant(),
+                    fontSize = 11.sp,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = stringResource(R.string.audio_close),
+                tint = playerOnSurfaceVariant(),
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+@Composable
+private fun SleepModeTab(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        color = if (selected) playerSurface() else Color.Transparent,
+        border = if (selected) BorderStroke(0.5.dp, playerOutline()) else null,
+        modifier = modifier,
+    ) {
+        Text(
+            text = text,
+            color = if (selected) playerPrimary() else playerOnSurfaceVariant(),
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(vertical = 9.dp),
+        )
+    }
+}
+@Composable
+private fun CircleNavButton(
+    text: String,
+    onClick: () -> Unit,
+    selected: Boolean = false,
+) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (selected) playerPrimary() else playerSurface(),
+        border = if (selected) null else BorderStroke(0.5.dp, playerOutline()),
+        modifier = Modifier.size(44.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            Text(
+                text = text,
+                color = if (selected) playerOnPrimary() else playerOnSurfaceVariant(),
+                fontSize = 11.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            )
+        }
+    }
+}
+@Composable
+private fun CompactSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int = 0,
+    modifier: Modifier = Modifier,
+) {
+    val primary = playerPrimary()
+    val onSurface = playerOnSurface()
+    val fraction = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
+    val stepSize = if (steps > 0) (valueRange.endInclusive - valueRange.start) / (steps + 1) else 0f
+
+    fun valueFromX(x: Float): Float {
+        val raw = valueRange.start + (valueRange.endInclusive - valueRange.start) * (x.coerceIn(0f, 1f))
+        if (steps <= 0) return raw.coerceIn(valueRange.start, valueRange.endInclusive)
+        val snapped = ((raw - valueRange.start) / stepSize).roundToInt()
+        return (valueRange.start + snapped * stepSize).coerceIn(valueRange.start, valueRange.endInclusive)
+    }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(32.dp)
+            // 点击轨道任意位置直接跳转
+            .pointerInput(valueRange, steps) {
+                detectTapGestures(
+                    onTap = { offset ->
+                        onValueChange(valueFromX(offset.x / size.width))
+                        onValueChangeFinished()
+                    },
+                )
+            }
+            // 拖动
+            .pointerInput(valueRange, steps) {
+                detectDragGestures(
+                    onDragStart = { offset -> onValueChange(valueFromX(offset.x / size.width)) },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        onValueChange(valueFromX(change.position.x / size.width))
+                    },
+                    onDragEnd = { onValueChangeFinished() },
+                    onDragCancel = { onValueChangeFinished() },
+                )
+            },
+    ) {
+        val trackHeight = 8.dp
+        val thumbSize = 18.dp
+        val thumbTravel = maxWidth - thumbSize
+
+        // 轨道底（加宽）
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(trackHeight)
+                .align(Alignment.Center)
+                .clip(RoundedCornerShape(trackHeight / 2))
+                .background(onSurface.copy(alpha = 0.15f)),
+        )
+        // 已播段（主色）
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(fraction)
+                .height(trackHeight)
+                .align(Alignment.CenterStart)
+                .clip(RoundedCornerShape(trackHeight / 2))
+                .background(primary),
+        )
+        // thumb（白底 + 主色描边）
+        Box(
+            modifier = Modifier
+                .size(thumbSize)
+                .offset(x = thumbTravel * fraction)
+                .align(Alignment.CenterStart)
+                .background(FluxTheme.colorScheme.surface, CircleShape)
+                .border(2.dp, primary, CircleShape),
+        )
+    }
+}
+
+/**
+ * 滑块块：标签行（标题 + 右侧实时值）+ 自绘滑块 + 两端刻度。
+ */
+@Composable
+private fun SliderBlock(
+    title: String,
+    valueText: String?,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    startLabel: String,
+    endLabel: String,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = title,
+                color = playerOnSurface(),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            if (valueText != null) {
+                Text(
+                    text = valueText,
+                    color = playerPrimary(),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+        CompactSlider(
+            value = value,
+            onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
+            valueRange = valueRange,
+            steps = steps,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(text = startLabel, fontSize = 11.sp, color = playerOnSurfaceVariant())
+            Text(text = endLabel, fontSize = 11.sp, color = playerOnSurfaceVariant())
+        }
+    }
+}
+
+/**
+ * 预设值胶囊行：横向均分，选中主色高亮，点选回调。
+ */
+@Composable
+private fun PresetChips(
+    options: List<String>,
+    selected: String?,
+    onSelect: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { opt ->
+            val isSelected = opt == selected
+            Surface(
+                onClick = { onSelect(opt) },
+                shape = RoundedCornerShape(50),
+                color = if (isSelected) playerPrimary() else playerSurfaceVariant(),
+                border = if (isSelected) null else BorderStroke(0.5.dp, playerOutline()),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    text = opt,
+                    color = if (isSelected) playerOnPrimary() else playerOnSurfaceVariant(),
+                    fontSize = 12.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(vertical = 7.dp),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun TopBar(onBackClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .height(42.dp)
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBackClick) {
+        // 左：返回箭头
+        IconButton(onClick = onBackClick, modifier = Modifier.size(32.dp)) {
             Icon(
                 painter = painterResource(coreUiR.drawable.ic_arrow_left),
                 contentDescription = stringResource(R.string.audio_back),
@@ -869,8 +1255,9 @@ private fun TopBar(onBackClick: () -> Unit) {
 private fun AlbumCover(artworkUri: Uri?, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .size(280.dp)
-            .shadow(20.dp, RoundedCornerShape(16.dp))
+            .fillMaxWidth(0.72f)
+            .aspectRatio(1f)
+            .shadow(16.dp, RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
             .background(FluxTheme.colorScheme.surface),
         contentAlignment = Alignment.Center,
@@ -908,6 +1295,7 @@ private fun InfoTag(text: String) {
     }
 }
 
+
 @Composable
 private fun AudioSeekbar(
     position: Float,
@@ -917,18 +1305,70 @@ private fun AudioSeekbar(
 ) {
     val primary = FluxTheme.colorScheme.primary
     val onSurface = FluxTheme.colorScheme.onSurface
+    val fraction = if (duration > 0f) (position / duration).coerceIn(0f, 1f) else 0f
+
     Column(modifier = Modifier.fillMaxWidth()) {
-        Slider(
-            value = if (duration > 0f) (position / duration).coerceIn(0f, 1f) else 0f,
-            onValueChange = { fraction -> onSeek(fraction * duration) },
-            onValueChangeFinished = onSeekFinished,
-            modifier = Modifier.fillMaxWidth(),
-            colors = SliderDefaults.colors(
-                thumbColor = primary,
-                activeTrackColor = primary,
-                inactiveTrackColor = onSurface.copy(alpha = 0.15f),
-            ),
-        )
+        // 自定义进度条（加宽轨道 + 圆点 thumb + 点击/拖动均可定位）
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(32.dp)
+                // 点击轨道任意位置直接跳转
+                .pointerInput(duration) {
+                    detectTapGestures(
+                        onTap = { offset ->
+                            onSeek(offset.x.coerceIn(0f, size.width.toFloat()) / size.width * duration)
+                            onSeekFinished()
+                        },
+                    )
+                }
+                // 拖动
+                .pointerInput(duration) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            onSeek(offset.x.coerceIn(0f, size.width.toFloat()) / size.width * duration)
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            onSeek(change.position.x.coerceIn(0f, size.width.toFloat()) / size.width * duration)
+                        },
+                        onDragEnd = { onSeekFinished() },
+                        onDragCancel = { onSeekFinished() },
+                    )
+                },
+        ) {
+            val trackHeight = 8.dp
+            val thumbSize = 18.dp
+            val thumbTravel = maxWidth - thumbSize
+
+            // 轨道底（浅色，加宽）
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(trackHeight)
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(trackHeight / 2))
+                    .background(onSurface.copy(alpha = 0.15f)),
+            )
+            // 已播部分（主色）
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .height(trackHeight)
+                    .align(Alignment.CenterStart)
+                    .clip(RoundedCornerShape(trackHeight / 2))
+                    .background(primary),
+            )
+            // thumb 圆点（白底 + 主色描边）
+            Box(
+                modifier = Modifier
+                    .size(thumbSize)
+                    .offset(x = thumbTravel * fraction)
+                    .align(Alignment.CenterStart)
+                    .background(FluxTheme.colorScheme.surface, CircleShape)
+                    .border(1.dp, primary, CircleShape),
+            )
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -960,100 +1400,77 @@ private fun TransportRow(player: Player, isPlaying: Boolean) {
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 上一集（轻量级：细边框小圆）
+        // 快退（对齐小梨 ic_player_backward）
+        IconButton(onClick = {
+            player.seekTo((player.currentPosition - 10_000L).coerceAtLeast(0L))
+        }) {
+            Icon(
+                painter = painterResource(R.drawable.ic_player_backward),
+                contentDescription = stringResource(R.string.audio_rewind_10s),
+                tint = onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.size(28.dp),
+            )
+        }
+
+        // 上一集（对齐小梨 ic_player_seek_to_previous）
         IconButton(onClick = {
             val idx = player.currentMediaItemIndex
             if (idx > 0) player.seekToDefaultPosition(idx - 1)
             else player.seekTo(0)
         }) {
             Icon(
-                painter = painterResource(coreUiR.drawable.ic_skip_prev),
+                painter = painterResource(R.drawable.ic_player_seek_to_previous),
                 contentDescription = stringResource(R.string.audio_previous_episode),
                 tint = onSurface.copy(alpha = 0.55f),
                 modifier = Modifier.size(28.dp),
             )
         }
 
-        // 快退 10s（中级强调：主题色浅如 + 数字标签�?
+        // 播放 / 暂停（透明背景 + 满尺寸大图标，三角圆润）
         Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(primary.copy(alpha = 0.1f))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = ripple(bounded = true),
-                ) {
-                    player.seekTo((player.currentPosition - 10_000L).coerceAtLeast(0L))
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Replay10,
-                contentDescription = stringResource(R.string.audio_rewind_10s),
-                tint = primary,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-
-        // 播放 / 暂停（最高优先级：白色圆形按钮，视觉锚点�?
-        Box(
-            modifier = Modifier
-                .size(96.dp)
-                .shadow(6.dp, CircleShape)
-                .background(FluxTheme.colorScheme.primary, CircleShape),
+            modifier = Modifier.size(80.dp),
             contentAlignment = Alignment.Center,
         ) {
             IconButton(
                 onClick = { playPauseState.onClick() },
-                modifier = Modifier.size(96.dp),
+                modifier = Modifier.size(80.dp),
             ) {
                 Icon(
                     painter = painterResource(
-                        if (playPauseState.showPlay) coreUiR.drawable.ic_play
-                        else coreUiR.drawable.ic_pause,
+                        if (playPauseState.showPlay) R.drawable.ic_player_play
+                        else R.drawable.ic_player_pause,
                     ),
                     contentDescription = if (playPauseState.showPlay) {
                         stringResource(R.string.audio_play)
                     } else {
                         stringResource(R.string.audio_pause)
                     },
-                    tint = FluxTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(56.dp),
+                    tint = onSurface.copy(alpha = 0.9f),
+                    modifier = Modifier.size(72.dp),
                 )
             }
         }
 
-        // 快进 10s（中级强调：主题色浅如 + 数字标签�?
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(primary.copy(alpha = 0.1f))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = ripple(bounded = true),
-                ) {
-                    player.seekTo((player.currentPosition + 10_000L).coerceAtMost(player.duration))
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Forward10,
-                contentDescription = stringResource(R.string.audio_forward_10s),
-                tint = primary,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-
-        // 下一集（轻量级：细边框小圆）
+        // 下一集（对齐小梨 ic_player_seek_to_next）
         IconButton(onClick = {
             val idx = player.currentMediaItemIndex
             if (idx < player.mediaItemCount - 1) player.seekToDefaultPosition(idx + 1)
         }) {
             Icon(
-                painter = painterResource(coreUiR.drawable.ic_skip_next),
+                painter = painterResource(R.drawable.ic_player_seek_to_next),
                 contentDescription = stringResource(R.string.audio_next_episode),
+                tint = onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.size(28.dp),
+            )
+        }
+
+        // 快进（对齐小梨 ic_player_forward）
+        IconButton(onClick = {
+            player.seekTo((player.currentPosition + 10_000L).coerceAtMost(player.duration))
+        }) {
+            Icon(
+                painter = painterResource(R.drawable.ic_player_forward),
+                contentDescription = stringResource(R.string.audio_forward_10s),
                 tint = onSurface.copy(alpha = 0.55f),
                 modifier = Modifier.size(28.dp),
             )
@@ -1064,11 +1481,11 @@ private fun TransportRow(player: Player, isPlaying: Boolean) {
 @Composable
 private fun BottomFunctionRow(
     currentSpeed: Float,
-    onSpeedClick: () -> Unit,
-    onSkipClick: () -> Unit,
-    onSleepClick: () -> Unit,
-    onPlaylistClick: () -> Unit,
     sleepRemaining: Int,
+    onSleepClick: () -> Unit,
+    onSkipClick: () -> Unit,
+    onSpeedClick: () -> Unit,
+    onPlaylistClick: () -> Unit,
 ) {
     val sleepLabel = if (sleepRemaining > 0) {
         val mins = sleepRemaining / 60
@@ -1077,65 +1494,66 @@ private fun BottomFunctionRow(
     } else stringResource(R.string.audio_sleep_label)
     val onSurfaceAlpha = FluxTheme.colorScheme.onSurface.copy(alpha = 0.8f)
 
+    // 4 功能按钮：定时 | 跳过头尾 | 倍速 | 目录
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 播放列表
+        // 定时（对齐小梨 ic_player_timing_btn）
         FunctionButton(
             icon = {
                 Icon(
-                    imageVector = AutoMirrored.Filled.List,
-                    contentDescription = null,
-                    tint = onSurfaceAlpha,
-                    modifier = Modifier.size(24.dp),
-                )
-            },
-            label = stringResource(R.string.audio_list),
-            onClick = onPlaylistClick,
-        )
-
-        // 定时关闭
-        FunctionButton(
-            icon = {
-                Icon(
-                    imageVector = Icons.Outlined.AccessTime,
+                    painter = painterResource(R.drawable.ic_player_timing_btn),
                     contentDescription = null,
                     tint = if (sleepRemaining > 0) FluxTheme.colorScheme.primary else onSurfaceAlpha,
-                    modifier = Modifier.size(24.dp),
+                    modifier = Modifier.size(28.dp),
                 )
             },
             label = sleepLabel,
             onClick = onSleepClick,
         )
 
-        // 倍�?
+        // 跳过头尾（对齐小梨 ic_player_skip_btn）
         FunctionButton(
             icon = {
                 Icon(
-                    painter = painterResource(coreUiR.drawable.ic_speed),
+                    painter = painterResource(R.drawable.ic_player_skip_btn),
                     contentDescription = null,
                     tint = onSurfaceAlpha,
-                    modifier = Modifier.size(24.dp),
-                )
-            },
-            label = "${currentSpeed}x",
-            onClick = onSpeedClick,
-        )
-
-        // 片头片尾
-        FunctionButton(
-            icon = {
-                Icon(
-                    painter = painterResource(coreUiR.drawable.ic_settings),
-                    contentDescription = null,
-                    tint = onSurfaceAlpha,
-                    modifier = Modifier.size(24.dp),
+                    modifier = Modifier.size(28.dp),
                 )
             },
             label = stringResource(R.string.audio_skip_intro_outro),
             onClick = onSkipClick,
+        )
+
+        // 倍速（对齐小梨 ic_player_speed_btn）
+        FunctionButton(
+            icon = {
+                Icon(
+                    painter = painterResource(R.drawable.ic_player_speed_btn),
+                    contentDescription = null,
+                    tint = onSurfaceAlpha,
+                    modifier = Modifier.size(28.dp),
+                )
+            },
+            label = "${formatSpeed(currentSpeed)}x",
+            onClick = onSpeedClick,
+        )
+
+        // 目录（对齐小梨 ic_player_list_btn）
+        FunctionButton(
+            icon = {
+                Icon(
+                    painter = painterResource(R.drawable.ic_player_list_btn),
+                    contentDescription = null,
+                    tint = onSurfaceAlpha,
+                    modifier = Modifier.size(28.dp),
+                )
+            },
+            label = stringResource(R.string.audio_list),
+            onClick = onPlaylistClick,
         )
     }
 }
@@ -1149,12 +1567,18 @@ private fun FunctionButton(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(FluxTheme.colorScheme.onSurface.copy(alpha = 0.06f)),
+        ) {
             icon()
         }
         Text(
             text = label,
-            fontSize = 12.sp,
+            fontSize = 10.sp,
             color = FluxTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -1165,11 +1589,19 @@ private fun FunctionButton(
 // region ── 工具函数 ──
 
 private fun formatTime(ms: Long): String {
-    if (ms <= 0) return "00:00"
+    if (ms <= 0) return "00:00:00"
     val totalSeconds = ms / 1000
-    val minutes = totalSeconds / 60
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60
-    return "%02d:%02d".format(minutes, seconds)
+    return "%02d:%02d:%02d".format(hours, minutes, seconds)
+}
+
+/** 倍速格式化：1.0 → "1"，1.25 → "1.25"，1.4 → "1.4"（先四舍五入到百分位，防浮点误差）。 */
+private fun formatSpeed(speed: Float): String {
+    val rounded = (speed * 100f).roundToInt() / 100f
+    if (rounded % 1f == 0f) return rounded.toInt().toString()
+    return "%.2f".format(rounded).trimEnd('0').trimEnd('.')
 }
 
 // endregion

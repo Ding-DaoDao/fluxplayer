@@ -29,10 +29,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.annotation.OptIn
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -60,6 +63,7 @@ import com.fluxplayer.app.core.ui.R as coreUiR
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AudiobookTabContent(
     viewModel: AudiobookViewModel = hiltViewModel(),
@@ -205,11 +209,17 @@ fun AudiobookTabContent(
                         modifier = modifier,
                     )
                 } else {
-                    BookshelfList(
-                        books = books,
-                        onBookClick = { selectedBook = it },
+                    PullToRefreshBox(
+                        isRefreshing = uiState.isRefreshing,
+                        onRefresh = { viewModel.refreshBooks() },
                         modifier = modifier,
-                    )
+                    ) {
+                        BookshelfList(
+                            books = books,
+                            onBookClick = { selectedBook = it },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
         }

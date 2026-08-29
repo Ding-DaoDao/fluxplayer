@@ -95,11 +95,11 @@ private fun GeneralPreferencesContent(
                 )
             }
 
-            ListSectionTitle(text = "下载")
+            ListSectionTitle(text = stringResource(R.string.download))
             Column {
                 ClickablePreferenceItem(
-                    title = "下载存储位置",
-                    description = uiState.downloadPath.ifBlank { "未设置" },
+                    title = stringResource(R.string.download_location),
+                    description = uiState.downloadPath.ifBlank { stringResource(R.string.not_set) },
                     icon = NextIcons.Folder,
                     onClick = { onEvent(GeneralPreferencesUiEvent.ShowDialog(GeneralPreferencesDialog.ChangeDownloadPathDialog)) },
                     isFirstItem = true,
@@ -183,7 +183,7 @@ private fun GeneralPreferencesContent(
                         onDismissRequest = { onEvent(GeneralPreferencesUiEvent.ShowDialog(null)) },
                         title = {
                             Text(
-                                text = "下载存储位置",
+                                text = stringResource(R.string.download_location),
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         },
@@ -191,7 +191,7 @@ private fun GeneralPreferencesContent(
                             TextButton(
                                 onClick = { directoryPickerLauncher.launch(null) },
                             ) {
-                                Text(text = "选择目录")
+                                Text(stringResource(R.string.choose_directory))
                             }
                         },
                         dismissButton = {
@@ -199,9 +199,9 @@ private fun GeneralPreferencesContent(
                         },
                         content = {
                             Column {
-                                Text("当前路径：", style = MaterialTheme.typography.bodyMedium)
+                                Text(stringResource(R.string.current_path), style = MaterialTheme.typography.bodyMedium)
                                 Text(
-                                    uiState.downloadPath.ifBlank { "未设置" },
+                                    uiState.downloadPath.ifBlank { stringResource(R.string.not_set) },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -212,7 +212,7 @@ private fun GeneralPreferencesContent(
                                         onEvent(GeneralPreferencesUiEvent.ShowDialog(null))
                                     }
                                 ) {
-                                    Text("恢复默认")
+                                    Text(stringResource(R.string.restore_default))
                                 }
                             }
                         },

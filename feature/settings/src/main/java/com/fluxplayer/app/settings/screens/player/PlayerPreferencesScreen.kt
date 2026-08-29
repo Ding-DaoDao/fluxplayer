@@ -41,7 +41,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.extensions.isPipFeatureSupported
 import com.fluxplayer.app.core.common.extensions.round
 import com.fluxplayer.app.core.model.CacheMaxSize
-import com.fluxplayer.app.core.model.ControlButtonsPosition
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.model.Resume
 import com.fluxplayer.app.core.model.ScreenOrientation
@@ -177,7 +176,7 @@ private fun PlayerPreferencesContent(
                 )
                 HorizontalDivider()
                 ClickablePreferenceItem(
-                    title = "倍速预设",
+                    title = stringResource(R.string.speed_presets),
                     description = uiState.preferences.speedPresets.joinToString(", ") { "${it}x" },
                     icon = NextIcons.Speed,
                     onClick = {
@@ -256,8 +255,8 @@ private fun PlayerPreferencesContent(
                 )
                 HorizontalDivider()
                 ClickablePreferenceItem(
-                    title = "弹幕源管理",
-                    description = "${DanmakuSource.filterValid(uiState.preferences.danmakuSources).size} 个弹幕源",
+                    title = stringResource(R.string.danmaku_sources),
+                    description = "${DanmakuSource.filterValid(uiState.preferences.danmakuSources).size} ${stringResource(R.string.danmaku_source_count)}",
                     icon = NextIcons.Caption,
                     onClick = {
                         onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.DanmakuSourceManagerDialog))
@@ -265,7 +264,7 @@ private fun PlayerPreferencesContent(
                 )
                 HorizontalDivider()
                 ClickablePreferenceItem(
-                    title = "本地弹幕目录",
+                    title = stringResource(R.string.local_danmaku_path),
                     description = uiState.preferences.localDanmakuPath,
                     icon = NextIcons.Folder,
                     onClick = {
@@ -340,24 +339,6 @@ private fun PlayerPreferencesContent(
                                 selected = it == uiState.preferences.playerScreenOrientation,
                                 onClick = {
                                     onEvent(PlayerPreferencesUiEvent.UpdatePreferredPlayerOrientation(it))
-                                    onEvent(PlayerPreferencesUiEvent.ShowDialog(null))
-                                },
-                            )
-                        }
-                    }
-                }
-
-                PlayerPreferenceDialog.ControlButtonsDialog -> {
-                    OptionsDialog(
-                        text = stringResource(id = R.string.control_buttons_alignment),
-                        onDismissClick = { onEvent(PlayerPreferencesUiEvent.ShowDialog(null)) },
-                    ) {
-                        items(ControlButtonsPosition.entries.toTypedArray()) {
-                            RadioTextButton(
-                                text = it.name(),
-                                selected = it == uiState.preferences.controlButtonsPosition,
-                                onClick = {
-                                    onEvent(PlayerPreferencesUiEvent.UpdatePreferredControlButtonsPosition(it))
                                     onEvent(PlayerPreferencesUiEvent.ShowDialog(null))
                                 },
                             )
@@ -531,6 +512,11 @@ fun SpeedPresetsDialog(
     var newSpeedText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
 
+    // onClick 等普通 lambda 中不可调用 stringResource，提前在 Composable 作用域取值。
+    val invalidSpeedNumberMessage = stringResource(R.string.invalid_speed_number)
+    val speedOutOfRangeMessage = stringResource(R.string.speed_out_of_range)
+    val speedAlreadyExistsMessage = stringResource(R.string.speed_already_exists)
+
     val defaultPresets = listOf(0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f)
 
     if (showAddDialog) {
@@ -540,7 +526,7 @@ fun SpeedPresetsDialog(
                 newSpeedText = ""
                 errorMessage = ""
             },
-            title = { Text(text = "添加倍速") },
+            title = { Text(text = stringResource(R.string.add_speed)) },
             text = {
                 Column {
                     OutlinedTextField(
@@ -549,7 +535,7 @@ fun SpeedPresetsDialog(
                             newSpeedText = it
                             errorMessage = ""
                         },
-                        label = { Text("倍速值 (0.1-10.0)") },
+                        label = { Text(stringResource(R.string.speed_value_range_hint)) },
                         singleLine = true,
                         isError = errorMessage.isNotEmpty(),
                     )
@@ -568,9 +554,9 @@ fun SpeedPresetsDialog(
                     onClick = {
                         val speed = newSpeedText.toFloatOrNull()
                         when {
-                            speed == null -> errorMessage = "请输入有效的数字"
-                            speed < 0.1f || speed > 10.0f -> errorMessage = "倍速范围: 0.1-10.0"
-                            presets.any { abs(it - speed) < 0.001f } -> errorMessage = "该倍速已存在"
+                            speed == null -> errorMessage = invalidSpeedNumberMessage
+                            speed < 0.1f || speed > 10.0f -> errorMessage = speedOutOfRangeMessage
+                            presets.any { abs(it - speed) < 0.001f } -> errorMessage = speedAlreadyExistsMessage
                             else -> {
                                 presets = (presets + speed).sorted()
                                 showAddDialog = false
@@ -579,7 +565,7 @@ fun SpeedPresetsDialog(
                             }
                         }
                     },
-                ) { Text("添加") }
+                ) { Text(stringResource(R.string.add)) }
             },
             dismissButton = {
                 TextButton(
@@ -588,13 +574,13 @@ fun SpeedPresetsDialog(
                         newSpeedText = ""
                         errorMessage = ""
                     },
-                ) { Text("取消") }
+                ) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
 
     NextDialogWithDoneAndCancelButtons(
-        title = "倍速预设",
+        title = stringResource(R.string.speed_presets),
         onDoneClick = {
             onUpdatePresets(presets)
             onDismiss()
@@ -625,7 +611,7 @@ fun SpeedPresetsDialog(
                             enabled = presets.size > 1,
                         ) {
                             Text(
-                                text = "删除",
+                                text = stringResource(R.string.delete),
                                 color = if (presets.size > 1) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
                             )
                         }
@@ -640,14 +626,14 @@ fun SpeedPresetsDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     FilledIconButton(onClick = { showAddDialog = true }) {
-                        Icon(painter = painterResource(id = R.drawable.ic_add), contentDescription = "添加倍速")
+                        Icon(painter = painterResource(id = R.drawable.ic_add), contentDescription = stringResource(R.string.add_speed))
                     }
                     TextButton(
                         onClick = { presets = defaultPresets.sorted() },
                     ) {
-                        Icon(imageVector = NextIcons.History, contentDescription = "恢复默认")
+                        Icon(imageVector = NextIcons.History, contentDescription = stringResource(R.string.restore_defaults))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("恢复默认")
+                        Text(stringResource(R.string.restore_defaults))
                     }
                 }
             }

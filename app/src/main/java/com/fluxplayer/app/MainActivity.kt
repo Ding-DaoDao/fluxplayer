@@ -50,8 +50,10 @@ import com.fluxplayer.app.core.common.storagePermission
 import com.fluxplayer.app.core.data.backup.AutoBackupHelper
 import com.fluxplayer.app.core.media.services.MediaService
 import com.fluxplayer.app.core.media.sync.MediaSynchronizer
+import com.fluxplayer.app.core.model.AccentPreset
 import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.model.ThemeConfig
+import com.fluxplayer.app.core.model.ThemeStyle
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
 import com.fluxplayer.app.navigation.MediaRootRoute
 import com.fluxplayer.app.navigation.mediaNavGraph
@@ -120,6 +122,8 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = shouldUseDynamicTheming(uiState = uiState),
                 customSeedColor = customSeedColor(uiState = uiState),
                 composeEngine = shouldUseComposeEngine(uiState = uiState),
+                themeStyle = shouldUseThemeStyle(uiState = uiState),
+                accentPreset = shouldUseAccentPreset(uiState = uiState),
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -298,4 +302,20 @@ fun customSeedColor(
 ): Int = when (uiState) {
     MainActivityUiState.Loading -> 0
     is MainActivityUiState.Success -> uiState.preferences.customSeedColor
+}
+
+@Composable
+fun shouldUseThemeStyle(
+    uiState: MainActivityUiState,
+): ThemeStyle = when (uiState) {
+    MainActivityUiState.Loading -> ThemeStyle.TONAL
+    is MainActivityUiState.Success -> uiState.preferences.themeStyle
+}
+
+@Composable
+fun shouldUseAccentPreset(
+    uiState: MainActivityUiState,
+): AccentPreset = when (uiState) {
+    MainActivityUiState.Loading -> AccentPreset.Default
+    is MainActivityUiState.Success -> uiState.preferences.accentPreset
 }

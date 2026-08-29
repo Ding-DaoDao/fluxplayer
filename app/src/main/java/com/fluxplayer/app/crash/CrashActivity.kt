@@ -64,6 +64,8 @@ import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
 import com.fluxplayer.app.shouldUseDarkTheme
 import com.fluxplayer.app.shouldUseDynamicTheming
 import com.fluxplayer.app.shouldUseHighContrastDarkTheme
+import com.fluxplayer.app.shouldUseThemeStyle
+import com.fluxplayer.app.shouldUseAccentPreset
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -125,6 +127,8 @@ class CrashActivity : ComponentActivity() {
                 darkTheme = shouldUseDarkTheme,
                 highContrastDarkTheme = shouldUseHighContrastDarkTheme(uiState = uiState),
                 dynamicColor = shouldUseDynamicTheming(uiState = uiState),
+                themeStyle = shouldUseThemeStyle(uiState = uiState),
+                accentPreset = shouldUseAccentPreset(uiState = uiState),
             ) {
                 val clipboard = LocalClipboard.current
                 CrashScreen(

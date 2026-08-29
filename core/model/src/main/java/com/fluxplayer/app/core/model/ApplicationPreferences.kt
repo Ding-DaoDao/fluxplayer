@@ -9,6 +9,8 @@ data class ApplicationPreferences(
     val themeConfig: ThemeConfig = ThemeConfig.SYSTEM,
     val useHighContrastDarkTheme: Boolean = false,
     val useDynamicColors: Boolean = true,
+    val themeStyle: ThemeStyle = ThemeStyle.TONAL,
+    val accentPreset: AccentPreset = AccentPreset.Default,
     val markLastPlayedMedia: Boolean = true,
     val excludeFolders: List<String> = emptyList(),
     val mediaViewMode: MediaViewMode = MediaViewMode.FOLDERS,
