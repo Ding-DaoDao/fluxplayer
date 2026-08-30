@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -48,7 +49,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,7 +59,6 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
-import com.fluxplayer.app.core.ui.R as coreUiR
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
 
@@ -115,7 +114,6 @@ fun AudiobookTabContent(
                 val parts = v.split("|")
                 (parts.getOrNull(0)?.toLongOrNull() ?: 0L) to (parts.getOrNull(1)?.toLongOrNull() ?: 0L)
             }
-        Log.d("AudiobookTabContent", "bookPath=${book.folderPath}, resumeEntry=$resumeEntry, chapterProgressPairs keys=${chapterProgressPairs.keys}, total=${uiState.chapterProgress.size}")
 
         AudiobookDetailContent(
             book = book,
@@ -128,6 +126,8 @@ fun AudiobookTabContent(
             resumeChapterIndex = resumeChapterIndex,
             resumePositionMs = resumePositionMs,
             chapterProgress = chapterProgressPairs,
+            isFavorite = book.folderPath in uiState.favorites,
+            onToggleFavorite = { viewModel.toggleFavorite(book.folderPath) },
             modifier = Modifier.fillMaxSize(),
         )
         return
@@ -209,13 +209,26 @@ fun AudiobookTabContent(
                         modifier = modifier,
                     )
                 } else {
+                    // 收藏置顶，其余按最近播放排序（未播放过的保持扫描顺序）
+                    val sortedBooks = remember(books, uiState.favorites, uiState.lastPlayedAt) {
+                        books.sortedWith(
+                            compareByDescending<AudioBook> { it.folderPath in uiState.favorites }
+                                .thenComparator { a, b ->
+                                    val ta = uiState.lastPlayedAt[a.folderPath] ?: 0L
+                                    val tb = uiState.lastPlayedAt[b.folderPath] ?: 0L
+                                    tb.compareTo(ta)
+                                },
+                        )
+                    }
                     PullToRefreshBox(
                         isRefreshing = uiState.isRefreshing,
                         onRefresh = { viewModel.refreshBooks() },
                         modifier = modifier,
                     ) {
                         BookshelfList(
-                            books = books,
+                            books = sortedBooks,
+                            resumeStates = uiState.resumeStates,
+                            favorites = uiState.favorites,
                             onBookClick = { selectedBook = it },
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -335,6 +348,8 @@ private fun EmptyBooksView(
 private fun BookshelfList(
     books: List<AudioBook>,
     onBookClick: (AudioBook) -> Unit,
+    resumeStates: Map<String, String> = emptyMap(),
+    favorites: Set<String> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -345,6 +360,9 @@ private fun BookshelfList(
         items(books, key = { it.folderPath }) { book ->
             BookListItem(
                 book = book,
+                resumeChapterIndex = resumeStates[book.folderPath]
+                    ?.substringBefore('|')?.toIntOrNull(),
+                isFavorite = book.folderPath in favorites,
                 onClick = { onBookClick(book) },
             )
         }
@@ -354,6 +372,8 @@ private fun BookshelfList(
 @Composable
 private fun BookListItem(
     book: AudioBook,
+    resumeChapterIndex: Int? = null,
+    isFavorite: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -417,7 +437,10 @@ private fun BookListItem(
                     lineHeight = 20.sp,
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     // 章节数标签
                     Surface(
                         shape = RoundedCornerShape(6.dp),
@@ -429,6 +452,28 @@ private fun BookListItem(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
+                    // 上次听到第 N 集
+                    if (resumeChapterIndex != null && resumeChapterIndex < book.chapterCount) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = colors.surfaceVariant,
+                        ) {
+                            Text(
+                                text = "听到第 ${resumeChapterIndex + 1} 集",
+                                color = colors.onSurfaceVariant,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
+                    if (isFavorite) {
+                        Icon(
+                            imageVector = Icons.Filled.Favorite,
+                            contentDescription = "收藏",
+                            tint = colors.primary.copy(alpha = 0.6f),
+                            modifier = Modifier.size(13.dp),
                         )
                     }
                 }

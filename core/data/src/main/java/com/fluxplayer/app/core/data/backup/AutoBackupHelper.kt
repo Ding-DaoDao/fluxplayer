@@ -9,6 +9,8 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 自动备份与检查助手，负责：
@@ -22,25 +24,43 @@ class AutoBackupHelper @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
 
+    /** 距上次自动备份的时间戳，用于节流（每次 onStop 都触发备份时避免过于频繁） */
+    private var lastAutoBackupAtMs: Long = 0L
+
+    /** 防止快速连续 onStop 时并发执行两份备份 */
+    private val backupMutex = Mutex()
+
     /**
-     * 根据 autoBackupSyncMode 执行自动备份（静默执行，静默记录日志）
+     * 根据 autoBackupSyncMode 执行自动备份（静默执行，静默记录日志）。
+     * @param force 为 true 时跳过节流（用于用户手动触发备份）
      */
-    suspend fun performAutoBackup() {
-        val config = backupWebDavDataSource.config.first()
-        if (!config.isConfigured) return
+    suspend fun performAutoBackup(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastAutoBackupAtMs < MIN_AUTO_BACKUP_INTERVAL_MS) {
+            Log.d(TAG, "距上次自动备份不足 ${MIN_AUTO_BACKUP_INTERVAL_MS / 1000}s，跳过本次")
+            return
+        }
 
-        val syncMode = config.autoBackupSyncMode
-        Log.d(TAG, "执行自动备份，模式: $syncMode")
+        backupMutex.withLock {
+            val config = backupWebDavDataSource.config.first()
+            if (!config.isConfigured) return
 
-        val backup = backupManager.createBackup()
+            // 进入实际备份流程即更新节流时间戳，避免失败重试时无限逼近
+            lastAutoBackupAtMs = System.currentTimeMillis()
 
-        when (syncMode) {
-            "both" -> {
-                localBackup(backup, config)
-                cloudBackup(config)
+            val syncMode = config.autoBackupSyncMode
+            Log.d(TAG, "执行自动备份，模式: $syncMode")
+
+            val backup = backupManager.createBackup()
+
+            when (syncMode) {
+                "both" -> {
+                    localBackup(backup, config)
+                    cloudBackup(config)
+                }
+                "local" -> localBackup(backup, config)
+                "remote" -> cloudBackup(config)
             }
-            "local" -> localBackup(backup, config)
-            "remote" -> cloudBackup(config)
         }
     }
 
@@ -104,5 +124,8 @@ class AutoBackupHelper @Inject constructor(
 
     companion object {
         private const val TAG = "AutoBackupHelper"
+
+        /** 自动备份最小间隔：5 分钟内重复退到后台不再触发 */
+        private const val MIN_AUTO_BACKUP_INTERVAL_MS = 5 * 60 * 1000L
     }
 }

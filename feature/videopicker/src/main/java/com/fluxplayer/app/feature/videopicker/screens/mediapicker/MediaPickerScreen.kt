@@ -685,12 +685,15 @@ internal fun MediaPickerScreen(
         } else {
             scaffoldPadding
         }
+        // 为每个 Tab 提供独立的可保存状态：切 Tab 时滚动位置等 rememberSaveable 状态不再丢失
+        val tabStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
         Crossfade(
             targetState = selectedTab,
             modifier = Modifier.fillMaxSize(),
             animationSpec = tween(280, easing = EaseOutCubic),
             label = "TabTransition",
         ) { tab ->
+            tabStateHolder.SaveableStateProvider(key = "picker_tab_$tab") {
             when (tab) {
                 0 -> {
                     when (uiState.mediaDataState) {
@@ -797,6 +800,7 @@ internal fun MediaPickerScreen(
                             .padding(contentPadding),
                     )
                 }
+            }
             }
         }
     }

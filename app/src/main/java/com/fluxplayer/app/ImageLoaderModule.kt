@@ -46,7 +46,9 @@ object ImageLoaderModule {
                 DiskCache.Builder()
                     .fileSystem(FileSystem.SYSTEM)
                     .directory(context.filesDir.resolve("thumbnails"))
-                    .maxSizePercent(1.0)
+                    // Cap thumbnail disk cache at 2% of available storage (was 100%,
+                    // which could in theory consume the entire free space).
+                    .maxSizePercent(0.02)
                     .build(),
             )
             .crossfade(true)

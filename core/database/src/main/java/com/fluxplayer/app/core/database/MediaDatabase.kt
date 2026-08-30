@@ -29,7 +29,7 @@ import com.fluxplayer.app.core.database.entities.VideoStreamInfoEntity
         SubtitleStreamInfoEntity::class,
         DownloadTaskEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class MediaDatabase : RoomDatabase() {
@@ -264,6 +264,13 @@ abstract class MediaDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_media_state_last_played_time` ON `media_state` (`last_played_time`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_playback_history_last_played_time` ON `playback_history` (`last_played_time`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_download_tasks_status` ON `download_tasks` (`status`)")
+            }
+        }
+
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 目录浏览按 parent_path 过滤（MediumDao.getMediaInDirectory 等），补索引避免全表扫描
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_media_parent_path` ON `media` (`parent_path`)")
             }
         }
     }

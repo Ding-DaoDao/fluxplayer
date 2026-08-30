@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.fluxplayer.app.core.common.sortedByNaturalName
 import java.io.File
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -53,6 +54,8 @@ class AudiobookViewModel @Inject constructor(
                         rootUri = prefs.audiobookRootUri.takeIf { it.isNotBlank() },
                         resumeStates = prefs.audiobookResumeState,
                         chapterProgress = prefs.audiobookChapterProgress,
+                        favorites = prefs.audiobookFavorites,
+                        lastPlayedAt = prefs.audiobookLastPlayedAt,
                     )
                 }
             }
@@ -76,6 +79,17 @@ class AudiobookViewModel @Inject constructor(
         }
     }
 
+    /** 收藏/取消收藏一本书。 */
+    fun toggleFavorite(bookPath: String) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences { prefs ->
+                val favorites = prefs.audiobookFavorites.toMutableSet()
+                if (!favorites.remove(bookPath)) favorites.add(bookPath)
+                prefs.copy(audiobookFavorites = favorites)
+            }
+        }
+    }
+
     fun scanBooks(rootUri: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(scanState = DataState.Loading, partialBooks = emptyList()) }
@@ -87,6 +101,7 @@ class AudiobookViewModel @Inject constructor(
                     }
                 }
                 _uiState.update { it.copy(scanState = DataState.Success(books)) }
+                cleanupStaleEntries(books)
             } catch (e: Exception) {
                 _uiState.update { it.copy(scanState = DataState.Error(e)) }
             }
@@ -96,6 +111,47 @@ class AudiobookViewModel @Inject constructor(
     fun refresh() {
         val root = _uiState.value.rootUri ?: return
         scanBooks(root)
+    }
+
+    /**
+     * 清理已删除书籍/越界章节的进度与续播条目。
+     * audiobookChapterProgress / audiobookResumeState 是全量序列化写盘的 map，
+     * 不清理会随使用时间无限增长，放大每次进度保存的写入成本。
+     */
+    private fun cleanupStaleEntries(books: List<AudioBook>) {
+        viewModelScope.launch {
+            preferencesRepository.updateApplicationPreferences { prefs ->
+                val bookPaths = HashSet<String>(books.size * 2)
+                val chapterCounts = HashMap<String, Int>(books.size * 2)
+                books.forEach { book ->
+                    bookPaths.add(book.folderPath)
+                    chapterCounts[book.folderPath] = book.chapters.size
+                }
+                val progress = prefs.audiobookChapterProgress.filterKeys { key ->
+                    val path = key.substringBeforeLast('|')
+                    val idx = key.substringAfterLast('|').toIntOrNull() ?: return@filterKeys false
+                    val count = chapterCounts[path] ?: return@filterKeys false
+                    idx < count
+                }
+                val resumes = prefs.audiobookResumeState.filterKeys { it in bookPaths }
+                val favorites = prefs.audiobookFavorites.filterTo(HashSet()) { it in bookPaths }
+                val lastPlayed = prefs.audiobookLastPlayedAt.filterKeys { it in bookPaths }
+                if (progress.size == prefs.audiobookChapterProgress.size &&
+                    resumes.size == prefs.audiobookResumeState.size &&
+                    favorites.size == prefs.audiobookFavorites.size &&
+                    lastPlayed.size == prefs.audiobookLastPlayedAt.size
+                ) {
+                    prefs // 无变化，避免无效写盘
+                } else {
+                    prefs.copy(
+                        audiobookChapterProgress = progress,
+                        audiobookResumeState = resumes,
+                        audiobookFavorites = favorites,
+                        audiobookLastPlayedAt = lastPlayed,
+                    )
+                }
+            }
+        }
     }
 
     /**
@@ -117,6 +173,7 @@ class AudiobookViewModel @Inject constructor(
                         partialBooks = emptyList(),
                     )
                 }
+                cleanupStaleEntries(books)
             } catch (e: Exception) {
                 _uiState.update { it.copy(isRefreshing = false, scanState = DataState.Error(e)) }
             }
@@ -136,7 +193,7 @@ class AudiobookViewModel @Inject constructor(
 
         val folders = rootDir.listFiles()
             ?.filter { it.isDirectory && !it.name.startsWith(".") }
-            ?.sortedBy { it.name }
+            ?.let { it.sortedByNaturalName() }
             ?: emptyList()
 
         return coroutineScope {
@@ -159,7 +216,7 @@ class AudiobookViewModel @Inject constructor(
         // 音频文件
         val audioFiles = allFiles
             .filter { it.extension.lowercase() in AUDIO_EXTENSIONS }
-            .sortedBy { it.name }
+            .let { it.sortedByNaturalName() }
 
         val chapters = audioFiles.map { file ->
             AudioChapter(
@@ -241,16 +298,23 @@ class AudiobookViewModel @Inject constructor(
      * 尝试从 SAF content URI 提取真实文件路径。
      * 格式: content://com.android.externalstorage.documents/tree/primary%3AAudiobook
      *   → /storage/emulated/0/Audiobook
+     * SD 卡等外部卷的卷 ID 是 FAT UUID（如 1A2B-3C4D）：
+     *   → /storage/1A2B-3C4D/Audiobook
      */
     private fun contentUriToFile(uriString: String): File? {
         return try {
             val uri = Uri.parse(uriString)
-            val docId = uri.lastPathSegment ?: return null
+            val docId = Uri.decode(uri.lastPathSegment ?: return null)
             // 处理 URL 编码（如 primary%3A → primary:）
-            val decoded = Uri.decode(docId)
-            // primary: 替换为 /storage/emulated/0/
-            val path = decoded.replaceFirst("^[^:]+:".toRegex(), "")
-            File("/storage/emulated/0/$path")
+            val separator = docId.indexOf(':')
+            if (separator <= 0) return null
+            val volume = docId.substring(0, separator)
+            val path = docId.substring(separator + 1)
+            val base = if (volume == "primary") "/storage/emulated/0" else "/storage/$volume"
+            val dir = File(if (path.isEmpty()) base else "$base/$path")
+            // 卷映射可能不存在（厂商自定义路径等），校验后再返回，
+            // 避免 scanDirectory 静默返回空列表造成"未找到书籍"的误导
+            if (dir.isDirectory) dir else null
         } catch (_: Exception) {
             null
         }
@@ -267,4 +331,8 @@ data class AudiobookUiState(
     val resumeStates: Map<String, String> = emptyMap(),
     /** key: "bookPath|chapterIndex", value: "positionMs|durationMs" */
     val chapterProgress: Map<String, String> = emptyMap(),
+    /** 收藏的书籍文件夹路径 */
+    val favorites: Set<String> = emptySet(),
+    /** 书籍最近播放时间（epochMillis），用于书架排序 */
+    val lastPlayedAt: Map<String, Long> = emptyMap(),
 )

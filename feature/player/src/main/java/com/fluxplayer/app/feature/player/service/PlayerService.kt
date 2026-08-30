@@ -75,6 +75,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.future
@@ -143,6 +144,13 @@ class PlayerService : MediaSessionService() {
      */
     private var isRestoringPlaybackSpeed = false
 
+    /**
+     * 标记：当前会话是否为纯音频（听书）会话。在 onSetMediaItems/onAddMediaItems
+     * 里根据 mediaItems 判断。听书章节必须自动连播，不受视频"自动连播"偏好的影响。
+     */
+    @Volatile
+    private var isAudioSession = false
+
     private var loudnessEnhancer: LoudnessEnhancer? = null
 
     companion object {
@@ -156,7 +164,22 @@ class PlayerService : MediaSessionService() {
             super.onMediaItemTransition(mediaItem, reason)
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) return
             isMediaItemReady = false
+            // 听书章节始终自动连播；视频会话按"自动连播"偏好（此处运行在主线程）
+            // MediaSession 暴露的是 Player 接口，pauseAtEndOfMediaItems 是 ExoPlayer 专属属性
+            (mediaSession?.player as? ExoPlayer)?.pauseAtEndOfMediaItems =
+                if (isAudioSession) false else !playerPreferences.autoplay
+            // 睡眠定时（按集数）：达到 起始集 + N 时暂停并清除定时
+            val sleepState = AudioSleepTimer.state.value
+            if (sleepState.remainingEpisodes > 0 && sleepState.startEpisodeIndex >= 0) {
+                val index = mediaSession?.player?.currentMediaItemIndex ?: -1
+                if (index >= 0 && index >= sleepState.startEpisodeIndex + sleepState.remainingEpisodes) {
+                    AudioSleepTimer.cancel()
+                    mediaSession?.player?.pause()
+                }
+            }
             loadArtworkForCurrentMediaItem()
+            // 听书会话：同步刷新通知栏点击的 PendingIntent，携带听书上下文
+            updateSessionActivityForAudiobook()
             val meta = mediaItem?.mediaMetadata
             Log.d(TAG, "onMediaItemTransition: mediaId=${mediaItem?.mediaId}, " +
                 "positionMs=${meta?.positionMs}, playbackSpeed=${meta?.playbackSpeed}, " +
@@ -510,6 +533,7 @@ class PlayerService : MediaSessionService() {
             // 纯音频模式：跳过 DB 查询、字幕扫描、artwork 加载
             // 仍需从 mediaId 重建 URI（localConfiguration 可能在 IPC 传输中丢失）
             if (mediaItems.all { persistence.isAudioFile(it.mediaId) }) {
+                isAudioSession = true
                 // 听书倍速独立于视频播放设置，从 DataStore 读取上次保存的倍速
                 sessionPlaybackSpeed = preferencesRepository.applicationPreferences.value.audiobookPlaybackSpeed
                 val updatedItems = mediaItems.map { item ->
@@ -519,6 +543,7 @@ class PlayerService : MediaSessionService() {
                 }
                 return@future MediaSession.MediaItemsWithStartPosition(updatedItems, startIndex, startPositionMs)
             }
+            isAudioSession = false
             val updatedMediaItems = mediaItemEnricher.enrich(mediaItems)
             return@future MediaSession.MediaItemsWithStartPosition(updatedMediaItems, startIndex, startPositionMs)
         }
@@ -530,6 +555,7 @@ class PlayerService : MediaSessionService() {
         ): ListenableFuture<MutableList<MediaItem>> = serviceScope.future(Dispatchers.Default) {
             // 纯音频模式：跳过 metadata 增强，但仍需从 mediaId 重建 URI
             if (mediaItems.all { persistence.isAudioFile(it.mediaId) }) {
+                isAudioSession = true
                 sessionPlaybackSpeed = preferencesRepository.applicationPreferences.value.audiobookPlaybackSpeed
                 val updatedItems = mediaItems.map { item ->
                     item.buildUpon()
@@ -538,6 +564,7 @@ class PlayerService : MediaSessionService() {
                 }
                 return@future updatedItems.toMutableList()
             }
+            isAudioSession = false
             val updatedMediaItems = mediaItemEnricher.enrich(mediaItems)
             return@future updatedMediaItems.toMutableList()
         }
@@ -755,6 +782,19 @@ class PlayerService : MediaSessionService() {
                     }
                 }
         }
+
+        // 睡眠定时（按分钟）倒计时：仅在播放中计时，暂停不消耗；到时暂停播放。
+        // 逻辑放在 Service 内，Activity 重建（旋转/息屏）不影响定时器
+        serviceScope.launch {
+            while (true) {
+                delay(1000)
+                if (AudioSleepTimer.state.value.remainingSeconds <= 0) continue
+                val currentPlayer = mediaSession?.player ?: continue
+                if (currentPlayer.isPlaying && AudioSleepTimer.tickSecond()) {
+                    currentPlayer.pause()
+                }
+            }
+        }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -770,6 +810,9 @@ class PlayerService : MediaSessionService() {
 
     override fun onDestroy() {
         super.onDestroy()
+
+        // 播放会话结束，睡眠定时随之失效
+        AudioSleepTimer.cancel()
 
         // 退出前保存当前播放状态（使用 saveScope，不受 serviceScope 取消影响）
         val currentPlayer = mediaSession?.player
@@ -872,6 +915,19 @@ class PlayerService : MediaSessionService() {
                 setCallback(mediaSessionCallback)
                 setCustomLayout(
                     listOf(
+                        // 上一章/下一章（听书章节或播放列表切换）；播放器不支持时自动隐藏
+                        CommandButton.Builder(ICON_UNDEFINED)
+                            .setCustomIconResId(coreUiR.drawable.ic_skip_prev)
+                            .setDisplayName(getString(coreUiR.string.player_controls_previous))
+                            .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                            .setEnabled(true)
+                            .build(),
+                        CommandButton.Builder(ICON_UNDEFINED)
+                            .setCustomIconResId(coreUiR.drawable.ic_skip_next)
+                            .setDisplayName(getString(coreUiR.string.player_controls_next))
+                            .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                            .setEnabled(true)
+                            .build(),
                         CommandButton.Builder(ICON_UNDEFINED)
                             .setCustomIconResId(coreUiR.drawable.ic_close)
                             .setDisplayName(getString(coreUiR.string.stop_player_session))
@@ -884,6 +940,31 @@ class PlayerService : MediaSessionService() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    /**
+     * 听书（纯音频）会话时，把通知栏点击的 PendingIntent 更新为携带听书上下文，
+     * 保证 Activity 已被返回销毁后，从通知栏点回仍以听书 UI 打开
+     * （audio_only + 当前章节 URI + 封面）。视频会话保持默认（无 extra），
+     * 由 PlayerActivity 按会话状态自行恢复。
+     */
+    private fun updateSessionActivityForAudiobook() {
+        if (!isAudioSession) return
+        val player = mediaSession?.player ?: return
+        val currentItem = player.currentMediaItem ?: return
+        val intent = Intent(this, PlayerActivity::class.java).apply {
+            data = currentItem.localConfiguration?.uri
+            putExtra("audio_only", true)
+            currentItem.mediaMetadata.artworkUri?.toString()?.let { putExtra("cover_uri", it) }
+        }
+        mediaSession?.setSessionActivity(
+            PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            ),
+        )
     }
 
     /**

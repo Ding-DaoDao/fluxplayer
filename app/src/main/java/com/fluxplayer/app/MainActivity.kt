@@ -32,6 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
@@ -139,8 +140,12 @@ class MainActivity : ComponentActivity() {
                     }
                     val permissionsState = rememberMultiplePermissionsState(permissions = permissionsToRequest)
 
+                    // 仅首次进入时自动请求，避免永久拒绝后每次回到前台都重复弹系统权限框
+                    var hasRequestedPermissions by rememberSaveable { mutableStateOf(false) }
+
                     LifecycleEventEffect(event = Lifecycle.Event.ON_START) {
-                        if (!permissionsState.allPermissionsGranted) {
+                        if (!permissionsState.allPermissionsGranted && !hasRequestedPermissions) {
+                            hasRequestedPermissions = true
                             permissionsState.launchMultiplePermissionRequest()
                         }
                     }

@@ -9,6 +9,11 @@ build/
 classes.jar
 local.properties
 
+# ==================== Signing Keys ====================
+# Never commit signing keystores (release key is a security-sensitive secret)
+app/release.keystore
+*.jks
+
 # ==================== IDE & Tools ====================
 .idea/
 .kotlin/

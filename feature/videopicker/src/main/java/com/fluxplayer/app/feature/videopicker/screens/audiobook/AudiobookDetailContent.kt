@@ -37,6 +37,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -109,6 +110,8 @@ fun AudiobookDetailContent(
     resumeChapterIndex: Int? = null,
     resumePositionMs: Long = 0L,
     chapterProgress: Map<Int, Pair<Long, Long>> = emptyMap(),
+    isFavorite: Boolean = false,
+    onToggleFavorite: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var reversed by remember { mutableStateOf(false) }
@@ -514,6 +517,15 @@ fun AudiobookDetailContent(
                                 overflow = TextOverflow.Ellipsis,
                             )
 
+                            // 章节时长（首次播放后从进度记录回填）
+                            if (savedDurMs > 0) {
+                                Text(
+                                    text = formatChapterDuration(savedDurMs),
+                                    color = fluxColors.onSurfaceVariant,
+                                    fontSize = 12.sp,
+                                )
+                            }
+
                             // 进度条（已播放的章节显示）
                             if (hasProgress) {
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -630,16 +642,16 @@ fun AudiobookDetailContent(
 
             // 右侧收藏（带点击微交互）
             IconButton(
-                onClick = { /* 收藏 - 开发中 */ },
+                onClick = onToggleFavorite,
                 modifier = Modifier.graphicsLayer {
                     scaleX = favScale
                     scaleY = favScale
                 },
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.FavoriteBorder,
+                    imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                     contentDescription = "收藏",
-                    tint = topBarIconTint,
+                    tint = if (isFavorite) fluxColors.primary else topBarIconTint,
                 )
             }
         }
@@ -649,4 +661,17 @@ fun AudiobookDetailContent(
 // ── 工具：Dp 线性插值 ──
 private fun lerp(start: Dp, stop: Dp, fraction: Float): Dp {
     return start + (stop - start) * fraction.coerceIn(0f, 1f)
+}
+
+// ── 工具：章节时长格式化（mm:ss / h:mm:ss） ──
+private fun formatChapterDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
 }

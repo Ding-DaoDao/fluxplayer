@@ -134,7 +134,14 @@ class DanmakuView @JvmOverloads constructor(
         currentTimeMs = timeMs
         activeDanmaku.clear()
         trackAllocator.clear()
-        nextEmitIndex = allDanmaku.indexOfFirst { it.timeMs >= timeMs }.coerceAtLeast(0)
+        // allDanmaku 已按 timeMs 升序，二分查找首个 >= timeMs 的位置，避免拖动进度条时 O(n) 全量扫描
+        var lo = 0
+        var hi = allDanmaku.size
+        while (lo < hi) {
+            val mid = (lo + hi) / 2
+            if (allDanmaku[mid].timeMs < timeMs) lo = mid + 1 else hi = mid
+        }
+        nextEmitIndex = lo
         Log.d(TAG, "seekTo: $timeMs ms, nextEmit=$nextEmitIndex/${allDanmaku.size}")
     }
 

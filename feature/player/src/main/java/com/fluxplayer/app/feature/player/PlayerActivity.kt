@@ -63,9 +63,11 @@ import android.util.Log
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
+import com.fluxplayer.app.core.common.sortedByNaturalName
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
@@ -180,11 +182,13 @@ class PlayerActivity : ComponentActivity() {
                                     (parts.getOrNull(0)?.toLongOrNull() ?: 0L) to (parts.getOrNull(1)?.toLongOrNull() ?: 0L)
                                 }
                         }
+                        // 心跳保存每 5 秒回流一次，等值时避免下游重组
+                        .distinctUntilChanged()
                         .collectAsStateWithLifecycle(initialValue = emptyMap())
 
-                    // 拦截系统返回键，确保播放进度被保存
+                    // 拦截系统返回键：听书返回后转入后台无感播放（不停止），进度在退出时保存
                     BackHandler {
-                        finishAndStopPlayerSession()
+                        exitPlayerKeepPlaying()
                     }
 
                     NextPlayerTheme(
@@ -235,12 +239,17 @@ class PlayerActivity : ComponentActivity() {
                                                 map[bkPath] = "$chapterIdx|$pos"
                                                 var pg = p.audiobookChapterProgress.toMutableMap()
                                                 pg["$bkPath|$chapterIdx"] = "$pos|$dur"
-                                                p.copy(audiobookResumeState = map, audiobookChapterProgress = pg)
+                                                p.copy(
+                                                    audiobookResumeState = map,
+                                                    audiobookChapterProgress = pg,
+                                                    audiobookLastPlayedAt = p.audiobookLastPlayedAt +
+                                                        (bkPath to System.currentTimeMillis()),
+                                                )
                                             }
                                         }
                                     }
                                 },
-                                onBackClick = { finishAndStopPlayerSession() },
+                                onBackClick = { exitPlayerKeepPlaying() },
                                 onSpeedChanged = { speed ->
                                     lifecycleScope.launch {
                                         preferencesRepository.updateApplicationPreferences { p ->
@@ -411,6 +420,7 @@ class PlayerActivity : ComponentActivity() {
 
             // 从 URI 的父目录扫描所有音频文件（文件 IO 移出主线程，避免启动卡顿）
             val bookDir = File(chapterPath).parentFile
+            val bookName = bookDir?.name
             val scanned = withContext(Dispatchers.IO) {
                 val files = scanAudioFiles(bookDir)
                 val startIdx = files.indexOfFirst { it.absolutePath == chapterPath }.coerceAtLeast(0)
@@ -423,6 +433,8 @@ class PlayerActivity : ComponentActivity() {
                             MediaMetadata.Builder().apply {
                                 val itemTitle = if (index == startIdx) (title ?: file.nameWithoutExtension) else file.nameWithoutExtension
                                 setTitle(itemTitle)
+                                // 书名放 artist/albumTitle，锁屏大字显示章节名、副行显示书名
+                                bookName?.let { setArtist(it); setAlbumTitle(it) }
                                 coverArtworkUri?.let { setArtworkUri(it) }
                             }.build(),
                         )
@@ -613,43 +625,72 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * 听书续播：保存当前章节索引与播放位置到 DataStore。
+     * 通过 mediaId 反查章节索引（currentMediaItemIndex 在切集过渡期可能返回 C.INDEX_UNSET）。
+     */
+    private suspend fun saveAudiobookResumeState() {
+        val mediaId = mediaController?.currentMediaItem?.mediaId
+        val rawPos = mediaController?.currentPosition ?: 0L
+        val rawDur = mediaController?.duration ?: 0L
+        // C.TIME_UNSET 会转为负数，只保留有效值
+        val position = rawPos.coerceAtLeast(0L)
+        val duration = rawDur.coerceAtLeast(0L)
+        // 从缓存路径列表中反查真实章节索引，兜底 currentMediaItemIndex
+        val chapterIndex = resolveChapterIndex(
+            mediaController?.currentMediaItemIndex ?: 0,
+        )
+        // 只在有有效数据时保存（duration > 0 表示播放器已加载完毕）
+        if (mediaId != null && duration > 0) {
+            val bookPath = File(mediaId).parent ?: ""
+            Log.d("PlayerActivity", "save resume: mediaId=$mediaId, bookPath=$bookPath, chapterIndex=$chapterIndex, position=$position, duration=$duration")
+            if (bookPath.isNotEmpty()) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    preferencesRepository.updateApplicationPreferences { p ->
+                        Log.d("PlayerActivity", "DataStore before: resumeState=${p.audiobookResumeState[bookPath]}, chapterProgress=${p.audiobookChapterProgress["$bookPath|$chapterIndex"]}")
+                        val newMap = p.audiobookResumeState.toMutableMap()
+                        newMap[bookPath] = "$chapterIndex|$position"
+                        val pg = p.audiobookChapterProgress.toMutableMap()
+                        pg["$bookPath|$chapterIndex"] = "$position|$duration"
+                        val result = p.copy(audiobookResumeState = newMap, audiobookChapterProgress = pg)
+                        Log.d("PlayerActivity", "DataStore after: resumeState=${result.audiobookResumeState[bookPath]}, key=$bookPath|$chapterIndex=${result.audiobookChapterProgress["$bookPath|$chapterIndex"]}")
+                        result
+                    }
+                }
+            }
+        } else {
+            Log.w("PlayerActivity", "save resume SKIPPED: mediaId=$mediaId, duration=$duration")
+        }
+    }
+
+    /**
+     * 听书专用：返回后转入后台无感播放。
+     * 只保存进度并关闭页面，不 stop、不清空播放列表——
+     * 播放继续运行在 PlayerService，由系统通知栏媒体控制接管。
+     */
+    private fun exitPlayerKeepPlaying() {
+        if (isFinishingPlayer) return
+        isFinishingPlayer = true
+        lifecycleScope.launch {
+            if (intent.getBooleanExtra("audio_only", false)) {
+                saveAudiobookResumeState()
+            }
+            viewModel.onPlayerExit()
+            controllerFuture?.run {
+                MediaController.releaseFuture(this)
+                controllerFuture = null
+            }
+            finish()
+        }
+    }
+
     private fun finishAndStopPlayerSession() {
         if (isFinishingPlayer) return
         isFinishingPlayer = true
         lifecycleScope.launch {
-            // 听书续播：通过 mediaId 反查章节索引（currentMediaItemIndex 在切集过渡期可能返回 C.INDEX_UNSET）
+            // 听书续播：保存进度（播放列表随后会被清空，必须在此先保存）
             if (intent.getBooleanExtra("audio_only", false)) {
-                val mediaId = mediaController?.currentMediaItem?.mediaId
-                val rawPos = mediaController?.currentPosition ?: 0L
-                val rawDur = mediaController?.duration ?: 0L
-                // C.TIME_UNSET 会转为负数，只保留有效值
-                val position = rawPos.coerceAtLeast(0L)
-                val duration = rawDur.coerceAtLeast(0L)
-                // 从缓存路径列表中反查真实章节索引，兜底 currentMediaItemIndex
-                val chapterIndex = resolveChapterIndex(
-                    mediaController?.currentMediaItemIndex ?: 0,
-                )
-                // 只在有有效数据时保存（duration > 0 表示播放器已加载完毕）
-                if (mediaId != null && duration > 0) {
-                    val bookPath = File(mediaId).parent ?: ""
-                    Log.d("PlayerActivity", "finish save: mediaId=$mediaId, bookPath=$bookPath, chapterIndex=$chapterIndex, position=$position, duration=$duration")
-                    if (bookPath.isNotEmpty()) {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                            preferencesRepository.updateApplicationPreferences { p ->
-                                Log.d("PlayerActivity", "DataStore before: resumeState=${p.audiobookResumeState[bookPath]}, chapterProgress=${p.audiobookChapterProgress["$bookPath|$chapterIndex"]}")
-                                val newMap = p.audiobookResumeState.toMutableMap()
-                                newMap[bookPath] = "$chapterIndex|$position"
-                                val pg = p.audiobookChapterProgress.toMutableMap()
-                                pg["$bookPath|$chapterIndex"] = "$position|$duration"
-                                val result = p.copy(audiobookResumeState = newMap, audiobookChapterProgress = pg)
-                                Log.d("PlayerActivity", "DataStore after: resumeState=${result.audiobookResumeState[bookPath]}, key=$bookPath|$chapterIndex=${result.audiobookChapterProgress["$bookPath|$chapterIndex"]}")
-                                result
-                            }
-                        }
-                    }
-                } else {
-                    Log.w("PlayerActivity", "finish save SKIPPED: mediaId=$mediaId, duration=$duration")
-                }
+                saveAudiobookResumeState()
             }
             // 退出时通过 PixelCopy 截取 SurfaceView 当前帧作为缩略图
             val sv = playerSurfaceView
@@ -662,9 +703,11 @@ class PlayerActivity : ComponentActivity() {
                 Log.w("PlayerActivity", "thumbnail capture SKIPPED: SurfaceView size invalid ${sv.width}x${sv.height}")
             } else {
                 try {
-                    val bitmap = Bitmap.createBitmap(
-                        sv.width, sv.height, Bitmap.Config.ARGB_8888,
-                    )
+                    // 直接分配缩略图尺寸的位图（PixelCopy 会缩放到目标尺寸），
+                    // 避免按 SurfaceView 原始分辨率分配大位图（4K 约 33MB）
+                    val thumbW = 320
+                    val thumbH = (sv.height.toFloat() / sv.width * thumbW).toInt().coerceAtLeast(1)
+                    val bitmap = Bitmap.createBitmap(thumbW, thumbH, Bitmap.Config.ARGB_8888)
                     val copyResult = suspendCancellableCoroutine { cont ->
                         PixelCopy.request(
                             sv, bitmap,
@@ -674,12 +717,7 @@ class PlayerActivity : ComponentActivity() {
                     }
                     if (copyResult == PixelCopy.SUCCESS) {
                         val path = withContext(Dispatchers.Default) {
-                            // 缩到 320px 宽的缩略图
-                            val thumbW = 320
-                            val thumbH = (bitmap.height.toFloat() / bitmap.width * thumbW).toInt().coerceAtLeast(1)
-                            val thumb = Bitmap.createScaledBitmap(bitmap, thumbW, thumbH, true)
-                            bitmap.recycle()
-                            thumbnailExtractor.saveDirect(uri, thumb)
+                            thumbnailExtractor.saveDirect(uri, bitmap)
                         }
                         if (path != null) {
                             PlayerFrameCapture.put(uri, path)
@@ -754,7 +792,7 @@ class PlayerActivity : ComponentActivity() {
             if (dir == null || !dir.isDirectory) return emptyList()
             return dir.listFiles()
                 ?.filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
-                ?.sortedBy { it.name }
+                ?.let { it.sortedByNaturalName() }
                 ?: emptyList()
         }
     }

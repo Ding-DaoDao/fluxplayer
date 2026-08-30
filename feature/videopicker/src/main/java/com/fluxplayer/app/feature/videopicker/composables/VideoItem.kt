@@ -24,6 +24,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -232,11 +233,14 @@ private fun ThumbnailView(
                 .fillMaxSize(0.5f),
         )
         if (preferences.showThumbnailField) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
+            val imageRequest = remember(video.uriString) {
+                ImageRequest.Builder(context)
                     .data(video.uriString)
                     .crossfade(true)
-                    .build(),
+                    .build()
+            }
+            AsyncImage(
+                model = imageRequest,
                 contentDescription = null,
                 alignment = Alignment.Center,
                 contentScale = ContentScale.Crop,

@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
+import com.fluxplayer.app.core.common.sortedByNaturalName
 import com.fluxplayer.app.feature.player.R
 import com.fluxplayer.app.feature.player.ui.QualityOption
 import kotlinx.coroutines.withContext
@@ -152,13 +153,16 @@ class PlayerViewModel @Inject constructor(
                 danmakuEnabled.value = true
                 danmakuForCurrentEpisode.value = true
                 notifier.success(context.getString(R.string.danmaku_loaded_toast, list.size))
-                // 保存本地弹幕上下文（用于切集自动加载）
+                // 保存本地弹幕上下文（用于切集自动加载）；目录列举是文件 IO，在 IO 线程执行
                 val filePath = uri.path?.let { java.io.File(it) }
                 if (filePath != null && filePath.parentFile != null) {
                     val dir = filePath.parentFile!!
-                    val allDanmakuFiles = dir.listFiles { f ->
-                        f.extension.lowercase() in listOf("xml", "json", "bilibili")
-                    }?.sortedBy { it.name } ?: emptyList()
+                    val allDanmakuFiles = withContext(Dispatchers.IO) {
+                        dir.listFiles()
+                            ?.filter { it.extension.lowercase() in listOf("xml", "json", "bilibili") }
+                            ?.sortedByNaturalName()
+                            ?: emptyList()
+                    }
                     danmakuContext = DanmakuSelectionContext.LocalFile(
                         dir = dir,
                         currentFile = filePath,

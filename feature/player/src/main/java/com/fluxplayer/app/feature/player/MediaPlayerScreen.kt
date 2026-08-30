@@ -257,30 +257,36 @@ fun MediaPlayerScreen(
             val uri = player.currentMediaItem?.localConfiguration?.uri ?: return@LaunchedEffect
             val uriStr = uri.toString()
             val playUrl = uriStr.substringBefore("#")
-            val videoQualityCache = com.fluxplayer.app.core.common.VideoQualityCache(context.applicationContext)
-            var cachedOptions = when {
-                uriStr.contains("#pan123Play=true#") ->
-                    videoQualityCache.getQualityOptionsByUrl("pan123", playUrl)
-                uriStr.contains("#ucPlay=true#") ->
-                    videoQualityCache.getQualityOptionsByUrl("uc", playUrl)
-                uriStr.contains("#quarkPlay=true#") ->
-                    videoQualityCache.getQualityOptionsByUrl("quark", playUrl)
-                uriStr.contains("#alipanPlay=true#") ->
-                    videoQualityCache.getQualityOptionsByUrl("alipan", playUrl)
-                else -> null
-            }
-            // 反向索引查找失败时，直接扫描 SharedPreferences 匹配 URL
-            if (cachedOptions == null) {
-                val provider = when {
-                    uriStr.contains("#pan123Play=true#") -> "pan123"
-                    uriStr.contains("#ucPlay=true#") -> "uc"
-                    uriStr.contains("#quarkPlay=true#") -> "quark"
-                    uriStr.contains("#alipanPlay=true#") -> "alipan"
+            // SharedPreferences 全量扫描 + JSON 解析在后台线程执行，避免阻塞主线程
+            val cachedOptions = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                val videoQualityCache = com.fluxplayer.app.core.common.VideoQualityCache(context.applicationContext)
+                val options = when {
+                    uriStr.contains("#pan123Play=true#") ->
+                        videoQualityCache.getQualityOptionsByUrl("pan123", playUrl)
+                    uriStr.contains("#ucPlay=true#") ->
+                        videoQualityCache.getQualityOptionsByUrl("uc", playUrl)
+                    uriStr.contains("#quarkPlay=true#") ->
+                        videoQualityCache.getQualityOptionsByUrl("quark", playUrl)
+                    uriStr.contains("#alipanPlay=true#") ->
+                        videoQualityCache.getQualityOptionsByUrl("alipan", playUrl)
                     else -> null
                 }
-                if (provider != null) {
-                    val prefs = context.applicationContext.getSharedPreferences("video_quality_cache", android.content.Context.MODE_PRIVATE)
-                    cachedOptions = prefs.all.entries
+                // 反向索引查找失败时，直接扫描 SharedPreferences 匹配 URL
+                if (options != null) {
+                    options
+                } else {
+                    val provider = when {
+                        uriStr.contains("#pan123Play=true#") -> "pan123"
+                        uriStr.contains("#ucPlay=true#") -> "uc"
+                        uriStr.contains("#quarkPlay=true#") -> "quark"
+                        uriStr.contains("#alipanPlay=true#") -> "alipan"
+                        else -> null
+                    } ?: return@withContext null
+                    val prefs = context.applicationContext.getSharedPreferences(
+                        "video_quality_cache",
+                        android.content.Context.MODE_PRIVATE,
+                    )
+                    prefs.all.entries
                         .filter { it.key.startsWith("${provider}_") && !it.key.startsWith("url_index_") }
                         .firstNotNullOfOrNull { (_, value) ->
                             try {
@@ -737,11 +743,27 @@ fun MediaPlayerScreen(
                                                     .build()
                                                 player.setMediaItems(listOf(newMediaItem), 0, currentPosition)
                                                 player.playWhenReady = playWhenReady
-                                                delay(10000)
-                                                val error = player.playerError
-                                                val resUpdated = videoResolution.first > 0 && videoResolution.second > 0
-                                                if (error != null || !resUpdated) {
-                                                    Log.w("FluxQuality", "切换失败, error=$error, resUpdated=$resUpdated")
+                                                // 事件驱动等待切换结果：出错立即回退、就绪即成功；
+                                                // 10 秒仅作超时兜底，避免快速失败也要白等 10 秒
+                                                val switchSucceeded = kotlinx.coroutines.withTimeoutOrNull(10000L) {
+                                                    kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                                                        val switchListener = object : Player.Listener {
+                                                            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                                                                if (cont.isActive) cont.resume(false) {}
+                                                            }
+                                                            override fun onPlaybackStateChanged(playbackState: Int) {
+                                                                if (playbackState == Player.STATE_READY && cont.isActive) {
+                                                                    cont.resume(true) {}
+                                                                }
+                                                            }
+                                                        }
+                                                        player.addListener(switchListener)
+                                                        cont.invokeOnCancellation { player.removeListener(switchListener) }
+                                                    }
+                                                } ?: (player.playerError == null &&
+                                                    videoResolution.first > 0 && videoResolution.second > 0)
+                                                if (!switchSucceeded) {
+                                                    Log.w("FluxQuality", "切换失败, error=${player.playerError}")
                                                     selectedQualityLabel = previousLabel
                                                     val revertItem = androidx.media3.common.MediaItem.Builder()
                                                         .setUri(currentItem.localConfiguration?.uri ?: Uri.EMPTY)

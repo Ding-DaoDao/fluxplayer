@@ -53,7 +53,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -86,6 +88,7 @@ import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.ui.components.ChapterDragScrollbar
 import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
 import com.fluxplayer.app.core.ui.components.FluxNotificationState
+import com.fluxplayer.app.feature.player.service.AudioSleepTimer
 import com.fluxplayer.app.feature.player.state.rememberMediaPresentationState
 import com.fluxplayer.app.feature.player.state.rememberMetadataState
 import com.fluxplayer.app.core.ui.R as coreUiR
@@ -179,10 +182,10 @@ fun AudioPlaybackScreen(
     var currentSpeed by remember { mutableStateOf(player.playbackParameters.speed) }
     LaunchedEffect(player.playbackParameters) { currentSpeed = player.playbackParameters.speed }
 
-    // ── 定时关闭 ──
-    var sleepRemaining by remember { mutableIntStateOf(0) }  // 剩余秒数�?0=未激�?
-    var sleepEpisodes by remember { mutableIntStateOf(0) }  // 剩余集数（按集数定时）
-    var sleepStartEpisode by remember { mutableIntStateOf(-1) }  // 按集数定时的起始集索引
+    // ── 定时关闭（状态由 AudioSleepTimer 单例持有、Service 驱动倒计时，Activity 重建不丢） ──
+    val sleepTimerState by AudioSleepTimer.state.collectAsState()
+    val sleepRemaining = sleepTimerState.remainingSeconds
+    val sleepEpisodes = sleepTimerState.remainingEpisodes
     var showSleepSheet by remember { mutableStateOf(false) }
     var sleepModeMinutes by remember { mutableStateOf(true) }  // 定时弹窗：true=按分钟，false=按集数
     var sleepHourIdx by remember { mutableIntStateOf(0) }  // 定时弹窗：小时滚轮索引
@@ -194,8 +197,8 @@ fun AudioPlaybackScreen(
             when {
                 sleepRemaining > 0 && sleepEpisodes == 0 -> {
                     sleepModeMinutes = true
-                    sleepHourIdx = (sleepRemaining / 3600).toInt().coerceIn(0, 23)
-                    sleepMinIdx = ((sleepRemaining % 3600) / 60).toInt().coerceIn(0, 59)
+                    sleepHourIdx = (sleepRemaining / 3600).coerceIn(0, 23)
+                    sleepMinIdx = ((sleepRemaining % 3600) / 60).coerceIn(0, 59)
                 }
                 sleepEpisodes > 0 -> {
                     sleepModeMinutes = false
@@ -209,32 +212,13 @@ fun AudioPlaybackScreen(
             }
         }
     }
-    LaunchedEffect(sleepRemaining) {
-        if (sleepRemaining > 0) {
-            delay(1000)
-            sleepRemaining -= 1
-            if (sleepRemaining == 0) {
-                player.pause()
-            }
-        }
-    }
 
-    // 按集数定时：当前集数达到 起始集 + N 时暂停
-    LaunchedEffect(player.currentMediaItemIndex) {
-        if (sleepEpisodes > 0) {
-            if (sleepStartEpisode < 0) sleepStartEpisode = player.currentMediaItemIndex
-            if (player.currentMediaItemIndex >= sleepStartEpisode + sleepEpisodes) {
-                player.pause()
-                sleepEpisodes = 0
-                sleepStartEpisode = -1
-            }
-        }
-    }
-
-    // ── 定时保存播放进度（每 5 秒） ──
+    // ── 定时保存播放进度（本地进度每 5 秒刷新，落盘节流到每 20 秒） ──
+    // 落盘写的是全量 preferences map，高频写放大明显；切章与退出另有即时保存兜底
     var localProgress by remember { mutableStateOf(chapterProgress) }
     LaunchedEffect(mediaState.isPlaying) {
         if (!mediaState.isPlaying) return@LaunchedEffect
+        var tick = 0
         while (true) {
             delay(5000)
             val mediaId = player.currentMediaItem?.mediaId
@@ -246,13 +230,40 @@ fun AudioPlaybackScreen(
             }
             val pos = player.currentPosition
             val dur = player.duration
-            // duration 未就绪（C.TIME_UNSET）时跳过，避免存入无效数�?
+            // duration 未就绪（C.TIME_UNSET）时跳过，避免存入无效数据
             if (dur > 0) {
-                onSaveResume(idx, pos, dur)
-                // 立即更新本地进度（不如 DataStore 回流�?
                 localProgress = localProgress + (idx to (pos to dur))
+                if (++tick % 4 == 0) {
+                    onSaveResume(idx, pos, dur)
+                }
             }
         }
+    }
+
+    // ── 切章时立即保存上一章进度 ──
+    // 心跳保存每 5 秒一次，快速连点下一章时上一章进度会丢；自然播完的章节记为已播完
+    DisposableEffect(player, chapterPaths) {
+        var lastIndex = player.currentMediaItemIndex
+        val listener = object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                val prevIndex = lastIndex
+                lastIndex = player.currentMediaItemIndex
+                if (prevIndex == player.currentMediaItemIndex) return
+                val prev = localProgress[prevIndex] ?: return
+                val (_, dur) = prev
+                if (dur > 0) {
+                    val pos = if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                        dur // 自然播完：整章已听完
+                    } else {
+                        prev.first.coerceIn(0, dur) // 手动切走：用最近一次心跳的位置
+                    }
+                    onSaveResume(prevIndex, pos, dur)
+                    localProgress = localProgress + (prevIndex to (pos to dur))
+                }
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
     }
 
     // ── 播放列表弹窗 ──
@@ -284,23 +295,15 @@ fun AudioPlaybackScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 预设倍速（点选即生效）
+                // 预设倍速（点选即生效）—— 含听书常用档位
+                val speedPresets = listOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 3.0f)
                 PresetChips(
-                    options = listOf("1.0x", "1.25x", "1.5x", "2.0x"),
-                    selected = when (currentSpeed) {
-                        1.0f -> "1.0x"
-                        1.25f -> "1.25x"
-                        1.5f -> "1.5x"
-                        2.0f -> "2.0x"
-                        else -> null
-                    },
+                    options = speedPresets.map { formatSpeed(it) + "x" },
+                    selected = speedPresets
+                        .firstOrNull { kotlin.math.abs(it - currentSpeed) < 0.01f }
+                        ?.let { formatSpeed(it) + "x" },
                     onSelect = { label ->
-                        val speed = when (label) {
-                            "1.0x" -> 1.0f
-                            "1.25x" -> 1.25f
-                            "1.5x" -> 1.5f
-                            else -> 2.0f
-                        }
+                        val speed = label.removeSuffix("x").toFloatOrNull() ?: 1.0f
                         currentSpeed = speed
                         player.setPlaybackSpeed(speed)
                         onSpeedChanged(speed)
@@ -331,7 +334,7 @@ fun AudioPlaybackScreen(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // 滑块（0.5~3.0，粒度 0.1，拖动即生效）
+                // 滑块（0.5~4.0，粒度 0.1，拖动即生效）
                 CompactSlider(
                     value = currentSpeed,
                     onValueChange = { speed ->
@@ -340,8 +343,8 @@ fun AudioPlaybackScreen(
                         onSpeedChanged(speed)
                     },
                     onValueChangeFinished = {},
-                    valueRange = 0.5f..3.0f,
-                    steps = 24,
+                    valueRange = 0.5f..4.0f,
+                    steps = 34,
                     modifier = Modifier.fillMaxWidth(),
                 )
 
@@ -353,7 +356,7 @@ fun AudioPlaybackScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(text = "0.5x", fontSize = 11.sp, color = playerOnSurfaceVariant())
-                    Text(text = "3.0x", fontSize = 11.sp, color = playerOnSurfaceVariant())
+                    Text(text = "4.0x", fontSize = 11.sp, color = playerOnSurfaceVariant())
                 }
             }
         }
@@ -372,14 +375,33 @@ fun AudioPlaybackScreen(
         }
     }
 
-    // ── 片尾跳过（设置变化立即生效） ──
-    LaunchedEffect(outroSkipSeconds, mediaState.position, mediaState.duration) {
-        if (outroSkipSeconds > 0 && mediaState.duration > 0) {
-            val outroMs = outroSkipSeconds * 1000L
-            val threshold = (mediaState.duration - outroMs).coerceAtLeast(0)
-            if (mediaState.position >= threshold && mediaState.position > 0) {
-                player.seekToNext()
+    // ── 片尾跳过（设置变化立即生效；轮询在单协程内，避免每秒重建 effect） ──
+    LaunchedEffect(outroSkipSeconds, player) {
+        if (outroSkipSeconds <= 0) return@LaunchedEffect
+        // armed：当前章是否允许触发跳过。续播时若直接落在片尾区内，
+        // 先回到片尾区起点重听该段，而不是一打开就跳下一章
+        var armed = false
+        var lastChapterIndex = -1
+        while (true) {
+            val duration = player.duration
+            val position = player.currentPosition
+            if (duration > 0) {
+                val threshold = (duration - outroSkipSeconds * 1000L).coerceAtLeast(0)
+                if (player.currentMediaItemIndex != lastChapterIndex) {
+                    lastChapterIndex = player.currentMediaItemIndex
+                    if (position > threshold) {
+                        player.seekTo(threshold)
+                        armed = false
+                    } else {
+                        armed = true
+                    }
+                }
+                if (armed && player.isPlaying && position >= threshold && position > 0) {
+                    player.seekToNext()
+                    armed = false
+                }
             }
+            delay(500)
         }
     }
 
@@ -507,6 +529,25 @@ fun AudioPlaybackScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // 播完本章再停（听书最常用：把当前章节听完即暂停，等价于按 1 集定时）
+                Text(
+                    text = "播完本章后停止",
+                    color = playerPrimary(),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable {
+                            AudioSleepTimer.startEpisodes(1, player.currentMediaItemIndex)
+                            showSleepSheet = false
+                        }
+                        .padding(vertical = 8.dp),
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
                 // 预设值（点选即生效，并同步滑块位置）
                 if (sleepModeMinutes) {
                     PresetChips(
@@ -519,15 +560,15 @@ fun AudioPlaybackScreen(
                             else -> null
                         },
                         onSelect = { label ->
-                            sleepRemaining = when (label) {
+                            val seconds = when (label) {
                                 "30分钟" -> 1800
                                 "1小时" -> 3600
                                 "2小时" -> 7200
                                 else -> 10800
                             }
-                            sleepEpisodes = 0
-                            sleepHourIdx = sleepRemaining / 3600
-                            sleepMinIdx = (sleepRemaining % 3600) / 60
+                            AudioSleepTimer.startMinutes(seconds)
+                            sleepHourIdx = seconds / 3600
+                            sleepMinIdx = (seconds % 3600) / 60
                         },
                     )
                 } else {
@@ -540,14 +581,13 @@ fun AudioPlaybackScreen(
                             else -> null
                         },
                         onSelect = { label ->
-                            sleepEpisodes = when (label) {
+                            val episodes = when (label) {
                                 "2集" -> 2
                                 "5集" -> 5
                                 else -> 10
                             }
-                            sleepRemaining = 0
-                            sleepEpisodeIdx = sleepEpisodes
-                            if (sleepEpisodes > 0) sleepStartEpisode = player.currentMediaItemIndex
+                            sleepEpisodeIdx = episodes
+                            AudioSleepTimer.startEpisodes(episodes, player.currentMediaItemIndex)
                         },
                     )
                 }
@@ -593,8 +633,7 @@ fun AudioPlaybackScreen(
                             value = sleepHourIdx.toFloat(),
                             onValueChange = { sleepHourIdx = it.toInt() },
                             onValueChangeFinished = {
-                                sleepRemaining = sleepHourIdx * 3600 + sleepMinIdx * 60
-                                sleepEpisodes = 0
+                                AudioSleepTimer.startMinutes(sleepHourIdx * 3600 + sleepMinIdx * 60)
                             },
                             valueRange = 0f..23f,
                             steps = 22,
@@ -608,8 +647,7 @@ fun AudioPlaybackScreen(
                             value = sleepMinIdx.toFloat(),
                             onValueChange = { sleepMinIdx = it.toInt() },
                             onValueChangeFinished = {
-                                sleepRemaining = sleepHourIdx * 3600 + sleepMinIdx * 60
-                                sleepEpisodes = 0
+                                AudioSleepTimer.startMinutes(sleepHourIdx * 3600 + sleepMinIdx * 60)
                             },
                             valueRange = 0f..59f,
                             steps = 58,
@@ -636,9 +674,11 @@ fun AudioPlaybackScreen(
                             value = sleepEpisodeIdx.toFloat(),
                             onValueChange = { sleepEpisodeIdx = it.toInt() },
                             onValueChangeFinished = {
-                                sleepEpisodes = sleepEpisodeIdx
-                                sleepRemaining = 0
-                                if (sleepEpisodes > 0) sleepStartEpisode = player.currentMediaItemIndex
+                                if (sleepEpisodeIdx > 0) {
+                                    AudioSleepTimer.startEpisodes(sleepEpisodeIdx, player.currentMediaItemIndex)
+                                } else {
+                                    AudioSleepTimer.cancel()
+                                }
                             },
                             valueRange = 0f..10f,
                             steps = 9,
@@ -662,8 +702,7 @@ fun AudioPlaybackScreen(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
-                                sleepRemaining = 0
-                                sleepEpisodes = 0
+                                AudioSleepTimer.cancel()
                                 showSleepSheet = false
                             }
                             .padding(vertical = 8.dp),

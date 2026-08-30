@@ -212,10 +212,6 @@ fun BrowseTabs(
             }
 
             Box(modifier = Modifier.fillMaxSize()) {
-                // quark/uc 各自独立 ViewModel 实例，避免共享状态导致切换时数据串号
-                val quarkViewModel: QuarkBrowserViewModel = hiltViewModel(key = "quark_browser")
-                val ucViewModel: QuarkBrowserViewModel = hiltViewModel(key = "uc_browser")
-
                 when (provider) {
                     "alipan" -> AliyunBrowserTabContent(
                         modifier = Modifier.fillMaxSize(),
@@ -226,8 +222,10 @@ fun BrowseTabs(
                         navigateToDirParam = navigateToDirParam,
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
+                    // quark/uc 各自独立 ViewModel 实例（key 稳定，切换平台不丢状态），
+                    // 只在对应分支内创建，进入其它平台时不实例化
                     "quark" -> QuarkBrowserTabContent(
-                        viewModel = quarkViewModel,
+                        viewModel = hiltViewModel<QuarkBrowserViewModel>(key = "quark_browser"),
                         modifier = Modifier.fillMaxSize(),
                         onPlayVideo = onPlayVideo,
                         onPlayVideos = onPlayVideos,
@@ -237,7 +235,7 @@ fun BrowseTabs(
                         onNavigateToDirConsumed = onNavigateToDirConsumed,
                     )
                     "uc" -> QuarkBrowserTabContent(
-                        viewModel = ucViewModel,
+                        viewModel = hiltViewModel<QuarkBrowserViewModel>(key = "uc_browser"),
                         modifier = Modifier.fillMaxSize(),
                         driveType = "uc",
                         onPlayVideo = onPlayVideo,

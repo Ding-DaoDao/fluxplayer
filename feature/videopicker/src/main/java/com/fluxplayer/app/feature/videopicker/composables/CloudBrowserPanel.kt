@@ -225,19 +225,30 @@ fun <T> CloudBrowserPanel(
                             }
                             else -> {
                                 val flatListState = rememberLazyListState()
+                                // 派生为布尔值，仅在翻转时触发，避免滚动每帧回调
+                                val nearLoadMore by remember {
+                                    derivedStateOf {
+                                        val info = flatListState.layoutInfo
+                                        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                                        info.totalItemsCount > 0 && lastVisible >= info.totalItemsCount - 5
+                                    }
+                                }
+                                val nearBottom by remember {
+                                    derivedStateOf {
+                                        val info = flatListState.layoutInfo
+                                        if (info.totalItemsCount <= 0) return@derivedStateOf false
+                                        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                                        // 只有当可见项数量 < 总数量时，才认为内容溢出（需要滚动），
+                                        // 避免文件不足一屏时也触发 FAB 隐藏
+                                        lastVisible >= info.totalItemsCount - 3 &&
+                                            info.visibleItemsInfo.size < info.totalItemsCount
+                                    }
+                                }
                                 LaunchedEffect(flatListState, onLoadMore) {
-                                    snapshotFlow { flatListState.layoutInfo.visibleItemsInfo }
-                                        .collect { visibleItems ->
-                                            val lastVisible = visibleItems.lastOrNull()?.index ?: 0
-                                            val total = flatListState.layoutInfo.totalItemsCount
-                                            if (lastVisible >= total - 5 && total > 0) {
-                                                onLoadMore()
-                                            }
-                                            // 只有当可见项数量 < 总数量时，才认为内容溢出（需要滚动），
-                                            // 避免文件不足一屏时也触发 FAB 隐藏
-                                            val contentOverflows = visibleItems.size < total
-                                            isNearBottom = total > 0 && lastVisible >= total - 3 && contentOverflows
-                                        }
+                                    snapshotFlow { nearLoadMore }.collect { if (it) onLoadMore() }
+                                }
+                                LaunchedEffect(flatListState) {
+                                    snapshotFlow { nearBottom }.collect { isNearBottom = it }
                                 }
                                 LazyColumn(
                                     state = flatListState,
@@ -485,17 +496,28 @@ private fun DirectoryStackContent(
     playedUriSet: Set<String> = emptySet(),
     cloudProviderKey: String = "",
 ) {
+    // 派生为布尔值，仅在翻转时触发，避免滚动每帧回调
+    val nearLoadMore by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            info.totalItemsCount > 0 && lastVisible >= info.totalItemsCount - 5
+        }
+    }
+    val nearBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            if (info.totalItemsCount <= 0) return@derivedStateOf false
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            lastVisible >= info.totalItemsCount - 3 &&
+                info.visibleItemsInfo.size < info.totalItemsCount
+        }
+    }
     LaunchedEffect(listState, onLoadMore) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo }
-            .collect { visibleItems ->
-                val lastVisible = visibleItems.lastOrNull()?.index ?: 0
-                val total = listState.layoutInfo.totalItemsCount
-                if (lastVisible >= total - 5 && total > 0) {
-                    onLoadMore()
-                }
-                val contentOverflows = visibleItems.size < total
-                onNearBottomChanged(total > 0 && lastVisible >= total - 3 && contentOverflows)
-            }
+        snapshotFlow { nearLoadMore }.collect { if (it) onLoadMore() }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow { nearBottom }.collect { onNearBottomChanged(it) }
     }
     PullToRefreshBox(
         isRefreshing = entry.isLoading && entry.items.isNotEmpty(),
