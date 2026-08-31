@@ -344,7 +344,8 @@ class Pan123ApiClient(
                 createAt = item.optString("CreateAt", ""),
                 trashedAt = item.optString("TrashedAt", ""),
                 starredStatus = item.optInt("StarredStatus", 0),
-                thumbnailUrl = thumbnailUrl
+                thumbnailUrl = thumbnailUrl,
+                raw = item
             )
         }
         Pan123ListResult(items, null)
@@ -600,26 +601,61 @@ class Pan123ApiClient(
         true
     }
 
+    /**
+     * 删除文件（移入回收站）— 1:1 移植海阔视界 main.js 的 recycleDeleteFile()
+     *
+     * 海阔视界逻辑:
+     *   POST config.interfaceapi.recycleDeleteFile (即 /api/file/trash)
+     *   body: { driveId: 0, fileTrashInfoList: [列表原始完整对象], operation: true }
+     *   成功判定: message == "ok"，其余一律视为失败
+     *
+     * 注意:
+     *   1. fileTrashInfoList 必须提交列表接口返回的【完整原始对象】（含 Pid、Status、
+     *      Category、CreateAt 等全部字段），只拼部分字段会"返回成功但实际未删除"。
+     *   2. FileId 等数值字段需保持数值类型（JS 中为 JSON number），不能序列化成字符串。
+     */
     suspend fun trashFile(items: List<Pan123FileItem>): Result<Boolean> = runCatching {
         loadConfig().getOrThrow()
-        val endpoint = "$API_BASE/file/trash"
+        // 与海阔视界一致：端点取自 config.interfaceapi.recycleDeleteFile
+        val endpoint = try {
+            apiEndpoint("recycleDeleteFile")
+        } catch (e: Exception) {
+            Log.w(TAG, "trashFile: config endpoint unavailable (${e.message}), fallback to $API_BASE/file/trash")
+            "$API_BASE/file/trash"
+        }
         val trashInfoList = JSONArray()
         for (item in items) {
-            trashInfoList.put(JSONObject().apply {
-                put("FileId", item.fileId)
-                put("FileName", item.fileName)
-                put("Size", item.size)
-                put("Etag", item.etag)
-                put("S3KeyFlag", item.s3keyFlag)
-                put("Type", item.type)
-            })
+            if (item.raw != null) {
+                // 原样提交列表返回的完整对象（与海阔视界 recycleDeleteFile(data) 一致）
+                trashInfoList.put(item.raw)
+            } else {
+                // 无原始对象时的兜底构造：FileId/Size 尽量保持数值类型
+                val obj = JSONObject().apply {
+                    put("FileId", item.fileId.toLongOrNull() ?: item.fileId)
+                    put("FileName", item.fileName)
+                    put("Size", item.size)
+                    put("Etag", item.etag)
+                    put("S3KeyFlag", item.s3keyFlag)
+                    put("Type", item.type)
+                    put("Category", item.category)
+                }
+                trashInfoList.put(obj)
+            }
         }
         val body = JSONObject().apply {
             put("driveId", 0)
             put("fileTrashInfoList", trashInfoList)
             put("operation", true)
         }
+        Log.d(TAG, "trashFile: endpoint=$endpoint body=$body")
         val json = apiPost(endpoint, body)
+        val message = json.optString("message", "")
+        val code = json.optInt("code", -1)
+        Log.d(TAG, "trashFile: response code=$code message=$message full=$json")
+        // 成功判定与海阔视界一致：仅 message == "ok" 视为成功
+        if (message != "ok") {
+            throw IllegalStateException(message.ifBlank { "删除失败(code=$code)" })
+        }
         true
     }
 

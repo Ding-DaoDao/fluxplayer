@@ -104,6 +104,17 @@ class PlayerViewModel @Inject constructor(
     private val _danmakuDownloadState = MutableStateFlow<DanmakuDownloadState>(DanmakuDownloadState.Idle)
     val danmakuDownloadState = _danmakuDownloadState.asStateFlow()
 
+    /** 各弹幕源的结果缓存（sourceId -> 搜索/剧集状态），切换源时即时恢复，无需重新请求 */
+    private val danmakuResultCache = mutableMapOf<String, DanmakuDownloadState>()
+
+    /** 当前正在展示结果的弹幕源 id（Idle/Ready 时为 null） */
+    private val _activeDanmakuSourceId = MutableStateFlow<String?>(null)
+    val activeDanmakuSourceId = _activeDanmakuSourceId.asStateFlow()
+
+    /** 各弹幕源已缓存的结果数量（用于标签页角标） */
+    private val _danmakuSourceResultCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val danmakuSourceResultCounts = _danmakuSourceResultCounts.asStateFlow()
+
     /** 当前选中的弹幕源 */
     private var currentSource: DanmakuSource? = null
 
@@ -217,8 +228,14 @@ class PlayerViewModel @Inject constructor(
                     )
                 } else {
                     val result = DanmakuDownloadState.SearchResult(animes, source)
-                    lastSearchResults = result
-                    _danmakuDownloadState.value = result
+                    // 缓存与 UI 状态在主线程更新，避免与标签页切换的读操作竞争
+                    withContext(Dispatchers.Main) {
+                        lastSearchResults = result
+                        danmakuResultCache[source.id] = result
+                        _activeDanmakuSourceId.value = source.id
+                        _danmakuSourceResultCounts.update { it + (source.id to animes.size) }
+                        _danmakuDownloadState.value = result
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "searchDanmaku failed", e)
@@ -240,9 +257,13 @@ class PlayerViewModel @Inject constructor(
             try {
                 val episodes = danmakuRepository.getEpisodes(source, anime)
                 Log.d(TAG, "selectAnime: got ${episodes.size} episodes for anime=${anime.title}")
-                val state = DanmakuDownloadState.AnimeSelected(anime, episodes)
-                lastAnimeInfo = state
-                _danmakuDownloadState.value = state
+                val state = DanmakuDownloadState.AnimeSelected(anime, episodes, source = source)
+                withContext(Dispatchers.Main) {
+                    lastAnimeInfo = state
+                    danmakuResultCache[source.id] = state
+                    _activeDanmakuSourceId.value = source.id
+                    _danmakuDownloadState.value = state
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "selectAnime failed", e)
                 _danmakuDownloadState.value = DanmakuDownloadState.Error(
@@ -278,6 +299,7 @@ class PlayerViewModel @Inject constructor(
                             danmakuEnabled.value = true
                             danmakuForCurrentEpisode.value = true
                             _danmakuDownloadState.value = DanmakuDownloadState.Ready(uri.toString())
+                            _activeDanmakuSourceId.value = null
                             withContext(Dispatchers.Main) {
                                 notifier.success(context.getString(R.string.danmaku_loaded_toast, list.size))
                             }
@@ -324,8 +346,10 @@ class PlayerViewModel @Inject constructor(
     fun restoreLastSearchState() {
         lastAnimeInfo?.let {
             _danmakuDownloadState.value = it
+            _activeDanmakuSourceId.value = it.source?.id
         } ?: run {
             _danmakuDownloadState.value = DanmakuDownloadState.Idle
+            _activeDanmakuSourceId.value = null
         }
     }
 
@@ -334,30 +358,76 @@ class PlayerViewModel @Inject constructor(
         currentSource = null
         lastAnimeInfo = null
         lastSearchResults = null
+        danmakuResultCache.clear()
+        _danmakuSourceResultCounts.value = emptyMap()
+        _activeDanmakuSourceId.value = null
         danmakuForCurrentEpisode.value = false
         danmakuContext = null
     }
 
     /**
      * 弹幕搜索弹窗内返回上一步：
-     * - AnimeSelected → 回到搜索结果列表
-     * - SearchResult → 回到 Idle
+     * - AnimeSelected → 回到该源的搜索结果（优先取缓存，回退 lastSearchResults）
+     * - SearchResult → 回到 Idle（缓存保留，切回该源仍可恢复结果）
      */
     fun navigateDanmakuBack() {
         val current = _danmakuDownloadState.value
         when {
             current is DanmakuDownloadState.AnimeSelected -> {
-                lastSearchResults?.let {
-                    _danmakuDownloadState.value = it
-                } ?: run {
-                    _danmakuDownloadState.value = DanmakuDownloadState.Idle
+                val sourceId = current.source?.id ?: currentSource?.id
+                val cachedResult = sourceId?.let { danmakuResultCache[it] }
+                    as? DanmakuDownloadState.SearchResult
+                val lastResults = lastSearchResults?.takeIf {
+                    sourceId == null || it.source?.id == sourceId
+                }
+                when {
+                    cachedResult != null -> _danmakuDownloadState.value = cachedResult
+                    lastResults != null -> _danmakuDownloadState.value = lastResults
+                    else -> {
+                        _danmakuDownloadState.value = DanmakuDownloadState.Idle
+                        _activeDanmakuSourceId.value = null
+                    }
+                }
+                if (_danmakuDownloadState.value !is DanmakuDownloadState.Idle) {
+                    _activeDanmakuSourceId.value = sourceId
                 }
             }
             current is DanmakuDownloadState.SearchResult -> {
                 _danmakuDownloadState.value = DanmakuDownloadState.Idle
                 lastSearchResults = null
+                _activeDanmakuSourceId.value = null
             }
             else -> resetDanmakuSearch()
+        }
+    }
+
+    /**
+     * 切换弹幕源标签页：
+     * - 有缓存 → 立即恢复该源的结果/剧集列表（不联网）
+     * - 无缓存且有关键词 → 按当前关键词搜索
+     * - 无缓存且无关键词 → 回到 Idle
+     */
+    fun selectDanmakuSource(context: Context, source: DanmakuSource) {
+        val cached = danmakuResultCache[source.id]
+        when {
+            cached != null -> {
+                currentSource = source
+                when (cached) {
+                    is DanmakuDownloadState.SearchResult -> lastSearchResults = cached
+                    is DanmakuDownloadState.AnimeSelected -> lastAnimeInfo = cached
+                    else -> {}
+                }
+                _activeDanmakuSourceId.value = source.id
+                _danmakuDownloadState.value = cached
+            }
+            _danmakuSearchKeyword.value.isNotBlank() -> {
+                searchDanmaku(context, source, _danmakuSearchKeyword.value)
+            }
+            else -> {
+                currentSource = source
+                _danmakuDownloadState.value = DanmakuDownloadState.Idle
+                _activeDanmakuSourceId.value = null
+            }
         }
     }
 
@@ -370,7 +440,13 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun setDanmakuSearchKeyword(keyword: String) {
+        if (keyword == _danmakuSearchKeyword.value) return
         _danmakuSearchKeyword.value = keyword
+        // 关键词变化后，旧关键词的结果全部失效
+        danmakuResultCache.clear()
+        _danmakuSourceResultCounts.value = emptyMap()
+        _activeDanmakuSourceId.value = null
+        _danmakuDownloadState.value = DanmakuDownloadState.Idle
     }
 
     /**
@@ -384,6 +460,7 @@ class PlayerViewModel @Inject constructor(
         // 回退到剧集列表界面，方便用户为新集选择弹幕
         lastAnimeInfo?.let {
             _danmakuDownloadState.value = it
+            _activeDanmakuSourceId.value = it.source?.id
         }
         danmakuEnabled.value = false
     }

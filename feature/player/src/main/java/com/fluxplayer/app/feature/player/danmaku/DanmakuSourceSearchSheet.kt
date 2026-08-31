@@ -13,11 +13,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,19 +25,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import com.fluxplayer.app.core.ui.components.FluxCircularProgressIndicator
@@ -52,7 +48,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -103,6 +101,8 @@ fun DanmakuSearchSheet(
     show: Boolean,
     sources: List<DanmakuSource>,
     downloadState: DanmakuDownloadState,
+    activeSourceId: String?,
+    sourceResultCounts: Map<String, Int>,
     currentViewMode: DanmakuSearchViewMode,
     onViewModeChange: (DanmakuSearchViewMode) -> Unit,
     currentKeyword: String,
@@ -111,6 +111,7 @@ fun DanmakuSearchSheet(
     onLocalDirChange: (File) -> Unit,
     browserRoot: String,
     onSearch: (DanmakuSource, String) -> Unit,
+    onSelectSource: (DanmakuSource) -> Unit,
     onSelectAnime: (AnimeMatch) -> Unit,
     onSelectEpisode: (EpisodeInfo) -> Unit,
     onDismiss: () -> Unit,
@@ -170,66 +171,113 @@ fun DanmakuSearchSheet(
 
         Card(
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 80.dp, end = 12.dp)
-                .widthIn(max = 320.dp)
-                .heightIn(max = 480.dp),
-            shape = MaterialTheme.shapes.medium,
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .widthIn(min = 300.dp, max = 360.dp),
+            shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp),
             colors = CardDefaults.cardColors(containerColor = SurfaceColor),
             elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxSize()) {
                 when (currentViewMode) {
                     DanmakuSearchViewMode.SEARCH -> {
-                        // ── 搜索框（关闭按钮内嵌右侧） ──
-                        OutlinedTextField(
-                            value = currentKeyword,
-                            onValueChange = onKeywordChange,
+                        // ── 标题栏（合并/自适应：剧集页显示返回箭头 + 动漫名） ──
+                        val animeSelected = downloadState as? DanmakuDownloadState.AnimeSelected
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            placeholder = {
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (animeSelected != null) {
+                                FluxIconButton(
+                                    onClick = onNavigateBack,
+                                    modifier = Modifier.size(28.dp),
+                                ) {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_arrow_left),
+                                        contentDescription = "返回",
+                                        tint = TextPrimaryColor,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            } else {
+                                Spacer(Modifier.size(28.dp))
+                            }
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = animeSelected?.anime?.title ?: "弹幕搜索",
+                                    color = TextPrimaryColor,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            FluxIconButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_close),
+                                    contentDescription = "关闭",
+                                    tint = TextSecondaryColor,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+
+                        // ── 搜索框（紧凑型） ──
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp)
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(SurfaceVariantColor),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_search),
+                                contentDescription = null,
+                                tint = TextSecondaryColor,
+                                modifier = Modifier
+                                    .padding(start = 12.dp)
+                                    .size(16.dp),
+                            )
+                            if (currentKeyword.isEmpty()) {
                                 Text(
                                     "搜索动漫...",
                                     color = TextSecondaryColor.copy(alpha = 0.5f),
                                     fontSize = 13.sp,
+                                    modifier = Modifier.padding(start = 36.dp),
                                 )
-                            },
-                            textStyle = TextStyle(color = TextPrimaryColor, fontSize = 13.sp),
-                            singleLine = true,
-                            trailingIcon = {
-                                FluxIconButton(
-                                    onClick = onDismiss,
-                                    modifier = Modifier.size(28.dp),
-                                ) {
-                                    Icon(
-                                        painter = painterResource(R.drawable.ic_close),
-                                        contentDescription = "关闭",
-                                        tint = TextSecondaryColor,
-                                        modifier = Modifier.size(14.dp),
-                                    )
-                                }
-                            },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = AccentColor,
-                                unfocusedBorderColor = DividerColor,
-                                cursorColor = AccentColor,
-                                focusedContainerColor = SurfaceVariantColor,
-                                unfocusedContainerColor = SurfaceVariantColor,
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Text,
-                                imeAction = ImeAction.Search,
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onSearch = {
-                                    if (currentKeyword.isNotBlank() && sources.isNotEmpty()) {
-                                        onSearch(sources.first(), currentKeyword)
-                                    }
-                                },
-                            ),
-                        )
+                            }
+                            BasicTextField(
+                                value = currentKeyword,
+                                onValueChange = onKeywordChange,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 36.dp, end = 10.dp),
+                                textStyle = TextStyle(color = TextPrimaryColor, fontSize = 13.sp),
+                                singleLine = true,
+                                cursorBrush = SolidColor(AccentColor),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Text,
+                                    imeAction = ImeAction.Search,
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onSearch = {
+                                        if (currentKeyword.isNotBlank() && sources.isNotEmpty()) {
+                                            onSearch(sources.first(), currentKeyword)
+                                        }
+                                    },
+                                ),
+                            )
+                        }
 
                         // ── 本地文件入口 ──
                         Row(
@@ -259,33 +307,18 @@ fun DanmakuSearchSheet(
                             Text("›", color = TextSecondaryColor, fontSize = 14.sp)
                         }
 
-                        // ── 搜索源（单行横向滑动） ──
+                        // ── 弹幕源标签栏（搜索/结果/剧集全程可见） ──
                         LazyRow(
                             modifier = Modifier.fillMaxWidth(),
                             contentPadding = PaddingValues(horizontal = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             items(sources) { source ->
-                                FilterChip(
-                                    selected = false,
-                                    onClick = {
-                                        if (currentKeyword.isNotBlank()) {
-                                            onSearch(source, currentKeyword)
-                                        }
-                                    },
-                                    label = {
-                                        Text(
-                                            source.name,
-                                            fontSize = 10.sp,
-                                            color = if (currentKeyword.isNotBlank()) AccentColor else TextSecondaryColor,
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(6.dp),
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = AccentDimColor,
-                                        selectedContainerColor = AccentDimColor,
-                                    ),
-                                    border = null,
+                                SourceTab(
+                                    source = source,
+                                    active = source.id == activeSourceId,
+                                    resultCount = sourceResultCounts[source.id] ?: 0,
+                                    onClick = { onSelectSource(source) },
                                 )
                             }
                         }
@@ -298,27 +331,48 @@ fun DanmakuSearchSheet(
                                 .background(DividerColor),
                         )
 
+                        // ── 小节标签（结果数/剧集数提示） ──
+                        val sectionLabel = when (val state = downloadState) {
+                            is DanmakuDownloadState.SearchResult ->
+                                "搜索结果 · ${state.animeList.size} 项"
+                            is DanmakuDownloadState.AnimeSelected ->
+                                "选择剧集 · 共 ${state.episodes.size} 集"
+                            is DanmakuDownloadState.Idle -> "尚未搜索"
+                            else -> null
+                        }
+                        sectionLabel?.let {
+                            Text(
+                                text = it,
+                                color = TextSecondaryColor,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+
                         // ── 内容区域 ──
-                        when (val state = downloadState) {
-                            is DanmakuDownloadState.Idle -> IdleHint()
-                            is DanmakuDownloadState.Searching -> SearchingStep()
-                            is DanmakuDownloadState.SearchResult -> SearchResultStep(
-                                animeList = state.animeList,
-                                onSelectAnime = onSelectAnime,
-                                onBack = onResetSearch,
-                            )
-                            is DanmakuDownloadState.AnimeSelected -> EpisodeSelectionStep(
-                                anime = state.anime,
-                                episodes = state.episodes,
-                                onSelectEpisode = onSelectEpisode,
-                                onBack = onNavigateBack,
-                            )
-                            is DanmakuDownloadState.Downloading -> DownloadingStep()
-                            is DanmakuDownloadState.Ready -> {}
-                            is DanmakuDownloadState.Error -> ErrorStep(
-                                message = state.message,
-                                onRetry = onResetSearch,
-                            )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                        ) {
+                            when (val state = downloadState) {
+                                is DanmakuDownloadState.Idle -> IdleHint()
+                                is DanmakuDownloadState.Searching -> SearchingStep()
+                                is DanmakuDownloadState.SearchResult -> SearchResultList(
+                                    animeList = state.animeList,
+                                    onSelectAnime = onSelectAnime,
+                                )
+                                is DanmakuDownloadState.AnimeSelected -> EpisodeSelectionList(
+                                    episodes = state.episodes,
+                                    onSelectEpisode = onSelectEpisode,
+                                )
+                                is DanmakuDownloadState.Downloading -> DownloadingStep()
+                                is DanmakuDownloadState.Ready -> {}
+                                is DanmakuDownloadState.Error -> ErrorStep(
+                                    message = state.message,
+                                    onRetry = onResetSearch,
+                                )
+                            }
                         }
                     }
 
@@ -385,8 +439,9 @@ fun DanmakuSearchSheet(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 24.dp),
+                                    .weight(1f),
                                 horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
                             ) {
                                 Text(
                                     "需要存储权限才能浏览文件",
@@ -411,7 +466,7 @@ fun DanmakuSearchSheet(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(150.dp),
+                                    .weight(1f),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 FluxCircularProgressIndicator(
@@ -422,7 +477,7 @@ fun DanmakuSearchSheet(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(150.dp),
+                                    .weight(1f),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 FluxText(
@@ -434,7 +489,7 @@ fun DanmakuSearchSheet(
                             LazyColumn(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(max = 300.dp),
+                                    .weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(2.dp),
                             ) {
                                 items(fileList, key = { it.file.absolutePath }) { item ->
@@ -464,8 +519,7 @@ fun DanmakuSearchSheet(
 private fun IdleHint() {
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(60.dp),
+            .fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -480,8 +534,7 @@ private fun IdleHint() {
 private fun SearchingStep() {
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(100.dp),
+            .fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -495,53 +548,21 @@ private fun SearchingStep() {
 }
 
 @Composable
-private fun SearchResultStep(
+private fun SearchResultList(
     animeList: List<AnimeMatch>,
     onSelectAnime: (AnimeMatch) -> Unit,
-    onBack: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    if (animeList.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
         ) {
-            FluxIconButton(onClick = onBack, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_arrow_left),
-                    contentDescription = "返回",
-                    tint = TextPrimaryColor,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-            Spacer(Modifier.width(4.dp))
-            Text(
-                "搜索结果",
-                color = TextPrimaryColor,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            )
+            Text("未找到匹配结果", color = TextSecondaryColor.copy(alpha = 0.4f), fontSize = 12.sp)
         }
-
-        if (animeList.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("未找到匹配结果", color = TextSecondaryColor.copy(alpha = 0.4f), fontSize = 12.sp)
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp),
-            ) {
-                items(animeList) { anime ->
-                    AnimeItem(anime = anime, onClick = { onSelectAnime(anime) })
-                }
+    } else {
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(animeList) { anime ->
+                AnimeItem(anime = anime, onClick = { onSelectAnime(anime) })
             }
         }
     }
@@ -556,6 +577,20 @@ private fun AnimeItem(anime: AnimeMatch, onClick: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(AccentDimColor, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = anime.title.take(1),
+                color = AccentColor,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = anime.title,
@@ -582,80 +617,80 @@ private fun AnimeItem(anime: AnimeMatch, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EpisodeSelectionStep(
-    anime: AnimeMatch,
+private fun EpisodeSelectionList(
     episodes: List<EpisodeInfo>,
     onSelectEpisode: (EpisodeInfo) -> Unit,
-    onBack: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    if (episodes.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
         ) {
-            FluxIconButton(onClick = onBack, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_arrow_left),
-                    contentDescription = "返回",
-                    tint = TextPrimaryColor,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-            Spacer(Modifier.width(4.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = anime.title,
-                    color = TextPrimaryColor,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text("选择剧集", color = TextSecondaryColor, fontSize = 11.sp)
+            Text("暂无剧集信息", color = TextSecondaryColor.copy(alpha = 0.4f), fontSize = 12.sp)
+        }
+    } else {
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(episodes) { episode ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectEpisode(episode) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = episode.title.ifBlank { "第${episode.episodeNumber}集" },
+                        color = TextPrimaryColor,
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "下载",
+                        color = AccentColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
         }
+    }
+}
 
-        Spacer(Modifier.height(4.dp))
-
-        if (episodes.isEmpty()) {
+@Composable
+private fun SourceTab(
+    source: DanmakuSource,
+    active: Boolean,
+    resultCount: Int,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (active) AccentColor else AccentDimColor)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = source.name,
+            fontSize = 11.sp,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+            color = if (active) MaterialTheme.colorScheme.onPrimary else AccentColor,
+            maxLines = 1,
+        )
+        if (resultCount > 0) {
+            Spacer(Modifier.width(4.dp))
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp),
-                contentAlignment = Alignment.Center,
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (active) AccentDimColor else AccentColor)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
             ) {
-                Text("暂无剧集信息", color = TextSecondaryColor.copy(alpha = 0.4f), fontSize = 12.sp)
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp),
-            ) {
-                items(episodes) { episode ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelectEpisode(episode) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = episode.title.ifBlank { "第${episode.episodeNumber}集" },
-                            color = TextPrimaryColor,
-                            fontSize = 13.sp,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = "下载",
-                            color = AccentColor,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                }
+                Text(
+                    text = resultCount.toString(),
+                    fontSize = 9.sp,
+                    color = if (active) AccentColor else MaterialTheme.colorScheme.onPrimary,
+                )
             }
         }
     }
@@ -665,8 +700,7 @@ private fun EpisodeSelectionStep(
 private fun DownloadingStep() {
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(100.dp),
+            .fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -685,8 +719,7 @@ private fun DownloadingStep() {
 private fun ErrorStep(message: String, onRetry: () -> Unit) {
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(100.dp),
+            .fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {

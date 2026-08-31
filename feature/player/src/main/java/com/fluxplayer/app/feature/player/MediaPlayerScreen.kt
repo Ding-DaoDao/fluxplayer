@@ -453,6 +453,8 @@ fun MediaPlayerScreen(
 
     val danmakuSources by viewModel.danmakuSources.collectAsStateWithLifecycle(emptyList())
     val danmakuDownloadState by viewModel.danmakuDownloadState.collectAsStateWithLifecycle(DanmakuDownloadState.Idle)
+    val activeDanmakuSourceId by viewModel.activeDanmakuSourceId.collectAsStateWithLifecycle()
+    val danmakuSourceResultCounts by viewModel.danmakuSourceResultCounts.collectAsStateWithLifecycle()
     val danmakuSearchViewMode by viewModel.danmakuSearchViewMode.collectAsStateWithLifecycle()
     val danmakuSearchKeyword by viewModel.danmakuSearchKeyword.collectAsStateWithLifecycle()
     val danmakuLocalBrowserDir by viewModel.danmakuLocalBrowserDir.collectAsStateWithLifecycle()
@@ -967,6 +969,8 @@ fun MediaPlayerScreen(
                 show = overlayView == OverlayView.DANMAKU_SEARCH,
                 sources = danmakuSources,
                 downloadState = danmakuDownloadState,
+                activeSourceId = activeDanmakuSourceId,
+                sourceResultCounts = danmakuSourceResultCounts,
                 currentViewMode = danmakuSearchViewMode,
                 onViewModeChange = { viewModel.setDanmakuSearchViewMode(it) },
                 currentKeyword = danmakuSearchKeyword,
@@ -979,6 +983,7 @@ fun MediaPlayerScreen(
                         viewModel.searchDanmaku(context, source, keyword)
                     }
                 },
+                onSelectSource = { viewModel.selectDanmakuSource(context, it) },
                 onSelectAnime = { viewModel.selectAnime(context, it) },
                 onSelectEpisode = { viewModel.selectEpisode(context, it) },
                 onResetSearch = { viewModel.resetDanmakuSearch() },
