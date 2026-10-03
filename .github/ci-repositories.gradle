@@ -1,0 +1,11 @@
+// CI runners resolve dependencies from the official repositories.
+settingsEvaluated { settings ->
+    settings.pluginManagement.repositories.clear()
+    settings.pluginManagement.repositories.gradlePluginPortal()
+    settings.pluginManagement.repositories.google()
+    settings.pluginManagement.repositories.mavenCentral()
+    settings.dependencyResolutionManagement.repositories.clear()
+    settings.dependencyResolutionManagement.repositories.google()
+    settings.dependencyResolutionManagement.repositories.mavenCentral()
+    settings.dependencyResolutionManagement.repositories.maven { url = uri('https://jitpack.io') }
+}
