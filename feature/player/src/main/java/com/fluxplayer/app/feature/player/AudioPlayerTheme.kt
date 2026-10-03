@@ -48,11 +48,8 @@ fun AudioPlayerTheme(content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalUseMaterialYouControls provides materialControls) {
         NextPlayerTheme(
             darkTheme = dark,
-            dynamicColor = preferences.useDynamicColors,
-            customSeedColor = preferences.customSeedColor,
-            composeEngine = preferences.composeEngine,
-            themeStyle = preferences.themeStyle,
             accentPreset = preferences.accentPreset,
+            surfaceStyle = preferences.surfaceStyle,
             content = content,
         )
     }

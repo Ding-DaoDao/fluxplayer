@@ -83,6 +83,10 @@ import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Update
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.rounded.ViewAgenda
 
 object NextIcons {
@@ -170,4 +174,10 @@ object NextIcons {
     val Star = Icons.Rounded.Star
     val StarOutline = Icons.Rounded.StarBorder
     val ViewAgenda = Icons.Rounded.ViewAgenda
+
+    // ── 底栏双态：outline 用于未选中，filled（rounded）用于选中 ──
+    val VideoOutline = Icons.Outlined.Movie
+    val FolderOutline = Icons.Outlined.Folder
+    val HistoryOutline = Icons.Outlined.History
+    val AudioOutline = Icons.Outlined.Headphones
 }

@@ -36,8 +36,6 @@ universalChardet = "2.5.0"
 okhttp = "4.12.0"
 haze = "1.7.2"
 backdrop = "2.0.0"
-miuix = "0.9.1"
-materialKolor = "1.7.1"
 
 
 fuel = "2.3.1"
@@ -114,12 +112,6 @@ okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.
 okhttp-core = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
 backdrop = { module = "io.github.kyant0:backdrop", version.ref = "backdrop" }
-miuix-core = { module = "top.yukonga.miuix.kmp:miuix-core", version.ref = "miuix" }
-miuix-ui-android = { module = "top.yukonga.miuix.kmp:miuix-ui-android", version.ref = "miuix" }
-miuix-blur-android = { module = "top.yukonga.miuix.kmp:miuix-blur-android", version.ref = "miuix" }
-miuix-icons-android = { module = "top.yukonga.miuix.kmp:miuix-icons-android", version.ref = "miuix" }
-miuix-preference-android = { module = "top.yukonga.miuix.kmp:miuix-preference-android", version.ref = "miuix" }
-material-kolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
 
 [plugins]
 aboutLibraries = { id = "com.mikepenz.aboutlibraries.plugin.android", version.ref = "aboutlibraries" }

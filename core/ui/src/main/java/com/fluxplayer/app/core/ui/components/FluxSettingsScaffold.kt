@@ -13,21 +13,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
-import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.core.ui.theme.LocalHazeState
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
-import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * Engine-aware settings scaffold. Uses MiuixScaffold + MiuixSmallTopAppBar in Miuix mode,
- * standard Scaffold + NextTopAppBar in Material mode.
- * Provides LocalHazeState for downstream blur-aware components.
+ * 设置页骨架：Scaffold + NextTopAppBar，并向内部 provide [LocalHazeState] 供下游毛玻璃组件消费。
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -39,50 +31,28 @@ fun FluxSettingsScaffold(
     enableBlur: Boolean = true,
     content: @Composable (PaddingValues) -> Unit,
 ) {
-    val isMiuix = FluxTheme.engine == ComposeEngine.MIUIX
     val hazeState = remember { HazeState() }
 
     CompositionLocalProvider(
         LocalHazeState provides if (enableBlur) hazeState else null,
     ) {
-        if (isMiuix) {
-            MiuixScaffold(
-                modifier = modifier,
-                topBar = {
-                    MiuixSmallTopAppBar(
-                        title = title,
-                        navigationIcon = {
-                            FluxIconButton(onClick = onNavigateUp) {
-                                FluxIcon(
-                                    imageVector = NextIcons.ArrowBack,
-                                    contentDescription = stringResource(id = R.string.navigate_up),
-                                )
-                            }
-                        },
-                    )
-                },
-                containerColor = MiuixTheme.colorScheme.surface,
-                content = content,
-            )
-        } else {
-            Scaffold(
-                modifier = modifier,
-                topBar = {
-                    NextTopAppBar(
-                        title = title,
-                        navigationIcon = {
-                            FilledTonalIconButton(onClick = onNavigateUp) {
-                                Icon(
-                                    imageVector = NextIcons.ArrowBack,
-                                    contentDescription = stringResource(id = R.string.navigate_up),
-                                )
-                            }
-                        },
-                    )
-                },
-                containerColor = containerColor,
-                content = content,
-            )
-        }
+        Scaffold(
+            modifier = modifier,
+            topBar = {
+                NextTopAppBar(
+                    title = title,
+                    navigationIcon = {
+                        FilledTonalIconButton(onClick = onNavigateUp) {
+                            Icon(
+                                imageVector = NextIcons.ArrowBack,
+                                contentDescription = stringResource(id = R.string.navigate_up),
+                            )
+                        }
+                    },
+                )
+            },
+            containerColor = containerColor,
+            content = content,
+        )
     }
 }

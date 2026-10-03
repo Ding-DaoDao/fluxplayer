@@ -93,7 +93,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.storagePermission
 import com.fluxplayer.app.core.media.services.MediaService
 import com.fluxplayer.app.core.model.ApplicationPreferences
-import com.fluxplayer.app.core.model.ComposeEngine
+import com.fluxplayer.app.core.model.NavStyle
+import com.fluxplayer.app.core.model.SurfaceStyle
 import com.fluxplayer.app.core.model.Folder
 import com.fluxplayer.app.core.model.MediaLayoutMode
 import com.fluxplayer.app.core.model.MediaViewMode
@@ -112,6 +113,10 @@ import com.fluxplayer.app.core.ui.extensions.copy
 import com.fluxplayer.app.core.ui.preview.DayNightPreview
 import com.fluxplayer.app.core.ui.preview.VideoPickerPreviewParameterProvider
 import com.fluxplayer.app.core.ui.theme.FluxHazeStyle
+import com.fluxplayer.app.core.ui.components.CapsuleDockBar
+import com.fluxplayer.app.core.ui.components.FullWidthNavBar
+import com.fluxplayer.app.core.ui.components.NavBarItem
+import com.fluxplayer.app.core.ui.theme.FluxRadius
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.core.ui.theme.LocalHazeState
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
@@ -144,8 +149,6 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 fun MediaPickerRoute(
@@ -266,6 +269,8 @@ internal fun MediaPickerScreen(
     val totalItemsSize = (uiState.mediaDataState as? DataState.Success)?.value?.run { folderList.size + mediaList.size } ?: 0
     val hazeState = remember { HazeState() }
     val useFloatingBottomBar = uiState.preferences.useFloatingBottomBar
+    val navStyle = uiState.preferences.navStyle
+    val surfaceStyle = uiState.preferences.surfaceStyle
     val useLiquidGlass = useFloatingBottomBar &&
         uiState.preferences.useLiquidGlass &&
         android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
@@ -275,215 +280,115 @@ internal fun MediaPickerScreen(
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
                 topBar = {
-                    val isMiuix = FluxTheme.engine == ComposeEngine.MIUIX
                     if (selectedProvider != null && selectedTab == 1 && !selectionManager.isInSelectionMode) {
                         // 已进入 provider → 不显示 Scaffold 顶栏，由 TabContent 内部 ProviderTopBar 接管
                     } else if (audiobookInDetail && selectedTab == 3 && !selectionManager.isInSelectionMode) {
                         // 听书详情页 → 不显示 Scaffold 顶栏，由 AudiobookDetailContent 内部顶栏接管
                     } else if ((selectedTab == 1 || selectedTab == 2 || selectedTab == 3) && !selectionManager.isInSelectionMode) {
-                        if (isMiuix) {
-                            MiuixSmallTopAppBar(
-                                title = when (selectedTab) {
-                                    1 -> stringResource(R.string.browse)
-                                    2 -> stringResource(R.string.history)
-                                    else -> stringResource(R.string.audiobook)
-                                },
-                                actions = {
-                                    IconButton(onClick = onSettingsClick) {
-                                        Icon(
-                                            imageVector = NextIcons.Settings,
-                                            contentDescription = stringResource(id = R.string.settings),
-                                        )
-                                    }
-                                },
-                            )
-                        } else {
-                            NextTopAppBar(
-                                title = when (selectedTab) {
-                                    1 -> stringResource(R.string.browse)
-                                    2 -> stringResource(R.string.history)
-                                    else -> stringResource(R.string.audiobook)
-                                },
-                                fontWeight = FontWeight.Bold,
-                                navigationIcon = {},
-                                actions = {
-                                    IconButton(onClick = onSettingsClick) {
-                                        Icon(
-                                            imageVector = NextIcons.Settings,
-                                            contentDescription = stringResource(id = R.string.settings),
-                                        )
-                                    }
-                                },
-                            )
-                        }
+                        
+                        NextTopAppBar(
+                            title = when (selectedTab) {
+                                1 -> stringResource(R.string.browse)
+                                2 -> stringResource(R.string.history)
+                                else -> stringResource(R.string.audiobook)
+                            },
+                            fontWeight = FontWeight.Bold,
+                            navigationIcon = {},
+                            actions = {
+                                IconButton(onClick = onSettingsClick) {
+                                    Icon(
+                                        imageVector = NextIcons.Settings,
+                                        contentDescription = stringResource(id = R.string.settings),
+                                    )
+                                }
+                            },
+                        )
+                    
                     } else {
-                        if (isMiuix) {
-                            // 视频列表页不启用顶栏模糊，避免透出后面的内容
-                            MiuixSmallTopAppBar(
-                                title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
-                                navigationIcon = {
-                                    if (selectionManager.isInSelectionMode) {
-                                        Row(
-                                            modifier = Modifier
-                                                .clip(CircleShape)
-                                                .background(MiuixTheme.colorScheme.surfaceVariant)
-                                                .clickable { selectionManager.exitSelectionMode() }
-                                                .padding(8.dp)
-                                                .padding(end = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        ) {
-                                            Icon(
-                                                imageVector = NextIcons.Close,
-                                                contentDescription = stringResource(id = R.string.navigate_up),
-                                            )
-                                            Text(
-                                                text = stringResource(R.string.m_n_selected, selectedItemsSize, totalItemsSize),
-                                                style = MiuixTheme.textStyles.body1,
-                                            )
-                                        }
-                                    } else if (uiState.folderName != null) {
-                                        FilledTonalIconButton(onClick = onNavigateUp) {
-                                            Icon(
-                                                imageVector = NextIcons.ArrowBack,
-                                                contentDescription = stringResource(id = R.string.navigate_up),
-                                            )
-                                        }
+                        
+                        NextTopAppBar(
+                            title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
+                            fontWeight = FontWeight.Bold.takeIf { uiState.folderName == null },
+                            navigationIcon = {
+                                if (selectionManager.isInSelectionMode) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                                            .clickable { selectionManager.exitSelectionMode() }
+                                            .padding(8.dp)
+                                            .padding(end = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = NextIcons.Close,
+                                            contentDescription = stringResource(id = R.string.navigate_up),
+                                        )
+                                        Text(
+                                            text = stringResource(R.string.m_n_selected, selectedItemsSize, totalItemsSize),
+                                            style = MaterialTheme.typography.labelLarge,
+                                        )
                                     }
-                                },
-                                actions = {
-                                    if (selectionManager.isInSelectionMode) {
-                                        FilledTonalIconButton(
-                                            onClick = {
-                                                if (selectedItemsSize != totalItemsSize) {
-                                                    (uiState.mediaDataState as? DataState.Success)?.value?.let { folder ->
-                                                        folder.folderList.forEach { selectionManager.selectFolder(it) }
-                                                        folder.mediaList.forEach { selectionManager.selectVideo(it) }
-                                                    }
-                                                } else {
-                                                    selectionManager.clearSelection()
+                                } else if (uiState.folderName != null) {
+                                    FilledTonalIconButton(onClick = onNavigateUp) {
+                                        Icon(
+                                            imageVector = NextIcons.ArrowBack,
+                                            contentDescription = stringResource(id = R.string.navigate_up),
+                                        )
+                                    }
+                                }
+                            },
+                            actions = {
+                                if (selectionManager.isInSelectionMode) {
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            if (selectedItemsSize != totalItemsSize) {
+                                                (uiState.mediaDataState as? DataState.Success)?.value?.let { folder ->
+                                                    folder.folderList.forEach { selectionManager.selectFolder(it) }
+                                                    folder.mediaList.forEach { selectionManager.selectVideo(it) }
                                                 }
+                                            } else {
+                                                selectionManager.clearSelection()
+                                            }
+                                        },
+                                    ) {
+                                        Icon(
+                                            imageVector = if (selectedItemsSize != totalItemsSize) {
+                                                NextIcons.SelectAll
+                                            } else {
+                                                NextIcons.DeselectAll
                                             },
-                                        ) {
-                                            Icon(
-                                                imageVector = if (selectedItemsSize != totalItemsSize) {
-                                                    NextIcons.SelectAll
-                                                } else {
-                                                    NextIcons.DeselectAll
-                                                },
-                                                contentDescription = if (selectedItemsSize != totalItemsSize) {
-                                                    stringResource(R.string.select_all)
-                                                } else {
-                                                    stringResource(R.string.deselect_all)
-                                                },
-                                            )
-                                        }
-                                    } else {
-                                        IconButton(onClick = onSearchClick) {
-                                            Icon(
-                                                imageVector = NextIcons.Search,
-                                                contentDescription = stringResource(id = R.string.search),
-                                            )
-                                        }
-                                        IconButton(onClick = { showQuickSettingsDialog = true }) {
-                                            Icon(
-                                                imageVector = NextIcons.DashBoard,
-                                                contentDescription = stringResource(id = R.string.menu),
-                                            )
-                                        }
-                                        IconButton(onClick = onSettingsClick) {
-                                            Icon(
-                                                imageVector = NextIcons.Settings,
-                                                contentDescription = stringResource(id = R.string.settings),
-                                            )
-                                        }
-                                    }
-                                },
-                            )
-                        } else {
-                            NextTopAppBar(
-                                title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
-                                fontWeight = FontWeight.Bold.takeIf { uiState.folderName == null },
-                                navigationIcon = {
-                                    if (selectionManager.isInSelectionMode) {
-                                        Row(
-                                            modifier = Modifier
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.secondaryContainer)
-                                                .clickable { selectionManager.exitSelectionMode() }
-                                                .padding(8.dp)
-                                                .padding(end = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        ) {
-                                            Icon(
-                                                imageVector = NextIcons.Close,
-                                                contentDescription = stringResource(id = R.string.navigate_up),
-                                            )
-                                            Text(
-                                                text = stringResource(R.string.m_n_selected, selectedItemsSize, totalItemsSize),
-                                                style = MaterialTheme.typography.labelLarge,
-                                            )
-                                        }
-                                    } else if (uiState.folderName != null) {
-                                        FilledTonalIconButton(onClick = onNavigateUp) {
-                                            Icon(
-                                                imageVector = NextIcons.ArrowBack,
-                                                contentDescription = stringResource(id = R.string.navigate_up),
-                                            )
-                                        }
-                                    }
-                                },
-                                actions = {
-                                    if (selectionManager.isInSelectionMode) {
-                                        FilledTonalIconButton(
-                                            onClick = {
-                                                if (selectedItemsSize != totalItemsSize) {
-                                                    (uiState.mediaDataState as? DataState.Success)?.value?.let { folder ->
-                                                        folder.folderList.forEach { selectionManager.selectFolder(it) }
-                                                        folder.mediaList.forEach { selectionManager.selectVideo(it) }
-                                                    }
-                                                } else {
-                                                    selectionManager.clearSelection()
-                                                }
+                                            contentDescription = if (selectedItemsSize != totalItemsSize) {
+                                                stringResource(R.string.select_all)
+                                            } else {
+                                                stringResource(R.string.deselect_all)
                                             },
-                                        ) {
-                                            Icon(
-                                                imageVector = if (selectedItemsSize != totalItemsSize) {
-                                                    NextIcons.SelectAll
-                                                } else {
-                                                    NextIcons.DeselectAll
-                                                },
-                                                contentDescription = if (selectedItemsSize != totalItemsSize) {
-                                                    stringResource(R.string.select_all)
-                                                } else {
-                                                    stringResource(R.string.deselect_all)
-                                                },
-                                            )
-                                        }
-                                    } else {
-                                        IconButton(onClick = onSearchClick) {
-                                            Icon(
-                                                imageVector = NextIcons.Search,
-                                                contentDescription = stringResource(id = R.string.search),
-                                            )
-                                        }
-                                        IconButton(onClick = { showQuickSettingsDialog = true }) {
-                                            Icon(
-                                                imageVector = NextIcons.DashBoard,
-                                                contentDescription = stringResource(id = R.string.menu),
-                                            )
-                                        }
-                                        IconButton(onClick = onSettingsClick) {
-                                            Icon(
-                                                imageVector = NextIcons.Settings,
-                                                contentDescription = stringResource(id = R.string.settings),
-                                            )
-                                        }
+                                        )
                                     }
-                                },
-                            )
-                        }
+                                } else {
+                                    IconButton(onClick = onSearchClick) {
+                                        Icon(
+                                            imageVector = NextIcons.Search,
+                                            contentDescription = stringResource(id = R.string.search),
+                                        )
+                                    }
+                                    IconButton(onClick = { showQuickSettingsDialog = true }) {
+                                        Icon(
+                                            imageVector = NextIcons.DashBoard,
+                                            contentDescription = stringResource(id = R.string.menu),
+                                        )
+                                    }
+                                    IconButton(onClick = onSettingsClick) {
+                                        Icon(
+                                            imageVector = NextIcons.Settings,
+                                            contentDescription = stringResource(id = R.string.settings),
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                    
                     }
                 },
                 bottomBar = {
@@ -657,11 +562,7 @@ internal fun MediaPickerScreen(
                         )
                     }
                 },
-                containerColor = if (FluxTheme.engine == ComposeEngine.MIUIX) {
-                    MiuixTheme.colorScheme.surface
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainer
-                },
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
             ) { scaffoldPadding ->
                 val contentPadding = if (useFloatingBottomBar) {
                     PaddingValues(top = scaffoldPadding.calculateTopPadding())
@@ -797,6 +698,8 @@ internal fun MediaPickerScreen(
                         onTabSelected = onTabSelected,
                         backdrop = backdrop,
                         hazeState = hazeState,
+                        navStyle = navStyle,
+                        surfaceStyle = surfaceStyle,
                         visibleTabs = visibleTabs,
                     )
                 }
@@ -1275,215 +1178,117 @@ private fun FloatingBottomBar(
     onTabSelected: (Int) -> Unit,
     backdrop: LayerBackdrop?,
     hazeState: HazeState,
+    navStyle: NavStyle,
+    surfaceStyle: SurfaceStyle,
     visibleTabs: List<Int> = listOf(0, 1, 2),
 ) {
-    val navBarModifier = if (backdrop != null) {
-        Modifier
-    } else {
-        Modifier.hazeEffect(
-            state = hazeState,
-            style = FluxHazeStyle.bottomBarStyle(),
-        )
-    }
-    if (backdrop != null) {
-        // 液态玻璃模式：三层叠加底栏（Legado 架构）
-        val tabsCount = visibleTabs.size
-        val tabsBackdrop = rememberLayerBackdrop()
-        val combinedBackdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop)
-        val indicatorAnim = remember { Animatable(selectedTab.toFloat()) }
-        val pressAnim = remember { Animatable(0f) }
-
-        LaunchedEffect(selectedTab) {
-            indicatorAnim.animateTo(
-                selectedTab.toFloat(),
-                spring(dampingRatio = 0.6f, stiffness = 400f),
+    val tabs = buildList {
+        if (0 in visibleTabs) {
+            add(
+                NavBarItem(
+                    key = 0,
+                    label = stringResource(R.string.videos),
+                    icon = NextIcons.VideoOutline,
+                    selectedIcon = NextIcons.Video,
+                ),
             )
         }
-
-        val selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        val unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-        val tabs = buildList {
-            if (0 in visibleTabs) add(Triple(NextIcons.Video, stringResource(R.string.videos), 0))
-            if (1 in visibleTabs) add(Triple(NextIcons.Folder, stringResource(R.string.browse), 1))
-            if (2 in visibleTabs) add(Triple(NextIcons.History, stringResource(R.string.history), 2))
-            if (3 in visibleTabs) add(Triple(NextIcons.Audio, stringResource(R.string.audiobook), 3))
+        if (1 in visibleTabs) {
+            add(
+                NavBarItem(
+                    key = 1,
+                    label = stringResource(R.string.browse),
+                    icon = NextIcons.FolderOutline,
+                    selectedIcon = NextIcons.Folder,
+                ),
+            )
         }
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-            // Layer 1: 主容器背景（vibrancy + blur + lens + highlight + shadow）
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { RoundedCornerShape(percent = 50) },
-                        effects = {
-                            vibrancy()
-                            blur(25f.dp.toPx())
-                            lens(24f.dp.toPx(), 24f.dp.toPx())
-                        },
-                        highlight = { Highlight.Ambient },
-                        shadow = { Shadow.Default },
-                    ),
-            ) {
-                tabs.forEach { _ -> Spacer(modifier = Modifier.weight(1f)) }
-            }
-
-            // Layer 2: 透明标签层（为指示器提供取色源）
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .alpha(0f)
-                    .layerBackdrop(tabsBackdrop),
-            ) {
-                tabs.forEach { _ -> Spacer(modifier = Modifier.weight(1f)) }
-            }
-
-            // Layer 3: 选中指示器（combinedBackdrop + lens 色散 + shadow + innerShadow）
-            BoxWithConstraints(modifier = Modifier.matchParentSize()) {
-                val tabWidth = maxWidth / tabsCount
-                Box(
-                    modifier = Modifier
-                        .graphicsLayer {
-                            translationX = indicatorAnim.value * size.width
-                        }
-                        .width(tabWidth)
-                        .height(56.dp)
-                        .drawBackdrop(
-                            backdrop = combinedBackdrop,
-                            shape = { RoundedCornerShape(percent = 50) },
-                            effects = {
-                                lens(
-                                    10f.dp.toPx(),
-                                    14f.dp.toPx(),
-                                    depthEffect = true,
-                                    chromaticAberration = true,
-                                )
-                            },
-                            shadow = { Shadow.Default.copy(color = Color.Black.copy(alpha = 0.15f)) },
-                            innerShadow = { InnerShadow.Default },
-                        ),
-                )
-            }
-
-            // 按钮层（接收触摸事件）
-            Row(modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                tabs.forEach { (icon, label, index) ->
-                    val isSelected = selectedTab == index
-                    val interactionSource = remember { MutableInteractionSource() }
-                    val isPressed by interactionSource.collectIsPressedAsState()
-
-                    LaunchedEffect(isPressed) {
-                        if (isPressed) {
-                            pressAnim.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 300f))
-                        } else {
-                            pressAnim.animateTo(0f, spring(dampingRatio = 0.7f, stiffness = 250f))
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(56.dp)
-                            .graphicsLayer {
-                                val scale = 1f + 0.08f * pressAnim.value
-                                scaleX = scale
-                                scaleY = scale
-                            }
-                            .clickable(
-                                interactionSource = interactionSource,
-                                indication = null,
-                            ) { onTabSelected(index) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = if (isSelected) selectedContentColor else unselectedContentColor,
-                            )
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (isSelected) selectedContentColor else unselectedContentColor,
-                            )
-                        }
-                    }
-                }
-            }
+        if (2 in visibleTabs) {
+            add(
+                NavBarItem(
+                    key = 2,
+                    label = stringResource(R.string.history),
+                    icon = NextIcons.HistoryOutline,
+                    selectedIcon = NextIcons.History,
+                ),
+            )
         }
-    } else {
-        // 毛玻璃模式：标准 NavigationBar
-        NavigationBar(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.8f),
-            modifier = navBarModifier,
-        ) {
-            if (0 in visibleTabs) {
-                NavigationBarItem(
-                    selected = selectedTab == 0,
-                    onClick = { onTabSelected(0) },
-                    icon = {
-                        Icon(
-                            imageVector = NextIcons.Video,
-                            contentDescription = null,
-                        )
+        if (3 in visibleTabs) {
+            add(
+                NavBarItem(
+                    key = 3,
+                    label = stringResource(R.string.audiobook),
+                    icon = NextIcons.AudioOutline,
+                    selectedIcon = NextIcons.Audio,
+                ),
+            )
+        }
+    }
+    if (tabs.isEmpty()) return
+
+    // 通栏：贴底通宽，图标在上标签在下，选中态是固定 64×32 指示胶囊
+    if (navStyle == NavStyle.FULL_BAR) {
+        FullWidthNavBar(
+            items = tabs,
+            selectedKey = selectedTab,
+            onSelect = onTabSelected,
+        )
+        return
+    }
+
+    // 悬浮舱：整条大胶囊，选中项展开显示文字
+    val flat = surfaceStyle == SurfaceStyle.FLAT
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            // 液态玻璃：外层 Box 与胶囊等尺寸，backdrop 画胶囊形玻璃；内容层透明透出玻璃。
+            // 玻璃的三层效果挂在容器上，指示胶囊仍是纯色 —— 两者叠在一起会糊。
+            backdrop != null -> Box(
+                modifier = Modifier.drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { FluxRadius.PillShape },
+                    effects = {
+                        vibrancy()
+                        blur(25f.dp.toPx())
+                        lens(24f.dp.toPx(), 24f.dp.toPx())
                     },
-                    label = { Text(stringResource(R.string.videos)) },
+                    highlight = { Highlight.Ambient },
+                    shadow = { Shadow.Default },
+                ),
+            ) {
+                CapsuleDockBar(
+                    items = tabs,
+                    selectedKey = selectedTab,
+                    onSelect = onTabSelected,
+                    containerColor = Color.Transparent,
+                    shadowElevation = 0.dp,
                 )
             }
-            if (1 in visibleTabs) {
-                NavigationBarItem(
-                    selected = selectedTab == 1,
-                    onClick = { onTabSelected(1) },
-                    icon = {
-                        Icon(
-                            imageVector = NextIcons.Folder,
-                            contentDescription = null,
-                        )
-                    },
-                    label = { Text(stringResource(R.string.browse)) },
-                )
-            }
-            if (2 in visibleTabs) {
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { onTabSelected(2) },
-                    icon = {
-                        Icon(
-                            imageVector = NextIcons.History,
-                            contentDescription = null,
-                        )
-                    },
-                    label = { Text(stringResource(R.string.history)) },
-                )
-            }
-            if (3 in visibleTabs) {
-                NavigationBarItem(
-                    selected = selectedTab == 3,
-                    onClick = { onTabSelected(3) },
-                    icon = {
-                        Icon(
-                            imageVector = NextIcons.Audio,
-                            contentDescription = null,
-                        )
-                    },
-                    label = { Text(stringResource(R.string.audiobook)) },
-                )
-            }
+            // 玻璃（非液态）：haze 模糊。底色必须半透明，不透明底会把模糊整片盖住。
+            !flat -> CapsuleDockBar(
+                items = tabs,
+                selectedKey = selectedTab,
+                onSelect = onTabSelected,
+                containerColor = FluxTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f),
+                shadowElevation = 6.dp,
+                modifier = Modifier.hazeEffect(state = hazeState, style = FluxHazeStyle.bottomBarStyle()),
+            )
+            // 扁平：不透明 tonal 面，不加模糊
+            else -> CapsuleDockBar(
+                items = tabs,
+                selectedKey = selectedTab,
+                onSelect = onTabSelected,
+                containerColor = FluxTheme.colorScheme.surfaceContainerHigh,
+                shadowElevation = 6.dp,
+            )
         }
     }
 }
-
 @DayNightPreview
 @Composable
 private fun MediaPickerLoadingPreview() {

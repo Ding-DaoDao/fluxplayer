@@ -27,7 +27,7 @@ import com.fluxplayer.app.core.model.AccentPreset
 /** 强调色按给定明暗取 ARGB 对应的 [Color]。 */
 fun AccentPreset.colorFor(dark: Boolean): Color = Color(if (dark) darkArgb else lightArgb)
 
-private val InkLightColors = lightColorScheme(
+private val NeutralLightColors = lightColorScheme(
     background = Color(0xFFFAFAFA),
     onBackground = Color(0xFF1A1A1A),
     surface = Color(0xFFFFFFFF),
@@ -56,7 +56,7 @@ private val InkLightColors = lightColorScheme(
     onTertiaryContainer = Color(0xFF232323),
 )
 
-private val InkDarkColors = darkColorScheme(
+private val NeutralDarkColors = darkColorScheme(
     background = Color(0xFF0E0E0E),
     onBackground = Color(0xFFE4E4E4),
     surface = Color(0xFF151515),
@@ -85,14 +85,17 @@ private val InkDarkColors = darkColorScheme(
 )
 
 /**
- * 墨色主题入口：中性底座 + 指定强调色派生的完整 ColorScheme。
- * 目前 UI 只暴露 [AccentPreset.INK]（纯黑白），其余预设为后续强调色切换预留。
+ * 中性配色入口：**中性灰阶底座 + 指定强调色派生的完整 ColorScheme**。
+ *
+ * 这是全应用唯一的配色实现。中性灰阶意味着 secondary/tertiary 家族被刻意去色，
+ * 强调色成为界面上唯一的色相出口 —— 换强调色能立刻在全局看到变化，
+ * 而底色始终保持克制。强调色由用户在「设置 › 外观」中选择。
  */
-fun inkColorScheme(accent: Color, dark: Boolean): ColorScheme =
-    (if (dark) InkDarkColors else InkLightColors).withAccent(accent, dark)
+fun neutralColorScheme(accent: Color, dark: Boolean): ColorScheme =
+    (if (dark) NeutralDarkColors else NeutralLightColors).withAccent(accent, dark)
 
-/** 墨色形态：全面大圆角，呼应 MoRead 的胶囊化语言。 */
-val InkShapes = Shapes(
+/** 形态：全面大圆角，呼应胶囊化语言。 */
+val FluxShapes = Shapes(
     extraSmall = RoundedCornerShape(10.dp),
     small = RoundedCornerShape(14.dp),
     medium = RoundedCornerShape(20.dp),
@@ -100,8 +103,8 @@ val InkShapes = Shapes(
     extraLarge = RoundedCornerShape(36.dp),
 )
 
-/** 墨色排版：标题用衬线（Serif）半粗，正文保持无衬线 —— 书卷气的来源。 */
-val InkTypography = Typography(
+/** 排版：标题用衬线（Serif）半粗，正文保持无衬线 —— 书卷气的来源。 */
+val FluxM3Typography = Typography(
     displayLarge = TextStyle(
         fontFamily = FontFamily.Serif,
         fontWeight = FontWeight.SemiBold,

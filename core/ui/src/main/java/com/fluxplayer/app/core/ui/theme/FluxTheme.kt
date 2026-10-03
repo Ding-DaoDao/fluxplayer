@@ -4,12 +4,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
-import com.fluxplayer.app.core.model.ComposeEngine
 import dev.chrisbanes.haze.HazeState
 
 val LocalFluxColorScheme = staticCompositionLocalOf { lightFluxColorScheme() }
 val LocalFluxTypography = staticCompositionLocalOf { defaultFluxTypography() }
-val LocalComposeEngine = compositionLocalOf { ComposeEngine.MATERIAL }
 val LocalHazeState = compositionLocalOf<HazeState?> { null }
 
 object FluxTheme {
@@ -22,11 +20,6 @@ object FluxTheme {
         @Composable
         @ReadOnlyComposable
         get() = LocalFluxTypography.current
-
-    val engine: ComposeEngine
-        @Composable
-        @ReadOnlyComposable
-        get() = LocalComposeEngine.current
 }
 
 fun lightFluxColorScheme(): FluxColorScheme = FluxColorScheme(

@@ -46,14 +46,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtimeCompose)
     implementation(libs.androidx.compose.material.iconsExtended)
 
-    implementation(libs.miuix.core)
-    implementation(libs.miuix.ui.android) {
-        exclude(group = "top.yukonga.miuix.kmp", module = "miuix-blur-android")
-    }
-    implementation(libs.miuix.icons.android)
-    implementation(libs.miuix.preference.android)
     implementation(libs.haze)
-    implementation(libs.material.kolor)
 
     implementation(libs.androidx.hilt.navigation.compose)
 

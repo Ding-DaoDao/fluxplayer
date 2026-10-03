@@ -7,10 +7,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.AccentPreset
 import com.fluxplayer.app.core.model.ApplicationPreferences
-import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.model.StartupPage
 import com.fluxplayer.app.core.model.ThemeConfig
-import com.fluxplayer.app.core.model.ThemeStyle
+import com.fluxplayer.app.core.model.NavStyle
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,7 +41,6 @@ class AppearancePreferencesViewModel @Inject constructor(
             is AppearancePreferencesEvent.ShowDialog -> showDialog(event.value)
             AppearancePreferencesEvent.ToggleDarkTheme -> toggleDarkTheme()
             is AppearancePreferencesEvent.UpdateThemeConfig -> updateThemeConfig(event.themeConfig)
-            AppearancePreferencesEvent.ToggleUseDynamicColors -> toggleUseDynamicColors()
             AppearancePreferencesEvent.ToggleUseHighContrastDarkTheme -> toggleUseHighContrastDarkTheme()
             AppearancePreferencesEvent.ToggleUseLiquidGlass -> toggleUseLiquidGlass()
             AppearancePreferencesEvent.ToggleUseFloatingBottomBar -> toggleUseFloatingBottomBar()
@@ -52,10 +50,8 @@ class AppearancePreferencesViewModel @Inject constructor(
             is AppearancePreferencesEvent.UpdateTopBarBlurAlpha -> updateTopBarBlurAlpha(event.value)
             is AppearancePreferencesEvent.UpdateBottomBarBlurRadius -> updateBottomBarBlurRadius(event.value)
             is AppearancePreferencesEvent.UpdateBottomBarBlurAlpha -> updateBottomBarBlurAlpha(event.value)
-            is AppearancePreferencesEvent.UpdateComposeEngine -> updateComposeEngine(event.composeEngine)
-            is AppearancePreferencesEvent.UpdateThemeStyle -> updateThemeStyle(event.themeStyle)
+            is AppearancePreferencesEvent.UpdateNavStyle -> updateNavStyle(event.navStyle)
             is AppearancePreferencesEvent.UpdateAccentPreset -> updateAccentPreset(event.accentPreset)
-            is AppearancePreferencesEvent.UpdateCustomSeedColor -> updateCustomSeedColor(event.value)
             is AppearancePreferencesEvent.UpdateTopBarOpacity -> updateTopBarOpacity(event.value)
             is AppearancePreferencesEvent.UpdateBottomBarOpacity -> updateBottomBarOpacity(event.value)
             is AppearancePreferencesEvent.UpdateContainerOpacity -> updateContainerOpacity(event.value)
@@ -87,14 +83,6 @@ class AppearancePreferencesViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences {
                 it.copy(themeConfig = themeConfig)
-            }
-        }
-    }
-
-    private fun toggleUseDynamicColors() {
-        viewModelScope.launch {
-            preferencesRepository.updateApplicationPreferences {
-                it.copy(useDynamicColors = !it.useDynamicColors)
             }
         }
     }
@@ -171,28 +159,9 @@ class AppearancePreferencesViewModel @Inject constructor(
         }
     }
 
-    private fun updateComposeEngine(composeEngine: ComposeEngine) {
+    private fun updateNavStyle(navStyle: NavStyle) {
         viewModelScope.launch {
-            preferencesRepository.updateApplicationPreferences {
-                it.copy(composeEngine = composeEngine)
-            }
-        }
-    }
-
-    private fun updateThemeStyle(themeStyle: ThemeStyle) {
-        viewModelScope.launch {
-            preferencesRepository.updateApplicationPreferences {
-                it.copy(
-                    themeStyle = themeStyle,
-                    // 墨 · 极简是 Material 3 专属风格（Miuix 引擎使用内置默认色，
-                    // 不接收墨色方案），选墨色时引擎自动切回 Material 3。
-                    composeEngine = if (themeStyle == ThemeStyle.INK) {
-                        ComposeEngine.MATERIAL
-                    } else {
-                        it.composeEngine
-                    },
-                )
-            }
+            preferencesRepository.updateApplicationPreferences { it.copy(navStyle = navStyle) }
         }
     }
 
@@ -200,17 +169,6 @@ class AppearancePreferencesViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences {
                 it.copy(accentPreset = accentPreset)
-            }
-        }
-    }
-
-    private fun updateCustomSeedColor(value: Int) {
-        viewModelScope.launch {
-            preferencesRepository.updateApplicationPreferences {
-                it.copy(
-                    customSeedColor = value,
-                    useDynamicColors = false,
-                )
             }
         }
     }
@@ -307,7 +265,6 @@ sealed interface AppearancePreferencesEvent {
     data class ShowDialog(val value: AppearancePreferenceDialog?) : AppearancePreferencesEvent
     data object ToggleDarkTheme : AppearancePreferencesEvent
     data class UpdateThemeConfig(val themeConfig: ThemeConfig) : AppearancePreferencesEvent
-    data object ToggleUseDynamicColors : AppearancePreferencesEvent
     data object ToggleUseHighContrastDarkTheme : AppearancePreferencesEvent
     data object ToggleUseLiquidGlass : AppearancePreferencesEvent
     data object ToggleUseFloatingBottomBar : AppearancePreferencesEvent
@@ -317,10 +274,8 @@ sealed interface AppearancePreferencesEvent {
     data class UpdateTopBarBlurAlpha(val value: Int) : AppearancePreferencesEvent
     data class UpdateBottomBarBlurRadius(val value: Int) : AppearancePreferencesEvent
     data class UpdateBottomBarBlurAlpha(val value: Int) : AppearancePreferencesEvent
-    data class UpdateComposeEngine(val composeEngine: ComposeEngine) : AppearancePreferencesEvent
-    data class UpdateThemeStyle(val themeStyle: ThemeStyle) : AppearancePreferencesEvent
+    data class UpdateNavStyle(val navStyle: NavStyle) : AppearancePreferencesEvent
     data class UpdateAccentPreset(val accentPreset: AccentPreset) : AppearancePreferencesEvent
-    data class UpdateCustomSeedColor(val value: Int) : AppearancePreferencesEvent
     data class UpdateTopBarOpacity(val value: Int) : AppearancePreferencesEvent
     data class UpdateBottomBarOpacity(val value: Int) : AppearancePreferencesEvent
     data class UpdateContainerOpacity(val value: Int) : AppearancePreferencesEvent
@@ -333,7 +288,6 @@ sealed interface AppearancePreferencesEvent {
 
 sealed interface AppearancePreferenceDialog {
     data object Theme : AppearancePreferenceDialog
-    data object ComposeEngine : AppearancePreferenceDialog
-    data object ThemeStyle : AppearancePreferenceDialog
+    data object NavStyle : AppearancePreferenceDialog
     data object StartupPage : AppearancePreferenceDialog
 }

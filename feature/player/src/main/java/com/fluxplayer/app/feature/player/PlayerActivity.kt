@@ -45,9 +45,7 @@ import com.fluxplayer.app.core.common.sortedByNaturalName
 import com.fluxplayer.app.core.data.extractor.ThumbnailExtractor
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.AccentPreset
-import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.model.ThemeConfig
-import com.fluxplayer.app.core.model.ThemeStyle
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
 import com.fluxplayer.app.feature.player.extensions.registerForSuspendActivityResult
 import com.fluxplayer.app.feature.player.extensions.setExtras
@@ -191,9 +189,6 @@ class PlayerActivity : ComponentActivity() {
 
                     NextPlayerTheme(
                         darkTheme = shouldUseDarkTheme,
-                        dynamicColor = appPrefs?.useDynamicColors ?: true,
-                        composeEngine = appPrefs?.composeEngine ?: ComposeEngine.MATERIAL,
-                        themeStyle = appPrefs?.themeStyle ?: ThemeStyle.TONAL,
                         accentPreset = appPrefs?.accentPreset ?: AccentPreset.Default,
                     ) {
                         val mp = player
@@ -264,10 +259,6 @@ class PlayerActivity : ComponentActivity() {
                     // 使弹幕/设置等面板的强调色与主界面一致
                     NextPlayerTheme(
                         darkTheme = true,
-                        dynamicColor = appPrefs?.useDynamicColors ?: true,
-                        customSeedColor = appPrefs?.customSeedColor ?: 0,
-                        composeEngine = appPrefs?.composeEngine ?: ComposeEngine.MATERIAL,
-                        themeStyle = appPrefs?.themeStyle ?: ThemeStyle.TONAL,
                         accentPreset = appPrefs?.accentPreset ?: AccentPreset.Default,
                     ) {
                         MediaPlayerScreen(

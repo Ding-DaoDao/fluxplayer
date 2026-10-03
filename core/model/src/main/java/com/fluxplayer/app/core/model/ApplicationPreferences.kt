@@ -8,8 +8,6 @@ data class ApplicationPreferences(
     val sortOrder: Sort.Order = Sort.Order.ASCENDING,
     val themeConfig: ThemeConfig = ThemeConfig.SYSTEM,
     val useHighContrastDarkTheme: Boolean = false,
-    val useDynamicColors: Boolean = true,
-    val themeStyle: ThemeStyle = ThemeStyle.TONAL,
     val accentPreset: AccentPreset = AccentPreset.Default,
     val markLastPlayedMedia: Boolean = true,
     val excludeFolders: List<String> = emptyList(),
@@ -63,6 +61,12 @@ data class ApplicationPreferences(
     // 悬浮底栏
     val useFloatingBottomBar: Boolean = false,
 
+    // 底栏样式（悬浮舱 / 通栏）。useFloatingBottomBar=false 时此值不生效
+    val navStyle: NavStyle = NavStyle.Default,
+
+    // 界面质感（玻璃 / 扁平）
+    val surfaceStyle: SurfaceStyle = SurfaceStyle.Default,
+
     // 液态玻璃效果（仅在悬浮底栏开启时生效）
     val useLiquidGlass: Boolean = false,
 
@@ -80,10 +84,8 @@ data class ApplicationPreferences(
     val containerOpacity: Int = 100,
 
     // 自定义主题色（0 = 使用默认/动态取色）
-    val customSeedColor: Int = 0,
 
     // 主题引擎
-    val composeEngine: ComposeEngine = ComposeEngine.MATERIAL,
 
     // 下载存储路径
     val downloadPath: String = "/storage/emulated/0/Download/",
