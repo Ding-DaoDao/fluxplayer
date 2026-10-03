@@ -39,11 +39,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.AudiobookBookCard
-import com.fluxplayer.app.feature.player.AudiobookDetailContent
+import com.fluxplayer.app.feature.player.PlayConfirmDialog
+import com.fluxplayer.app.feature.tingshu.TingshuPlayerActivity
 import com.fluxplayer.app.feature.tingshu.TingshuSourceContent
 import com.fluxplayer.app.feature.tingshu.TingshuViewModel
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
@@ -51,7 +53,6 @@ import com.fluxplayer.app.feature.videopicker.model.AudioBook
 @Composable
 fun AudiobookTabContent(
     viewModel: AudiobookViewModel = hiltViewModel(),
-    onBookClick: (AudioBook) -> Unit,
     onPlayChapter: (Uri, Uri?, Long, List<Uri>, Int) -> Unit = { _, _, _, _, _ -> },
     onShowingDetailChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -59,9 +60,60 @@ fun AudiobookTabContent(
     val sourceViewModel: TingshuViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val sources by sourceViewModel.repository.sources.collectAsStateWithLifecycle()
     val localState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var destination by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     var showingDetail by remember { mutableStateOf(false) }
-    var recentLocalBook by remember { mutableStateOf<AudioBook?>(null) }
+    // 首页点书后的播放确认窗：本地书直接可播，书源书籍需等预解析
+    var pendingLocal by remember { mutableStateOf<AudioBook?>(null) }
+    var pendingSource by remember { mutableStateOf<ListeningBook?>(null) }
+    val sourceState by sourceViewModel.state.collectAsStateWithLifecycle()
+
+    // 播放确认窗：本地书与书源书籍共用一套交互
+    pendingLocal?.let { book ->
+        val entry = localState.resumeStates[book.folderPath].orEmpty()
+        val resumeIndex = entry.substringBefore('|').toIntOrNull()?.takeIf { it >= 0 }
+        val uris = remember(book) { book.chapters.map { it.uri } }
+        PlayConfirmDialog(
+            title = book.title,
+            chapterCount = book.chapters.size,
+            coverModel = book.coverUri,
+            resumeLabel = resumeIndex?.let { "继续收听第 ${it + 1} 集" },
+            onDismiss = { pendingLocal = null },
+            onPlay = {
+                pendingLocal = null
+                val startIndex = resumeIndex?.coerceIn(0, (uris.lastIndex).coerceAtLeast(0)) ?: 0
+                val startMs = entry.substringAfter('|').toLongOrNull() ?: 0L
+                uris.getOrNull(startIndex)?.let { uri ->
+                    onPlayChapter(uri, book.coverUri, startMs, uris, startIndex)
+                }
+            },
+        )
+    }
+    pendingSource?.let { book ->
+        val progress = sourceViewModel.repository.progress(book.key)
+        val index = book.episodes.indexOfFirst { it.url == progress.episodeUrl }
+        PlayConfirmDialog(
+            title = book.title,
+            chapterCount = book.episodes.size,
+            coverModel = book.coverUrl.takeIf { it.isNotBlank() }?.let(Uri::parse),
+            resumeLabel = if (index >= 0) "继续收听第 ${index + 1} 集" else null,
+            onDismiss = {
+                pendingSource = null
+                sourceViewModel.consumePendingDetail()
+            },
+            onPlay = {
+                pendingSource = null
+                sourceViewModel.consumePendingDetail()
+                val startIndex = index.coerceAtLeast(0)
+                context.startActivity(
+                    android.content.Intent(context, TingshuPlayerActivity::class.java)
+                        .putExtra("book", book.key)
+                        .putExtra("index", startIndex)
+                        .putExtra("position", progress.position),
+                )
+            },
+        )
+    }
     val detailChanged: (Boolean) -> Unit = {
         showingDetail = it
         onShowingDetailChanged(it)
@@ -74,17 +126,12 @@ fun AudiobookTabContent(
             localBookCount = (localState.scanState as? DataState.Success)?.value?.size ?: localState.partialBooks.size,
             hasLocalPath = localState.rootUri != null,
             onLocalClick = {
-                recentLocalBook = null
                 destination = "local"
             },
             localBooks = (localState.scanState as? DataState.Success)?.value ?: localState.partialBooks,
             localResume = localState.resumeStates,
             localChapterProgress = localState.chapterProgress,
             localLastPlayedAt = localState.lastPlayedAt,
-            onLocalRecentClick = { book ->
-                recentLocalBook = book
-                destination = "local"
-            },
             onSourceClick = { source ->
                 sourceViewModel.open(source)
                 destination = source.id
@@ -92,6 +139,10 @@ fun AudiobookTabContent(
             onRecentClick = { key ->
                 sourceViewModel.openSavedBook(key)
                 destination = "recent"
+            },
+            // 首页点书：统一弹播放确认窗（本地书与书源书籍都已有完整数据，无需再解析）
+            onBookPick = { localBook, sourceBook ->
+                if (localBook != null) pendingLocal = localBook else pendingSource = sourceBook
             },
             modifier = modifier,
         )
@@ -106,7 +157,12 @@ fun AudiobookTabContent(
                 }
             }
             if (destination == "local") {
-                LocalAudiobookTabContent(viewModel, onBookClick, onPlayChapter, detailChanged, Modifier.weight(1f), recentLocalBook)
+                LocalAudiobookTabContent(
+                    viewModel,
+                    onPlayChapter,
+                    detailChanged,
+                    Modifier.weight(1f),
+                )
             } else {
                 TingshuSourceContent(onExit = { destination = null }, viewModel = sourceViewModel, modifier = Modifier.weight(1f), onShowingDetailChanged = detailChanged)
             }
@@ -118,55 +174,35 @@ fun AudiobookTabContent(
 @Composable
 private fun LocalAudiobookTabContent(
     viewModel: AudiobookViewModel = hiltViewModel(),
-    onBookClick: (AudioBook) -> Unit,
     onPlayChapter: (Uri, Uri?, Long, List<Uri>, Int) -> Unit = { _, _, _, _, _ -> },
     onShowingDetailChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
-    initialBook: AudioBook? = null,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    // 选中的书籍（非 null 时显示详情页）
-    var selectedBook by remember(initialBook) { mutableStateOf(initialBook) }
+    // 待确认播放的书籍：点击书籍只弹确认窗，确认后才起播
+    var pendingBook by remember { mutableStateOf<AudioBook?>(null) }
 
-    // 通知外层顶栏是否隐藏
-    LaunchedEffect(selectedBook) {
-        onShowingDetailChanged(selectedBook != null)
-    }
-
-    // 详情页
-    if (selectedBook != null) {
-        val book = selectedBook!!
-        // 解析续播状态
-        val resumeEntry = uiState.resumeStates[book.folderPath]
-        val resumeChapterIndex = resumeEntry?.substringBefore('|')?.toIntOrNull()
-        val resumePositionMs = resumeEntry?.substringAfter('|')?.toLongOrNull() ?: 0L
-        // 解析该书各章节进度: key="bookPath|chapterIndex" → "positionMs|durationMs"
-        val bookPrefix = "${book.folderPath}|"
-        val chapterProgressPairs = uiState.chapterProgress
-            .filterKeys { it.startsWith(bookPrefix) }
-            .mapKeys { (k, _) -> k.removePrefix(bookPrefix).toIntOrNull() ?: -1 }
-            .filterKeys { it >= 0 }
-            .mapValues { (_, v) ->
-                val parts = v.split("|")
-                (parts.getOrNull(0)?.toLongOrNull() ?: 0L) to (parts.getOrNull(1)?.toLongOrNull() ?: 0L)
-            }
-
-        AudiobookDetailContent(
-            book = book,
-            onBackClick = { selectedBook = null },
-            onChapterClick = { chapter, startMs ->
-                val chapterUris = book.chapters.map { it.uri }
-                val startIndex = book.chapters.indexOfFirst { it.uri == chapter.uri }.coerceAtLeast(0)
-                onPlayChapter(chapter.uri, book.coverUri, startMs, chapterUris, startIndex)
+    pendingBook?.let { book ->
+        val resumeEntry = uiState.resumeStates[book.folderPath].orEmpty()
+        val resumeIndex = resumeEntry.substringBefore('|').toIntOrNull()?.takeIf { it >= 0 }
+        val uris = remember(book) { book.chapters.map { it.uri } }
+        val startIndex = resumeIndex?.coerceIn(0, (uris.lastIndex).coerceAtLeast(0)) ?: 0
+        val startMs = resumeEntry.substringAfter('|').toLongOrNull() ?: 0L
+        PlayConfirmDialog(
+            title = book.title,
+            chapterCount = book.chapters.size,
+            coverModel = book.coverUri,
+            resumeLabel = resumeIndex?.let { "继续收听第 ${it + 1} 集" },
+            onDismiss = { pendingBook = null },
+            onPlay = {
+                pendingBook = null
+                uris.getOrNull(startIndex)?.let { uri ->
+                    onPlayChapter(uri, book.coverUri, startMs, uris, startIndex)
+                }
             },
-            resumeChapterIndex = resumeChapterIndex,
-            resumePositionMs = resumePositionMs,
-            chapterProgress = chapterProgressPairs,
-            modifier = Modifier.fillMaxSize(),
         )
-        return
     }
 
     if (uiState.rootUri == null) {
@@ -210,7 +246,7 @@ private fun LocalAudiobookTabContent(
                         }
                         BookshelfList(
                             books = partialBooks,
-                            onBookClick = { selectedBook = it },
+                            onBookClick = { pendingBook = it },
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -260,7 +296,7 @@ private fun LocalAudiobookTabContent(
                         BookshelfList(
                             books = sortedBooks,
                             resumeStates = uiState.resumeStates,
-                            onBookClick = { selectedBook = it },
+                            onBookClick = { pendingBook = it },
                             modifier = Modifier.fillMaxSize(),
                         )
                     }

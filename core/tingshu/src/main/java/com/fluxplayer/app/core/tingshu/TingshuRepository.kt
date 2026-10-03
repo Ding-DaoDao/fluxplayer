@@ -76,6 +76,11 @@ class TingshuRepository private constructor(private val context: Context) {
             readRecentKeys().forEach { key ->
                 runCatching { book(key) }.getOrNull()?.let { _recentBooks.value += it }
             }
+            // 回填磁盘进度：_progresses 只在 saveProgress 时更新，冷启动为空会让首页「继续收听」丢失进度与时长
+            if (_progresses.value.isEmpty()) {
+                val restored = readRecentKeys().mapNotNull { key -> readProgress(key)?.let { key to it } }.toMap()
+                if (restored.isNotEmpty()) _progresses.value = restored
+            }
         }
     }
 
@@ -250,6 +255,15 @@ class TingshuRepository private constructor(private val context: Context) {
         val raw = prefs.getString("progress.$key", null) ?: return ListeningProgress()
         val value = JSONObject(raw)
         return ListeningProgress(value.optString("url"), value.optLong("position"), value.optLong("duration"))
+    }
+
+    /** 读取磁盘进度，无记录或数据损坏时返回 null（区别于「有记录但进度为 0」）。 */
+    private fun readProgress(key: String): ListeningProgress? {
+        val raw = prefs.getString("progress.$key", null) ?: return null
+        return runCatching {
+            val value = JSONObject(raw)
+            ListeningProgress(value.optString("url"), value.optLong("position"), value.optLong("duration"))
+        }.getOrNull()
     }
 
     fun chapterProgress(book: ListeningBook): Map<Int, Pair<Long, Long>> {

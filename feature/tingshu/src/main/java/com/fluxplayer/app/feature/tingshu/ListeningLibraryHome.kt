@@ -89,7 +89,8 @@ fun ListeningLibraryHome(
     localResume: Map<String, String> = emptyMap(),
     localChapterProgress: Map<String, String> = emptyMap(),
     localLastPlayedAt: Map<String, Long> = emptyMap(),
-    onLocalRecentClick: (AudioBook) -> Unit = {},
+    /** 点击书籍：先弹播放确认窗（书名/封面/集数/播放按钮）。 */
+    onBookPick: (AudioBook?, ListeningBook?) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("listening_home", android.content.Context.MODE_PRIVATE) }
@@ -128,6 +129,19 @@ fun ListeningLibraryHome(
         .sortedByDescending { it.playedAt }.take(20)
     val colors = FluxTheme.colorScheme
 
+    // ── 正在播放横幅 ──
+    // 内存播放状态（ListeningPlayback / LocalAudiobookPlayback）是纯进程内的，App 被杀后归零；
+    // 此时回落到最近收听记录渲染横幅，保证「继续收听」入口常驻。
+    val liveLocal = localPlayback.bookPath.isNotBlank()
+    val liveSource = playback.book != null
+    val lastEntry = entries.firstOrNull { it.playedAt > 0L }
+    val bannerMode = when {
+        liveLocal && (showLocal) -> HomeBannerMode.Local
+        liveSource -> HomeBannerMode.Source
+        lastEntry != null -> HomeBannerMode.Resume
+        else -> null
+    }
+
     LazyVerticalGrid(
         columns = GridCells.Adaptive(150.dp),
         modifier = modifier.fillMaxSize(),
@@ -140,19 +154,46 @@ fun ListeningLibraryHome(
                 Text("留一点时间，听一本好书", style = FluxTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = colors.onSurface)
             }
         }
-        if (showLocal || playback.book != null) {
+        if (bannerMode != null) {
             item(key = "now-playing", span = { GridItemSpan(maxLineSpan) }) {
-                val sourceBook = playback.book
+                val entry = lastEntry
+                val isResume = bannerMode == HomeBannerMode.Resume
+                // 恢复态取持久化的章节/进度，直播态取内存实时值
+                val title = when (bannerMode) {
+                    HomeBannerMode.Local -> localPlayback.title
+                    HomeBannerMode.Source -> playback.book?.title.orEmpty()
+                    HomeBannerMode.Resume -> entry?.book?.title.orEmpty()
+                }
+                val episodeTitle = when (bannerMode) {
+                    HomeBannerMode.Local -> localPlayback.chapterTitle
+                    HomeBannerMode.Source -> playback.book?.episodes?.getOrNull(playback.index)?.title.orEmpty()
+                    HomeBannerMode.Resume -> entry?.let { resolveEpisodeTitle(it) }.orEmpty()
+                }
+                val position = when (bannerMode) {
+                    HomeBannerMode.Local -> localPlayback.position
+                    HomeBannerMode.Source -> playback.position
+                    HomeBannerMode.Resume -> entry?.progress?.position ?: 0L
+                }
+                val duration = when (bannerMode) {
+                    HomeBannerMode.Local -> localPlayback.duration
+                    HomeBannerMode.Source -> playback.duration
+                    HomeBannerMode.Resume -> entry?.progress?.duration ?: 0L
+                }
+                val coverModel = when (bannerMode) {
+                    HomeBannerMode.Local -> localPlayback.coverUri
+                    HomeBannerMode.Source -> playback.book?.let { rememberSourceCover(it.sourceId, it.coverUrl, repository) }
+                    HomeBannerMode.Resume -> entry?.let { resumeCover(it, repository) }
+                }
                 NowPlayingBanner(
-                    title = if (showLocal) localPlayback.title else sourceBook?.title.orEmpty(),
-                    episodeTitle = if (showLocal) localPlayback.chapterTitle else sourceBook?.episodes?.getOrNull(playback.index)?.title.orEmpty(),
-                    playing = if (showLocal) localPlayback.playing else playback.playing,
-                    playWhenReady = if (showLocal) localPlayback.playWhenReady else playback.playWhenReady,
-                    loading = if (showLocal) localPlayback.loading else playback.loading,
-                    position = if (showLocal) localPlayback.position else playback.position,
-                    duration = if (showLocal) localPlayback.duration else playback.duration,
-                    coverModel = if (showLocal) localPlayback.coverUri else sourceBook?.let { rememberSourceCover(it.sourceId, it.coverUrl, repository) },
-                    controlsEnabled = controller != null,
+                    title = title,
+                    episodeTitle = episodeTitle,
+                    playing = !isResume && (if (showLocal) localPlayback.playing else playback.playing),
+                    playWhenReady = !isResume && (if (showLocal) localPlayback.playWhenReady else playback.playWhenReady),
+                    loading = !isResume && (if (showLocal) localPlayback.loading else playback.loading),
+                    position = position,
+                    duration = duration,
+                    coverModel = coverModel,
+                    controlsEnabled = !isResume && controller != null,
                     onTogglePlayback = {
                         controller?.let {
                             if (it.playbackState == Player.STATE_ENDED) {
@@ -166,8 +207,8 @@ fun ListeningLibraryHome(
                         }
                     },
                     onClick = {
-                        if (showLocal) {
-                            context.startActivity(
+                        when (bannerMode) {
+                            HomeBannerMode.Local -> context.startActivity(
                                 Intent(context, PlayerActivity::class.java).apply {
                                     data = Uri.parse(localPlayback.chapterUri)
                                     putExtra("audio_only", true)
@@ -175,8 +216,13 @@ fun ListeningLibraryHome(
                                     putExtra("reopen_audiobook", true)
                                 },
                             )
-                        } else {
-                            context.startActivity(Intent(context, TingshuPlayerActivity::class.java).putExtra("reopen", true))
+                            HomeBannerMode.Source -> context.startActivity(
+                                Intent(context, TingshuPlayerActivity::class.java).putExtra("reopen", true),
+                            )
+                            // 恢复态：直接续播该书（解析→定位章节→播放）
+                            HomeBannerMode.Resume -> entry?.let { resume ->
+                                onBookPick(resume.localBook, resume.book)
+                            }
                         }
                     },
                 )
@@ -227,7 +273,10 @@ fun ListeningLibraryHome(
         items(entries, key = { "recent-${it.book.key}" }, span = { GridItemSpan(if (grid) 1 else maxLineSpan) }) { entry ->
             val book = entry.book
             val cover = if (entry.localBook != null) entry.localBook.coverUri else rememberSourceCover(book.sourceId, book.coverUrl, repository)
-            val open = { entry.localBook?.let(onLocalRecentClick) ?: onRecentClick(book.key) }
+            // 点击书籍直达播放页（跳过书籍详情页）；本地书库无解析成本，直接播续播章节
+            val open = {
+                onBookPick(entry.localBook, book)
+            }
             if (grid) {
                 RecentBookGridCard(book, entry.progress, cover, open)
             } else {
@@ -359,12 +408,32 @@ private fun NowPlayingBanner(
                     }
                     if (duration > 0) {
                         Spacer(Modifier.height(8.dp))
-                        FluxLinearProgressIndicator(
-                            progress = progress,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(3.dp)
-                                .clip(CircleShape),
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            FluxLinearProgressIndicator(
+                                progress = progress,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(3.dp)
+                                    .clip(CircleShape),
+                            )
+                            Text(
+                                text = "${formatHomeTime(position)} / ${formatHomeTime(duration)}",
+                                style = FluxTheme.typography.labelSmall,
+                                color = colors.onPrimaryContainer.copy(alpha = 0.75f),
+                                maxLines = 1,
+                            )
+                        }
+                    } else if (position > 0) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "已听到 ${formatHomeTime(position)}",
+                            style = FluxTheme.typography.labelSmall,
+                            color = colors.onPrimaryContainer.copy(alpha = 0.7f),
+                            maxLines = 1,
                         )
                     }
                 }
@@ -639,6 +708,41 @@ private data class HomeRecentBook(
     val playedAt: Long,
     val localBook: AudioBook? = null,
 )
+
+/** 横幅数据来源：本地书库直播 / 书源直播 / 冷启动恢复。 */
+private enum class HomeBannerMode { Local, Source, Resume }
+
+/** 恢复态：按持久化的 episodeUrl 反查章节名，匹配不上时回落到第 N 集提示。 */
+private fun resolveEpisodeTitle(entry: HomeRecentBook): String {
+    val progress = entry.progress ?: return ""
+    val episodes = entry.book.episodes
+    val index = episodes.indexOfFirst { it.url == progress.episodeUrl }
+    return when {
+        index >= 0 -> episodes[index].title
+        episodes.isNotEmpty() -> "第 ${progress.position / 1000}s 处"
+        else -> ""
+    }
+}
+
+/** 恢复态封面：本地书直接用书籍封面 Uri，书源走带鉴权头的图片请求。 */
+@Composable
+private fun resumeCover(entry: HomeRecentBook, repository: TingshuRepository): Any? =
+    entry.localBook?.coverUri
+        ?: entry.book.coverUrl.takeIf { it.isNotBlank() }
+            ?.let { rememberSourceCover(entry.book.sourceId, it, repository) }
+
+/** 横幅时间标签：mm:ss，超过一小时用 h:mm:ss。 */
+private fun formatHomeTime(ms: Long): String {
+    val total = (ms / 1000).coerceAtLeast(0L)
+    val hours = total / 3600
+    val minutes = (total % 3600) / 60
+    val seconds = total % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
+}
 
 /** 只连接当前展示的会话，离开首页时释放控制器。 */
 @Composable

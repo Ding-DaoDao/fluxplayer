@@ -775,7 +775,6 @@ internal fun MediaPickerScreen(
 
                             3 -> {
                                 AudiobookTabContent(
-                                    onBookClick = {},
                                     onPlayChapter = onPlayAudioChapter,
                                     onShowingDetailChanged = { audiobookInDetail = it },
                                     modifier = Modifier
