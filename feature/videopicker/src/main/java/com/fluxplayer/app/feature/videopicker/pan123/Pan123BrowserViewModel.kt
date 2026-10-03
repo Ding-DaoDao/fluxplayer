@@ -93,6 +93,7 @@ class Pan123BrowserViewModel @Inject constructor(
     private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
+    private val directoryPaginationCache = mutableMapOf<String, Pair<Int, Boolean>>()
     private var downloadJob: Job? = null
 
     data class DownloadProgressData(
@@ -253,6 +254,10 @@ class Pan123BrowserViewModel @Inject constructor(
     // region ==================== 登出 ====================
 
     fun logout() {
+        loadDirectoryJob?.cancel()
+        loadMoreJob?.cancel()
+        loadSequence++
+        loadingMore = false
         Pan123AuthProvider.clear()
 
         // 清除 OkHttp GlobalCookieJar 中旧账号的 Cookie
@@ -265,6 +270,7 @@ class Pan123BrowserViewModel @Inject constructor(
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         directoryCache.clear()
+        directoryPaginationCache.clear()
         CloudDirectoryCache.clear(getApplication(), "pan123")
         _uiState.value = Pan123BrowserUiState(initializing = false)
         _navigationStack.value = listOf(DirectoryStackEntry(fileId = "0", label = "根目录"))
@@ -280,7 +286,7 @@ class Pan123BrowserViewModel @Inject constructor(
         loadingMore = false
         loadSequence++
         val seq = loadSequence
-        updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
+        updateUiState { it.copy(isLoading = true, isLoadingMore = false, error = null, currentFileId = parentFileId) }
         syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
@@ -315,7 +321,8 @@ class Pan123BrowserViewModel @Inject constructor(
                     val resources = listResult.items.map { fileToResource(it) }
                     directoryCache[parentFileId] = resources
                     CloudDirectoryCache.put(getApplication(), "pan123", parentFileId, resources)
-                    val hasMore = listResult.items.size >= 100
+                    val hasMore = listResult.hasMore
+                    directoryPaginationCache[parentFileId] = 1 to hasMore
                     updateUiState {
                         it.copy(
                             items = resources,
@@ -343,10 +350,13 @@ class Pan123BrowserViewModel @Inject constructor(
     private fun loadDirectoryCached(fileId: String) {
         val cached = directoryCache[fileId]
         if (cached != null) {
+            loadDirectoryJob?.cancel()
             loadMoreJob?.cancel()
             loadingMore = false
-            val restoredPage = (cached.size + 99) / 100
-            val hasMore = cached.size % 100 == 0 && cached.size > 0
+            loadSequence++
+            val pagination = directoryPaginationCache[fileId]
+            val restoredPage = pagination?.first ?: maxOf(1, (cached.size + 99) / 100)
+            val hasMore = pagination?.second ?: (cached.size % 100 == 0 && cached.isNotEmpty())
             updateUiState {
                 it.copy(
                     items = cached,
@@ -374,8 +384,10 @@ class Pan123BrowserViewModel @Inject constructor(
         val state = _uiState.value
         if (!state.hasMore || loadingMore || state.isLoading) return
         val nextPage = state.currentPage + 1
+        val seq = loadSequence
         loadingMore = true
-        updateUiState { it.copy(isLoadingMore = true) }
+        updateUiState { it.copy(isLoadingMore = true, error = null) }
+        syncStackTop { it.copy(error = null) }
 
         loadMoreJob = viewModelScope.launch {
             try {
@@ -385,6 +397,7 @@ class Pan123BrowserViewModel @Inject constructor(
                     orderBy = state.orderBy,
                     orderDirection = state.orderDirection
                 )
+                if (seq != loadSequence) return@launch
                 result.fold(
                     onSuccess = { listResult ->
                         cachedFileItems = cachedFileItems + listResult.items
@@ -409,12 +422,14 @@ class Pan123BrowserViewModel @Inject constructor(
                         val existingPaths = _uiState.value.items.map { it.path }.toSet()
                         val filtered = newItems.filter { it.path !in existingPaths }
                         if (filtered.isEmpty()) {
+                            directoryPaginationCache[state.currentFileId] = state.currentPage to false
                             updateUiState { it.copy(isLoadingMore = false, hasMore = false) }
                             return@fold
                         }
                         val allItems = _uiState.value.items + filtered
-                        val hasMore = listResult.items.size >= 100
+                        val hasMore = listResult.hasMore
                         directoryCache[state.currentFileId] = allItems
+                        directoryPaginationCache[state.currentFileId] = nextPage to hasMore
                         updateUiState {
                             it.copy(
                                 items = allItems, isLoadingMore = false,
@@ -425,13 +440,17 @@ class Pan123BrowserViewModel @Inject constructor(
                     },
                     onFailure = { e ->
                         if (e !is kotlinx.coroutines.CancellationException) {
-                            updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
+                            val message = "加载更多失败: ${e.message}"
+                            updateUiState { it.copy(isLoadingMore = false, error = message) }
+                            syncStackTop { it.copy(error = message) }
                         }
                     }
                 )
             } finally {
-                loadingMore = false
-                updateUiState { it.copy(isLoadingMore = false) }
+                if (seq == loadSequence) {
+                    loadingMore = false
+                    updateUiState { it.copy(isLoadingMore = false) }
+                }
             }
         }
     }

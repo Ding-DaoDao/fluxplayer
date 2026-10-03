@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -285,7 +286,7 @@ class Pan123ApiClient(
     // region ==================== 文件操作 ====================
 
     /**
-     * 列出文件 — 使用 Web API + page 页码分页（Web API 的 DownloadUrl 含缩略图参数）
+     * 列出文件 — 使用 Web API + Page 页码分页（参数区分大小写）
      * API: https://api.123278.com/b/api/file/list/new
      */
     suspend fun listFiles(
@@ -295,21 +296,23 @@ class Pan123ApiClient(
         orderDirection: String = "desc",
         searchData: String = ""
     ): Result<Pan123ListResult> = runCatching {
-        val url = "$WEB_API_BASE/file/list/new" +
-            "?driveId=0" +
-            "&limit=100" +
-            "&page=$page" +
-            "&orderBy=$orderBy" +
-            "&orderDirection=$orderDirection" +
-            "&parentFileId=$parentFileId" +
-            "&trashed=false" +
-            "&SearchData=$searchData" +
-            "&OnlyLookAbnormalFile=0" +
-            "&event=homeListFile" +
-            "&operateType=1" +
-            "&inDirectSpace=false" +
-            "&fileCategory=0" +
-            "&isSearchOrder=false"
+        val url = "$WEB_API_BASE/file/list/new".toHttpUrl().newBuilder()
+            .addQueryParameter("driveId", "0")
+            .addQueryParameter("limit", "100")
+            .addQueryParameter("next", "0")
+            .addQueryParameter("Page", page.toString())
+            .addQueryParameter("orderBy", orderBy)
+            .addQueryParameter("orderDirection", orderDirection)
+            .addQueryParameter("parentFileId", parentFileId)
+            .addQueryParameter("trashed", "false")
+            .addQueryParameter("SearchData", searchData)
+            .addQueryParameter("OnlyLookAbnormalFile", "0")
+            .addQueryParameter("event", "homeListFile")
+            .addQueryParameter("operateType", "1")
+            .addQueryParameter("inDirectSpace", "false")
+            .addQueryParameter("fileCategory", "0")
+            .addQueryParameter("isSearchOrder", "false")
+            .build().toString()
 
         val json = webGet(url)
 
@@ -348,7 +351,8 @@ class Pan123ApiClient(
                 raw = item
             )
         }
-        Pan123ListResult(items, null)
+        val next = data?.optString("Next")?.takeIf { it.isNotBlank() && it != "null" }
+        Pan123ListResult(items, next)
     }
 
     suspend fun getFileDownloadUrl(item: Pan123FileItem): Result<String> = runCatching {
