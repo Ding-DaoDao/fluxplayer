@@ -226,11 +226,12 @@ fun <T> CloudBrowserPanel(
                             else -> {
                                 val flatListState = rememberLazyListState()
                                 // 派生为布尔值，仅在翻转时触发，避免滚动每帧回调
-                                val nearLoadMore by remember {
+                                val currentOnLoadMore by rememberUpdatedState(onLoadMore)
+                                val nearLoadMore by remember(flatListState, curItems.size) {
                                     derivedStateOf {
                                         val info = flatListState.layoutInfo
                                         val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                                        info.totalItemsCount > 0 && lastVisible >= info.totalItemsCount - 5
+                                        curItems.isNotEmpty() && lastVisible >= curItems.size - 5
                                     }
                                 }
                                 val nearBottom by remember {
@@ -244,8 +245,11 @@ fun <T> CloudBrowserPanel(
                                             info.visibleItemsInfo.size < info.totalItemsCount
                                     }
                                 }
-                                LaunchedEffect(flatListState, onLoadMore) {
-                                    snapshotFlow { nearLoadMore }.collect { if (it) onLoadMore() }
+                                // Only restart for new data or a directory refresh, not loading/error recompositions.
+                                LaunchedEffect(flatListState, curItems.size, curLoading) {
+                                    if (!curLoading) {
+                                        snapshotFlow { nearLoadMore }.collect { if (it) currentOnLoadMore() }
+                                    }
                                 }
                                 LaunchedEffect(flatListState) {
                                     snapshotFlow { nearBottom }.collect { isNearBottom = it }
@@ -497,11 +501,12 @@ private fun DirectoryStackContent(
     cloudProviderKey: String = "",
 ) {
     // 派生为布尔值，仅在翻转时触发，避免滚动每帧回调
-    val nearLoadMore by remember {
+    val currentOnLoadMore by rememberUpdatedState(onLoadMore)
+    val nearLoadMore by remember(listState, entry.items.size) {
         derivedStateOf {
             val info = listState.layoutInfo
             val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-            info.totalItemsCount > 0 && lastVisible >= info.totalItemsCount - 5
+            entry.items.isNotEmpty() && lastVisible >= entry.items.size - 5
         }
     }
     val nearBottom by remember {
@@ -513,8 +518,11 @@ private fun DirectoryStackContent(
                 info.visibleItemsInfo.size < info.totalItemsCount
         }
     }
-    LaunchedEffect(listState, onLoadMore) {
-        snapshotFlow { nearLoadMore }.collect { if (it) onLoadMore() }
+    // Loading indicators and callback replacements must not retry the same page.
+    LaunchedEffect(listState, entry.items.size, entry.isLoading) {
+        if (!entry.isLoading) {
+            snapshotFlow { nearLoadMore }.collect { if (it) currentOnLoadMore() }
+        }
     }
     LaunchedEffect(listState) {
         snapshotFlow { nearBottom }.collect { onNearBottomChanged(it) }
