@@ -6,28 +6,29 @@ import androidx.navigation.navigation
 import com.fluxplayer.app.settings.Setting
 import com.fluxplayer.app.settings.navigation.aboutPreferencesScreen
 import com.fluxplayer.app.settings.navigation.appearancePreferencesScreen
-import com.fluxplayer.app.settings.navigation.backupSettingsScreen
 import com.fluxplayer.app.settings.navigation.audioPreferencesScreen
+import com.fluxplayer.app.settings.navigation.audiobookSettingsScreen
+import com.fluxplayer.app.settings.navigation.backupSettingsScreen
 import com.fluxplayer.app.settings.navigation.decoderPreferencesScreen
 import com.fluxplayer.app.settings.navigation.folderPreferencesScreen
 import com.fluxplayer.app.settings.navigation.generalPreferencesScreen
+import com.fluxplayer.app.settings.navigation.gesturePreferencesScreen
 import com.fluxplayer.app.settings.navigation.librariesScreen
 import com.fluxplayer.app.settings.navigation.mediaLibraryPreferencesScreen
 import com.fluxplayer.app.settings.navigation.navigateToAboutPreferences
 import com.fluxplayer.app.settings.navigation.navigateToAppearancePreferences
-import com.fluxplayer.app.settings.navigation.gesturePreferencesScreen
 import com.fluxplayer.app.settings.navigation.navigateToAudioPreferences
-import com.fluxplayer.app.settings.navigation.navigateToDecoderPreferences
-import com.fluxplayer.app.settings.navigation.navigateToGesturePreferences
-import com.fluxplayer.app.settings.navigation.navigateToFolderPreferencesScreen
+import com.fluxplayer.app.settings.navigation.navigateToAudiobookSettings
 import com.fluxplayer.app.settings.navigation.navigateToBackupSettings
+import com.fluxplayer.app.settings.navigation.navigateToDecoderPreferences
+import com.fluxplayer.app.settings.navigation.navigateToFolderPreferencesScreen
 import com.fluxplayer.app.settings.navigation.navigateToGeneralPreferences
-import com.fluxplayer.app.settings.navigation.navigateToLibraries
+import com.fluxplayer.app.settings.navigation.navigateToGesturePreferences
 import com.fluxplayer.app.settings.navigation.navigateToMediaLibraryPreferencesScreen
+import com.fluxplayer.app.settings.navigation.navigateToOpenListSettings
 import com.fluxplayer.app.settings.navigation.navigateToPlayerPreferences
 import com.fluxplayer.app.settings.navigation.navigateToSubtitlePreferences
 import com.fluxplayer.app.settings.navigation.navigateToThumbnailPreferencesScreen
-import com.fluxplayer.app.settings.navigation.navigateToOpenListSettings
 import com.fluxplayer.app.settings.navigation.navigateToWebDavSettings
 import com.fluxplayer.app.settings.navigation.openListSettingsScreen
 import com.fluxplayer.app.settings.navigation.playerPreferencesScreen
@@ -55,6 +56,7 @@ fun NavGraphBuilder.settingsNavGraph(
                     Setting.PLAYER -> navController.navigateToPlayerPreferences()
                     Setting.GESTURES -> navController.navigateToGesturePreferences()
                     Setting.DECODER -> navController.navigateToDecoderPreferences()
+                    Setting.AUDIOBOOK -> navController.navigateToAudiobookSettings()
                     Setting.AUDIO -> navController.navigateToAudioPreferences()
                     Setting.SUBTITLE -> navController.navigateToSubtitlePreferences()
                     Setting.WEBDAV -> navController.navigateToWebDavSettings()
@@ -76,6 +78,7 @@ fun NavGraphBuilder.settingsNavGraph(
         gesturePreferencesScreen(onNavigateUp = navController::navigateUp)
         decoderPreferencesScreen(onNavigateUp = navController::navigateUp)
         audioPreferencesScreen(onNavigateUp = navController::navigateUp)
+        audiobookSettingsScreen(onNavigateUp = navController::navigateUp)
         subtitlePreferencesScreen(onNavigateUp = navController::navigateUp)
         openListSettingsScreen(onNavigateUp = navController::navigateUp)
         webDavSettingsScreen(onNavigateUp = navController::navigateUp)

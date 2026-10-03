@@ -49,3 +49,6 @@ include(":core:ui")
 include(":feature:player")
 include(":feature:settings")
 include(":feature:videopicker")
+
+include(":core:tingshu")
+include(":feature:tingshu")

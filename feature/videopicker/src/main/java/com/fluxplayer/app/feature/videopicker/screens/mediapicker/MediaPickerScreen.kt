@@ -4,15 +4,14 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOutCubic
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -22,10 +21,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.defaultMinSize
@@ -49,11 +48,11 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -76,12 +75,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -94,16 +90,14 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.isGranted
-import com.google.accompanist.permissions.rememberPermissionState
-import com.google.accompanist.permissions.shouldShowRationale
 import com.fluxplayer.app.core.common.storagePermission
 import com.fluxplayer.app.core.media.services.MediaService
 import com.fluxplayer.app.core.model.ApplicationPreferences
+import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.model.Folder
 import com.fluxplayer.app.core.model.MediaLayoutMode
 import com.fluxplayer.app.core.model.MediaViewMode
+import com.fluxplayer.app.core.model.StartupPage
 import com.fluxplayer.app.core.model.Video
 import com.fluxplayer.app.core.model.WebDavServer
 import com.fluxplayer.app.core.ui.R
@@ -117,36 +111,27 @@ import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.extensions.copy
 import com.fluxplayer.app.core.ui.preview.DayNightPreview
 import com.fluxplayer.app.core.ui.preview.VideoPickerPreviewParameterProvider
-import com.fluxplayer.app.core.model.ComposeEngine
-import com.fluxplayer.app.core.model.StartupPage
+import com.fluxplayer.app.core.ui.theme.FluxHazeStyle
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.core.ui.theme.LocalHazeState
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import dev.chrisbanes.haze.hazeEffect
-import com.fluxplayer.app.core.ui.theme.FluxHazeStyle
-import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
-import top.yukonga.miuix.kmp.basic.NavigationBar as MiuixNavigationBar
-import top.yukonga.miuix.kmp.basic.NavigationBarItem as MiuixNavigationBarItem
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
 import com.fluxplayer.app.feature.videopicker.composables.CenterCircularProgressBar
-import com.fluxplayer.app.feature.videopicker.openlist.OpenListBrowserTabContent
-import com.fluxplayer.app.feature.videopicker.screens.history.HistoryTabContent
-import com.fluxplayer.app.feature.videopicker.screens.audiobook.AudiobookTabContent
-import com.fluxplayer.app.feature.videopicker.screens.mediapicker.BrowseTabs
-import com.fluxplayer.app.feature.videopicker.screens.webdav.WebDavBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.composables.MediaView
 import com.fluxplayer.app.feature.videopicker.composables.NoVideosFound
 import com.fluxplayer.app.feature.videopicker.composables.QuickSettingsDialog
 import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.hazeSource
 import com.fluxplayer.app.feature.videopicker.composables.TextIconToggleButton
 import com.fluxplayer.app.feature.videopicker.composables.VideoInfoDialog
+import com.fluxplayer.app.feature.videopicker.screens.audiobook.AudiobookTabContent
+import com.fluxplayer.app.feature.videopicker.screens.history.HistoryTabContent
 import com.fluxplayer.app.feature.videopicker.state.SelectedFolder
 import com.fluxplayer.app.feature.videopicker.state.SelectedVideo
+import com.fluxplayer.app.feature.videopicker.state.rememberSelectionManager
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
+import com.google.accompanist.permissions.shouldShowRationale
+import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -157,8 +142,10 @@ import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.fluxplayer.app.feature.videopicker.state.rememberSelectionManager
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeEffect
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 fun MediaPickerRoute(
@@ -192,7 +179,7 @@ fun MediaPickerRoute(
                     StartupPage.BROWSE -> if (1 in visibleTabs) 1 else visibleTabs.first()
                     StartupPage.HISTORY -> if (2 in visibleTabs) 2 else visibleTabs.first()
                     StartupPage.AUDIOBOOK -> if (3 in visibleTabs) 3 else visibleTabs.first()
-                }
+                },
         )
     }
 
@@ -275,628 +262,624 @@ internal fun MediaPickerScreen(
     // 听书详情页是否正在展示（用于隐藏外层顶栏）
     var audiobookInDetail by remember { mutableStateOf(false) }
 
-
-
-
     val selectedItemsSize = selectionManager.selectedFolders.size + selectionManager.selectedVideos.size
     val totalItemsSize = (uiState.mediaDataState as? DataState.Success)?.value?.run { folderList.size + mediaList.size } ?: 0
     val hazeState = remember { HazeState() }
     val useFloatingBottomBar = uiState.preferences.useFloatingBottomBar
-    val useLiquidGlass = useFloatingBottomBar
-        && uiState.preferences.useLiquidGlass
-        && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+    val useLiquidGlass = useFloatingBottomBar &&
+        uiState.preferences.useLiquidGlass &&
+        android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val backdrop = if (useLiquidGlass) rememberLayerBackdrop() else null
 
     CompositionLocalProvider(LocalHazeState provides hazeState) {
-    Box(modifier = Modifier.fillMaxSize()) {
-    Scaffold(
-        topBar = {
-            val isMiuix = FluxTheme.engine == ComposeEngine.MIUIX
-            if (selectedProvider != null && selectedTab == 1 && !selectionManager.isInSelectionMode) {
-                // 已进入 provider → 不显示 Scaffold 顶栏，由 TabContent 内部 ProviderTopBar 接管
-            } else if (audiobookInDetail && selectedTab == 3 && !selectionManager.isInSelectionMode) {
-                // 听书详情页 → 不显示 Scaffold 顶栏，由 AudiobookDetailContent 内部顶栏接管
-            } else if ((selectedTab == 1 || selectedTab == 2 || selectedTab == 3) && !selectionManager.isInSelectionMode) {
-                if (isMiuix) {
-                    MiuixSmallTopAppBar(
-                        title = when (selectedTab) {
-                            1 -> stringResource(R.string.browse)
-                            2 -> stringResource(R.string.history)
-                            else -> stringResource(R.string.audiobook)
-                        },
-                        actions = {
-                            IconButton(onClick = onSettingsClick) {
-                                Icon(
-                                    imageVector = NextIcons.Settings,
-                                    contentDescription = stringResource(id = R.string.settings),
-                                )
-                            }
-                        },
-                    )
-                } else {
-                    NextTopAppBar(
-                        title = when (selectedTab) {
-                            1 -> stringResource(R.string.browse)
-                            2 -> stringResource(R.string.history)
-                            else -> stringResource(R.string.audiobook)
-                        },
-                        fontWeight = FontWeight.Bold,
-                        navigationIcon = {},
-                        actions = {
-                            IconButton(onClick = onSettingsClick) {
-                                Icon(
-                                    imageVector = NextIcons.Settings,
-                                    contentDescription = stringResource(id = R.string.settings),
-                                )
-                            }
-                        },
-                    )
-                }
-            } else {
-                if (isMiuix) {
-                    // 视频列表页不启用顶栏模糊，避免透出后面的内容
-                    MiuixSmallTopAppBar(
-                        title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
-                        navigationIcon = {
-                            if (selectionManager.isInSelectionMode) {
-                                Row(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(MiuixTheme.colorScheme.surfaceVariant)
-                                        .clickable { selectionManager.exitSelectionMode() }
-                                        .padding(8.dp)
-                                        .padding(end = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = NextIcons.Close,
-                                        contentDescription = stringResource(id = R.string.navigate_up),
-                                    )
-                                    Text(
-                                        text = stringResource(R.string.m_n_selected, selectedItemsSize, totalItemsSize),
-                                        style = MiuixTheme.textStyles.body1,
-                                    )
-                                }
-                            } else if (uiState.folderName != null) {
-                                FilledTonalIconButton(onClick = onNavigateUp) {
-                                    Icon(
-                                        imageVector = NextIcons.ArrowBack,
-                                        contentDescription = stringResource(id = R.string.navigate_up),
-                                    )
-                                }
-                            }
-                        },
-                        actions = {
-                            if (selectionManager.isInSelectionMode) {
-                                FilledTonalIconButton(
-                                    onClick = {
-                                        if (selectedItemsSize != totalItemsSize) {
-                                            (uiState.mediaDataState as? DataState.Success)?.value?.let { folder ->
-                                                folder.folderList.forEach { selectionManager.selectFolder(it) }
-                                                folder.mediaList.forEach { selectionManager.selectVideo(it) }
-                                            }
-                                        } else {
-                                            selectionManager.clearSelection()
-                                        }
-                                    },
-                                ) {
-                                    Icon(
-                                        imageVector = if (selectedItemsSize != totalItemsSize) {
-                                            NextIcons.SelectAll
-                                        } else {
-                                            NextIcons.DeselectAll
-                                        },
-                                        contentDescription = if (selectedItemsSize != totalItemsSize) {
-                                            stringResource(R.string.select_all)
-                                        } else {
-                                            stringResource(R.string.deselect_all)
-                                        },
-                                    )
-                                }
-                            } else {
-                                IconButton(onClick = onSearchClick) {
-                                    Icon(
-                                        imageVector = NextIcons.Search,
-                                        contentDescription = stringResource(id = R.string.search),
-                                    )
-                                }
-                                IconButton(onClick = { showQuickSettingsDialog = true }) {
-                                    Icon(
-                                        imageVector = NextIcons.DashBoard,
-                                        contentDescription = stringResource(id = R.string.menu),
-                                    )
-                                }
-                                IconButton(onClick = onSettingsClick) {
-                                    Icon(
-                                        imageVector = NextIcons.Settings,
-                                        contentDescription = stringResource(id = R.string.settings),
-                                    )
-                                }
-                            }
-                        },
-                    )
-                } else {
-                    NextTopAppBar(
-                        title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
-                        fontWeight = FontWeight.Bold.takeIf { uiState.folderName == null },
-                        navigationIcon = {
-                            if (selectionManager.isInSelectionMode) {
-                                Row(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.secondaryContainer)
-                                        .clickable { selectionManager.exitSelectionMode() }
-                                        .padding(8.dp)
-                                        .padding(end = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = NextIcons.Close,
-                                        contentDescription = stringResource(id = R.string.navigate_up),
-                                    )
-                                    Text(
-                                        text = stringResource(R.string.m_n_selected, selectedItemsSize, totalItemsSize),
-                                        style = MaterialTheme.typography.labelLarge,
-                                    )
-                                }
-                            } else if (uiState.folderName != null) {
-                                FilledTonalIconButton(onClick = onNavigateUp) {
-                                    Icon(
-                                        imageVector = NextIcons.ArrowBack,
-                                        contentDescription = stringResource(id = R.string.navigate_up),
-                                    )
-                                }
-                            }
-                        },
-                        actions = {
-                            if (selectionManager.isInSelectionMode) {
-                                FilledTonalIconButton(
-                                    onClick = {
-                                        if (selectedItemsSize != totalItemsSize) {
-                                            (uiState.mediaDataState as? DataState.Success)?.value?.let { folder ->
-                                                folder.folderList.forEach { selectionManager.selectFolder(it) }
-                                                folder.mediaList.forEach { selectionManager.selectVideo(it) }
-                                            }
-                                        } else {
-                                            selectionManager.clearSelection()
-                                        }
-                                    },
-                                ) {
-                                    Icon(
-                                        imageVector = if (selectedItemsSize != totalItemsSize) {
-                                            NextIcons.SelectAll
-                                        } else {
-                                            NextIcons.DeselectAll
-                                        },
-                                        contentDescription = if (selectedItemsSize != totalItemsSize) {
-                                            stringResource(R.string.select_all)
-                                        } else {
-                                            stringResource(R.string.deselect_all)
-                                        },
-                                    )
-                                }
-                            } else {
-                                IconButton(onClick = onSearchClick) {
-                                    Icon(
-                                        imageVector = NextIcons.Search,
-                                        contentDescription = stringResource(id = R.string.search),
-                                    )
-                                }
-                                IconButton(onClick = { showQuickSettingsDialog = true }) {
-                                    Icon(
-                                        imageVector = NextIcons.DashBoard,
-                                        contentDescription = stringResource(id = R.string.menu),
-                                    )
-                                }
-                                IconButton(onClick = onSettingsClick) {
-                                    Icon(
-                                        imageVector = NextIcons.Settings,
-                                        contentDescription = stringResource(id = R.string.settings),
-                                    )
-                                }
-                            }
-                        },
-                    )
-                }
-            }
-        },
-        bottomBar = {
-            if (selectionManager.isInSelectionMode && selectionManager.allSelectedVideos.isNotEmpty()) {
-                SelectionActionsSheet(
-                    show = true,
-                    showRenameAction = selectionManager.isSingleVideoSelected,
-                    showInfoAction = selectionManager.isSingleVideoSelected,
-                    onPlayAction = {
-                        val videoUris = selectionManager.allSelectedVideos.map { it.uriString.toUri() }
-                        onPlayVideos(videoUris, videoUris.first(), false)
-                        selectionManager.clearSelection()
-                    },
-                    onRenameAction = {
-                        val selectedVideo = selectionManager.selectedVideos.firstOrNull() ?: return@SelectionActionsSheet
-                        val video = (uiState.mediaDataState as? DataState.Success)?.value?.mediaList
-                            ?.find { it.uriString == selectedVideo.uriString } ?: return@SelectionActionsSheet
-                        showRenameActionFor = video
-                    },
-                    onInfoAction = {
-                        val selectedVideo = selectionManager.selectedVideos.firstOrNull() ?: return@SelectionActionsSheet
-                        val video = (uiState.mediaDataState as? DataState.Success)?.value?.mediaList
-                            ?.find { it.uriString == selectedVideo.uriString } ?: return@SelectionActionsSheet
-                        showInfoActionFor = video
-                        selectionManager.clearSelection()
-                    },
-                    onShareAction = {
-                        onEvent(MediaPickerUiEvent.ShareVideos(selectionManager.allSelectedVideos.map { it.uriString }))
-                    },
-                    onDeleteAction = {
-                        if (MediaService.willSystemAsksForDeleteConfirmation()) {
-                            onEvent(MediaPickerUiEvent.DeleteVideos(selectionManager.allSelectedVideos.map { it.uriString }))
-                            selectionManager.clearSelection()
+        Box(modifier = Modifier.fillMaxSize()) {
+            Scaffold(
+                topBar = {
+                    val isMiuix = FluxTheme.engine == ComposeEngine.MIUIX
+                    if (selectedProvider != null && selectedTab == 1 && !selectionManager.isInSelectionMode) {
+                        // 已进入 provider → 不显示 Scaffold 顶栏，由 TabContent 内部 ProviderTopBar 接管
+                    } else if (audiobookInDetail && selectedTab == 3 && !selectionManager.isInSelectionMode) {
+                        // 听书详情页 → 不显示 Scaffold 顶栏，由 AudiobookDetailContent 内部顶栏接管
+                    } else if ((selectedTab == 1 || selectedTab == 2 || selectedTab == 3) && !selectionManager.isInSelectionMode) {
+                        if (isMiuix) {
+                            MiuixSmallTopAppBar(
+                                title = when (selectedTab) {
+                                    1 -> stringResource(R.string.browse)
+                                    2 -> stringResource(R.string.history)
+                                    else -> stringResource(R.string.audiobook)
+                                },
+                                actions = {
+                                    IconButton(onClick = onSettingsClick) {
+                                        Icon(
+                                            imageVector = NextIcons.Settings,
+                                            contentDescription = stringResource(id = R.string.settings),
+                                        )
+                                    }
+                                },
+                            )
                         } else {
-                            showDeleteVideosConfirmation = true
+                            NextTopAppBar(
+                                title = when (selectedTab) {
+                                    1 -> stringResource(R.string.browse)
+                                    2 -> stringResource(R.string.history)
+                                    else -> stringResource(R.string.audiobook)
+                                },
+                                fontWeight = FontWeight.Bold,
+                                navigationIcon = {},
+                                actions = {
+                                    IconButton(onClick = onSettingsClick) {
+                                        Icon(
+                                            imageVector = NextIcons.Settings,
+                                            contentDescription = stringResource(id = R.string.settings),
+                                        )
+                                    }
+                                },
+                            )
                         }
-                    },
-                )
-            } else if (!useFloatingBottomBar && !audiobookInDetail) {
-                // 标准 NavigationBar
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ) {
-                    if (0 in visibleTabs) {
-                        NavigationBarItem(
-                            selected = selectedTab == 0,
-                            onClick = { onTabSelected(0) },
+                    } else {
+                        if (isMiuix) {
+                            // 视频列表页不启用顶栏模糊，避免透出后面的内容
+                            MiuixSmallTopAppBar(
+                                title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
+                                navigationIcon = {
+                                    if (selectionManager.isInSelectionMode) {
+                                        Row(
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .background(MiuixTheme.colorScheme.surfaceVariant)
+                                                .clickable { selectionManager.exitSelectionMode() }
+                                                .padding(8.dp)
+                                                .padding(end = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Icon(
+                                                imageVector = NextIcons.Close,
+                                                contentDescription = stringResource(id = R.string.navigate_up),
+                                            )
+                                            Text(
+                                                text = stringResource(R.string.m_n_selected, selectedItemsSize, totalItemsSize),
+                                                style = MiuixTheme.textStyles.body1,
+                                            )
+                                        }
+                                    } else if (uiState.folderName != null) {
+                                        FilledTonalIconButton(onClick = onNavigateUp) {
+                                            Icon(
+                                                imageVector = NextIcons.ArrowBack,
+                                                contentDescription = stringResource(id = R.string.navigate_up),
+                                            )
+                                        }
+                                    }
+                                },
+                                actions = {
+                                    if (selectionManager.isInSelectionMode) {
+                                        FilledTonalIconButton(
+                                            onClick = {
+                                                if (selectedItemsSize != totalItemsSize) {
+                                                    (uiState.mediaDataState as? DataState.Success)?.value?.let { folder ->
+                                                        folder.folderList.forEach { selectionManager.selectFolder(it) }
+                                                        folder.mediaList.forEach { selectionManager.selectVideo(it) }
+                                                    }
+                                                } else {
+                                                    selectionManager.clearSelection()
+                                                }
+                                            },
+                                        ) {
+                                            Icon(
+                                                imageVector = if (selectedItemsSize != totalItemsSize) {
+                                                    NextIcons.SelectAll
+                                                } else {
+                                                    NextIcons.DeselectAll
+                                                },
+                                                contentDescription = if (selectedItemsSize != totalItemsSize) {
+                                                    stringResource(R.string.select_all)
+                                                } else {
+                                                    stringResource(R.string.deselect_all)
+                                                },
+                                            )
+                                        }
+                                    } else {
+                                        IconButton(onClick = onSearchClick) {
+                                            Icon(
+                                                imageVector = NextIcons.Search,
+                                                contentDescription = stringResource(id = R.string.search),
+                                            )
+                                        }
+                                        IconButton(onClick = { showQuickSettingsDialog = true }) {
+                                            Icon(
+                                                imageVector = NextIcons.DashBoard,
+                                                contentDescription = stringResource(id = R.string.menu),
+                                            )
+                                        }
+                                        IconButton(onClick = onSettingsClick) {
+                                            Icon(
+                                                imageVector = NextIcons.Settings,
+                                                contentDescription = stringResource(id = R.string.settings),
+                                            )
+                                        }
+                                    }
+                                },
+                            )
+                        } else {
+                            NextTopAppBar(
+                                title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
+                                fontWeight = FontWeight.Bold.takeIf { uiState.folderName == null },
+                                navigationIcon = {
+                                    if (selectionManager.isInSelectionMode) {
+                                        Row(
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                                                .clickable { selectionManager.exitSelectionMode() }
+                                                .padding(8.dp)
+                                                .padding(end = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Icon(
+                                                imageVector = NextIcons.Close,
+                                                contentDescription = stringResource(id = R.string.navigate_up),
+                                            )
+                                            Text(
+                                                text = stringResource(R.string.m_n_selected, selectedItemsSize, totalItemsSize),
+                                                style = MaterialTheme.typography.labelLarge,
+                                            )
+                                        }
+                                    } else if (uiState.folderName != null) {
+                                        FilledTonalIconButton(onClick = onNavigateUp) {
+                                            Icon(
+                                                imageVector = NextIcons.ArrowBack,
+                                                contentDescription = stringResource(id = R.string.navigate_up),
+                                            )
+                                        }
+                                    }
+                                },
+                                actions = {
+                                    if (selectionManager.isInSelectionMode) {
+                                        FilledTonalIconButton(
+                                            onClick = {
+                                                if (selectedItemsSize != totalItemsSize) {
+                                                    (uiState.mediaDataState as? DataState.Success)?.value?.let { folder ->
+                                                        folder.folderList.forEach { selectionManager.selectFolder(it) }
+                                                        folder.mediaList.forEach { selectionManager.selectVideo(it) }
+                                                    }
+                                                } else {
+                                                    selectionManager.clearSelection()
+                                                }
+                                            },
+                                        ) {
+                                            Icon(
+                                                imageVector = if (selectedItemsSize != totalItemsSize) {
+                                                    NextIcons.SelectAll
+                                                } else {
+                                                    NextIcons.DeselectAll
+                                                },
+                                                contentDescription = if (selectedItemsSize != totalItemsSize) {
+                                                    stringResource(R.string.select_all)
+                                                } else {
+                                                    stringResource(R.string.deselect_all)
+                                                },
+                                            )
+                                        }
+                                    } else {
+                                        IconButton(onClick = onSearchClick) {
+                                            Icon(
+                                                imageVector = NextIcons.Search,
+                                                contentDescription = stringResource(id = R.string.search),
+                                            )
+                                        }
+                                        IconButton(onClick = { showQuickSettingsDialog = true }) {
+                                            Icon(
+                                                imageVector = NextIcons.DashBoard,
+                                                contentDescription = stringResource(id = R.string.menu),
+                                            )
+                                        }
+                                        IconButton(onClick = onSettingsClick) {
+                                            Icon(
+                                                imageVector = NextIcons.Settings,
+                                                contentDescription = stringResource(id = R.string.settings),
+                                            )
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
+                },
+                bottomBar = {
+                    if (selectionManager.isInSelectionMode && selectionManager.allSelectedVideos.isNotEmpty()) {
+                        SelectionActionsSheet(
+                            show = true,
+                            showRenameAction = selectionManager.isSingleVideoSelected,
+                            showInfoAction = selectionManager.isSingleVideoSelected,
+                            onPlayAction = {
+                                val videoUris = selectionManager.allSelectedVideos.map { it.uriString.toUri() }
+                                onPlayVideos(videoUris, videoUris.first(), false)
+                                selectionManager.clearSelection()
+                            },
+                            onRenameAction = {
+                                val selectedVideo = selectionManager.selectedVideos.firstOrNull() ?: return@SelectionActionsSheet
+                                val video = (uiState.mediaDataState as? DataState.Success)?.value?.mediaList
+                                    ?.find { it.uriString == selectedVideo.uriString } ?: return@SelectionActionsSheet
+                                showRenameActionFor = video
+                            },
+                            onInfoAction = {
+                                val selectedVideo = selectionManager.selectedVideos.firstOrNull() ?: return@SelectionActionsSheet
+                                val video = (uiState.mediaDataState as? DataState.Success)?.value?.mediaList
+                                    ?.find { it.uriString == selectedVideo.uriString } ?: return@SelectionActionsSheet
+                                showInfoActionFor = video
+                                selectionManager.clearSelection()
+                            },
+                            onShareAction = {
+                                onEvent(MediaPickerUiEvent.ShareVideos(selectionManager.allSelectedVideos.map { it.uriString }))
+                            },
+                            onDeleteAction = {
+                                if (MediaService.willSystemAsksForDeleteConfirmation()) {
+                                    onEvent(MediaPickerUiEvent.DeleteVideos(selectionManager.allSelectedVideos.map { it.uriString }))
+                                    selectionManager.clearSelection()
+                                } else {
+                                    showDeleteVideosConfirmation = true
+                                }
+                            },
+                        )
+                    } else if (!useFloatingBottomBar && !audiobookInDetail) {
+                        // 标准 NavigationBar
+                        NavigationBar(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        ) {
+                            if (0 in visibleTabs) {
+                                NavigationBarItem(
+                                    selected = selectedTab == 0,
+                                    onClick = { onTabSelected(0) },
+                                    icon = {
+                                        Icon(
+                                            imageVector = NextIcons.Video,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    label = { Text(stringResource(R.string.videos)) },
+                                )
+                            }
+                            if (1 in visibleTabs) {
+                                NavigationBarItem(
+                                    selected = selectedTab == 1,
+                                    onClick = { onTabSelected(1) },
+                                    icon = {
+                                        Icon(
+                                            imageVector = NextIcons.Folder,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    label = { Text(stringResource(R.string.browse)) },
+                                )
+                            }
+                            if (2 in visibleTabs) {
+                                NavigationBarItem(
+                                    selected = selectedTab == 2,
+                                    onClick = { onTabSelected(2) },
+                                    icon = {
+                                        Icon(
+                                            imageVector = NextIcons.History,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    label = { Text(stringResource(R.string.history)) },
+                                )
+                            }
+                            if (3 in visibleTabs) {
+                                NavigationBarItem(
+                                    selected = selectedTab == 3,
+                                    onClick = { onTabSelected(3) },
+                                    icon = {
+                                        Icon(
+                                            imageVector = NextIcons.Audio,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    label = { Text(stringResource(R.string.audiobook)) },
+                                )
+                            }
+                        }
+                    }
+                },
+                floatingActionButton = {
+                    if (selectionManager.isInSelectionMode || selectedTab != 0) return@Scaffold
+
+                    FloatingActionButtonMenu(
+                        modifier = Modifier.padding(bottom = 80.dp),
+                        expanded = isFabExpanded,
+                        button = {
+                            ToggleFloatingActionButton(
+                                checked = isFabExpanded,
+                                onCheckedChange = { isFabExpanded = !isFabExpanded },
+                            ) {
+                                val icon by remember {
+                                    derivedStateOf {
+                                        if (checkedProgress > 0.5f) NextIcons.Close else NextIcons.Play
+                                    }
+                                }
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = stringResource(
+                                        if (isFabExpanded) R.string.close_menu else R.string.open_menu,
+                                    ),
+                                    modifier = Modifier.animateIcon(checkedProgress = { checkedProgress }),
+                                )
+                            }
+                        },
+                    ) {
+                        FloatingActionButtonMenuItem(
+                            onClick = {
+                                isFabExpanded = false
+                                showUrlDialog = true
+                            },
                             icon = {
                                 Icon(
-                                    imageVector = NextIcons.Video,
+                                    imageVector = NextIcons.Link,
                                     contentDescription = null,
                                 )
                             },
-                            label = { Text(stringResource(R.string.videos)) },
+                            text = {
+                                Text(text = stringResource(id = R.string.open_network_stream))
+                            },
                         )
-                    }
-                    if (1 in visibleTabs) {
-                        NavigationBarItem(
-                            selected = selectedTab == 1,
-                            onClick = { onTabSelected(1) },
+                        FloatingActionButtonMenuItem(
+                            onClick = {
+                                isFabExpanded = false
+                                selectVideoFileLauncher.launch("video/*")
+                            },
                             icon = {
                                 Icon(
-                                    imageVector = NextIcons.Folder,
+                                    imageVector = NextIcons.FileOpen,
                                     contentDescription = null,
                                 )
                             },
-                            label = { Text(stringResource(R.string.browse)) },
+                            text = {
+                                Text(text = stringResource(id = R.string.open_local_video))
+                            },
                         )
-                    }
-                    if (2 in visibleTabs) {
-                        NavigationBarItem(
-                            selected = selectedTab == 2,
-                            onClick = { onTabSelected(2) },
+                        FloatingActionButtonMenuItem(
+                            onClick = {
+                                isFabExpanded = false
+                                val folder = (uiState.mediaDataState as? DataState.Success)?.value ?: return@FloatingActionButtonMenuItem
+                                val videoToPlay = folder.recentlyPlayedVideo ?: folder.firstVideo ?: return@FloatingActionButtonMenuItem
+                                onPlayVideo(videoToPlay.uriString.toUri(), null)
+                            },
                             icon = {
                                 Icon(
                                     imageVector = NextIcons.History,
                                     contentDescription = null,
                                 )
                             },
-                            label = { Text(stringResource(R.string.history)) },
-                        )
-                    }
-                    if (3 in visibleTabs) {
-                        NavigationBarItem(
-                            selected = selectedTab == 3,
-                            onClick = { onTabSelected(3) },
-                            icon = {
-                                Icon(
-                                    imageVector = NextIcons.Audio,
-                                    contentDescription = null,
-                                )
+                            text = {
+                                Text(text = stringResource(id = R.string.recently_played))
                             },
-                            label = { Text(stringResource(R.string.audiobook)) },
-                        )
-                    }
-                }
-            }
-        },
-        floatingActionButton = {
-            if (selectionManager.isInSelectionMode || selectedTab != 0) return@Scaffold
-
-            FloatingActionButtonMenu(
-                modifier = Modifier.padding(bottom = 80.dp),
-                expanded = isFabExpanded,
-                button = {
-                    ToggleFloatingActionButton(
-                        checked = isFabExpanded,
-                        onCheckedChange = { isFabExpanded = !isFabExpanded },
-                    ) {
-                        val icon by remember {
-                            derivedStateOf {
-                                if (checkedProgress > 0.5f) NextIcons.Close else NextIcons.Play
-                            }
-                        }
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = stringResource(
-                                if (isFabExpanded) R.string.close_menu else R.string.open_menu
-                            ),
-                            modifier = Modifier.animateIcon(checkedProgress = { checkedProgress }),
                         )
                     }
                 },
-            ) {
-                FloatingActionButtonMenuItem(
-                    onClick = {
-                        isFabExpanded = false
-                        showUrlDialog = true
-                    },
-                    icon = {
-                        Icon(
-                            imageVector = NextIcons.Link,
-                            contentDescription = null,
-                        )
-                    },
-                    text = {
-                        Text(text = stringResource(id = R.string.open_network_stream))
-                    },
-                )
-                FloatingActionButtonMenuItem(
-                    onClick = {
-                        isFabExpanded = false
-                        selectVideoFileLauncher.launch("video/*")
-                    },
-                    icon = {
-                        Icon(
-                            imageVector = NextIcons.FileOpen,
-                            contentDescription = null,
-                        )
-                    },
-                    text = {
-                        Text(text = stringResource(id = R.string.open_local_video))
-                    },
-                )
-                FloatingActionButtonMenuItem(
-                    onClick = {
-                        isFabExpanded = false
-                        val folder = (uiState.mediaDataState as? DataState.Success)?.value ?: return@FloatingActionButtonMenuItem
-                        val videoToPlay = folder.recentlyPlayedVideo ?: folder.firstVideo ?: return@FloatingActionButtonMenuItem
-                        onPlayVideo(videoToPlay.uriString.toUri(), null)
-                    },
-                    icon = {
-                        Icon(
-                            imageVector = NextIcons.History,
-                            contentDescription = null,
-                        )
-                    },
-                    text = {
-                        Text(text = stringResource(id = R.string.recently_played))
-                    },
-                )
-
-            }
-        },
-        containerColor = if (FluxTheme.engine == ComposeEngine.MIUIX) {
-            MiuixTheme.colorScheme.surface
-        } else {
-            MaterialTheme.colorScheme.surfaceContainer
-        },
-    ) { scaffoldPadding ->
-        val contentPadding = if (useFloatingBottomBar) {
-            PaddingValues(top = scaffoldPadding.calculateTopPadding())
-        } else {
-            scaffoldPadding
-        }
-        // 为每个 Tab 提供独立的可保存状态：切 Tab 时滚动位置等 rememberSaveable 状态不再丢失
-        val tabStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
-        Crossfade(
-            targetState = selectedTab,
-            modifier = Modifier.fillMaxSize(),
-            animationSpec = tween(280, easing = EaseOutCubic),
-            label = "TabTransition",
-        ) { tab ->
-            tabStateHolder.SaveableStateProvider(key = "picker_tab_$tab") {
-            when (tab) {
-                0 -> {
-                    when (uiState.mediaDataState) {
-                        is DataState.Error -> {
-                        }
-
-                        is DataState.Loading -> {
-                            CenterCircularProgressBar(modifier = Modifier.padding(contentPadding))
-                        }
-
-                        is DataState.Success -> {
-                            val successFolder = uiState.mediaDataState.value
-                            // Quick cards at root level (outside PullToRefreshBox, fixed header)
-                            if (uiState.folderName == null && successFolder != null &&
-                                !(successFolder.folderList.isEmpty() && successFolder.mediaList.isEmpty())
-                            ) {
-                                QuickCardsRow(
-                                    folderCount = successFolder.folderList.size,
-                                    videoCount = successFolder.mediaList.size,
-                                    onWebDavClick = onWebDavClick,
-                                )
-                            }
-                            PullToRefreshBox(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(top = contentPadding.calculateTopPadding())
-                                    .padding(start = contentPadding.calculateStartPadding(LocalLayoutDirection.current))
-                                    .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                                    .background(MaterialTheme.colorScheme.background),
-                                isRefreshing = uiState.refreshing,
-                                onRefresh = { onEvent(MediaPickerUiEvent.Refresh) },
-                            ) {
-                                val updatedScaffoldPadding = contentPadding.copy(top = 0.dp, start = 0.dp)
-                                PermissionMissingView(
-                                    isGranted = permissionState.status.isGranted,
-                                    showRationale = permissionState.status.shouldShowRationale,
-                                    permission = permissionState.permission,
-                                    launchPermissionRequest = { permissionState.launchPermissionRequest() },
-                                ) {
-                                    val rootFolder = uiState.mediaDataState.value
-                                    if (rootFolder == null || rootFolder.folderList.isEmpty() && rootFolder.mediaList.isEmpty()) {
-                                        NoVideosFound(contentPadding = updatedScaffoldPadding)
-                                        return@PermissionMissingView
+                containerColor = if (FluxTheme.engine == ComposeEngine.MIUIX) {
+                    MiuixTheme.colorScheme.surface
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainer
+                },
+            ) { scaffoldPadding ->
+                val contentPadding = if (useFloatingBottomBar) {
+                    PaddingValues(top = scaffoldPadding.calculateTopPadding())
+                } else {
+                    scaffoldPadding
+                }
+                // 为每个 Tab 提供独立的可保存状态：切 Tab 时滚动位置等 rememberSaveable 状态不再丢失
+                val tabStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+                Crossfade(
+                    targetState = selectedTab,
+                    modifier = Modifier.fillMaxSize(),
+                    animationSpec = tween(280, easing = EaseOutCubic),
+                    label = "TabTransition",
+                ) { tab ->
+                    tabStateHolder.SaveableStateProvider(key = "picker_tab_$tab") {
+                        when (tab) {
+                            0 -> {
+                                when (uiState.mediaDataState) {
+                                    is DataState.Error -> {
                                     }
 
-                                    MediaView(
-                                        rootFolder = rootFolder,
-                                        preferences = uiState.preferences,
-                                        playedUriSet = uiState.playedUriSet,
-                                        onFolderClick = onFolderClick,
-                                        onVideoClick = { onPlayVideo(it, null) },
-                                        selectionManager = selectionManager,
-                                        lazyGridState = lazyGridState,
-                                        contentPadding = updatedScaffoldPadding,
-                                        onVideoLoaded = { onEvent(MediaPickerUiEvent.AddToSync(it)) },
-                                    )
+                                    is DataState.Loading -> {
+                                        CenterCircularProgressBar(modifier = Modifier.padding(contentPadding))
+                                    }
+
+                                    is DataState.Success -> {
+                                        val successFolder = uiState.mediaDataState.value
+                                        // Quick cards at root level (outside PullToRefreshBox, fixed header)
+                                        if (uiState.folderName == null && successFolder != null &&
+                                            !(successFolder.folderList.isEmpty() && successFolder.mediaList.isEmpty())
+                                        ) {
+                                            QuickCardsRow(
+                                                folderCount = successFolder.folderList.size,
+                                                videoCount = successFolder.mediaList.size,
+                                                onWebDavClick = onWebDavClick,
+                                            )
+                                        }
+                                        PullToRefreshBox(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(top = contentPadding.calculateTopPadding())
+                                                .padding(start = contentPadding.calculateStartPadding(LocalLayoutDirection.current))
+                                                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                                                .background(MaterialTheme.colorScheme.background),
+                                            isRefreshing = uiState.refreshing,
+                                            onRefresh = { onEvent(MediaPickerUiEvent.Refresh) },
+                                        ) {
+                                            val updatedScaffoldPadding = contentPadding.copy(top = 0.dp, start = 0.dp)
+                                            PermissionMissingView(
+                                                isGranted = permissionState.status.isGranted,
+                                                showRationale = permissionState.status.shouldShowRationale,
+                                                permission = permissionState.permission,
+                                                launchPermissionRequest = { permissionState.launchPermissionRequest() },
+                                            ) {
+                                                val rootFolder = uiState.mediaDataState.value
+                                                if (rootFolder == null || rootFolder.folderList.isEmpty() && rootFolder.mediaList.isEmpty()) {
+                                                    NoVideosFound(contentPadding = updatedScaffoldPadding)
+                                                    return@PermissionMissingView
+                                                }
+
+                                                MediaView(
+                                                    rootFolder = rootFolder,
+                                                    preferences = uiState.preferences,
+                                                    playedUriSet = uiState.playedUriSet,
+                                                    onFolderClick = onFolderClick,
+                                                    onVideoClick = { onPlayVideo(it, null) },
+                                                    selectionManager = selectionManager,
+                                                    lazyGridState = lazyGridState,
+                                                    contentPadding = updatedScaffoldPadding,
+                                                    onVideoLoaded = { onEvent(MediaPickerUiEvent.AddToSync(it)) },
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
+                            }
+
+                            1 -> {
+                                BrowseTabs(
+                                    onPlayVideo = onPlayVideo,
+                                    onPlayVideos = onPlayVideos,
+                                    onSettingsClick = onSettingsClick,
+                                    selectedProvider = selectedProvider,
+                                    onProviderSelected = { selectedProvider = it },
+                                    onProviderLogoutChanged = { providerLogout = it },
+                                    preferences = uiState.preferences,
+                                    onProviderReordered = { onEvent(MediaPickerUiEvent.ReorderProviders(it)) },
+                                    navigateToDirParam = navigateToDirParam,
+                                    onNavigateToDirConsumed = { navigateToDirParam = null },
+                                    webDavServers = activeWebDavServers,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(contentPadding),
+                                )
+                            }
+
+                            2 -> {
+                                HistoryTabContent(
+                                    onPlayVideo = onPlayVideo,
+                                    onPlayVideos = onPlayVideos,
+                                    onNavigateToCloudDir = { providerId, fileId, label ->
+                                        onTabSelected(1) // 切换到"浏览"Tab
+                                        selectedProvider = providerId
+                                        navigateToDirParam = fileId to label
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(contentPadding),
+                                )
+                            }
+
+                            3 -> {
+                                AudiobookTabContent(
+                                    onBookClick = {},
+                                    onPlayChapter = onPlayAudioChapter,
+                                    onShowingDetailChanged = { audiobookInDetail = it },
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(contentPadding),
+                                )
                             }
                         }
                     }
                 }
-
-                1 -> {
-                    BrowseTabs(
-                        onPlayVideo = onPlayVideo,
-                        onPlayVideos = onPlayVideos,
-                        onSettingsClick = onSettingsClick,
-                        selectedProvider = selectedProvider,
-                        onProviderSelected = { selectedProvider = it },
-                        onProviderLogoutChanged = { providerLogout = it },
-                        preferences = uiState.preferences,
-                        onProviderReordered = { onEvent(MediaPickerUiEvent.ReorderProviders(it)) },
-                        navigateToDirParam = navigateToDirParam,
-                        onNavigateToDirConsumed = { navigateToDirParam = null },
-                        webDavServers = activeWebDavServers,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(contentPadding),
-                    )
-                }
-
-                2 -> {
-                    HistoryTabContent(
-                        onPlayVideo = onPlayVideo,
-                        onPlayVideos = onPlayVideos,
-                        onNavigateToCloudDir = { providerId, fileId, label ->
-                            onTabSelected(1) // 切换到"浏览"Tab
-                            selectedProvider = providerId
-                            navigateToDirParam = fileId to label
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(contentPadding),
-                    )
-                }
-
-                3 -> {
-                    AudiobookTabContent(
-                        onBookClick = {},
-                        onPlayChapter = onPlayAudioChapter,
-                        onShowingDetailChanged = { audiobookInDetail = it },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(contentPadding),
-                    )
-                }
             }
+
+            // Floating bar overlay
+            if (useFloatingBottomBar && !selectionManager.isInSelectionMode && !audiobookInDetail) {
+                Box(
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                ) {
+                    FloatingBottomBar(
+                        selectedTab = selectedTab,
+                        onTabSelected = onTabSelected,
+                        backdrop = backdrop,
+                        hazeState = hazeState,
+                        visibleTabs = visibleTabs,
+                    )
+                }
             }
         }
-    }
 
-        // Floating bar overlay
-        if (useFloatingBottomBar && !selectionManager.isInSelectionMode && !audiobookInDetail) {
-            Box(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-            ) {
-                FloatingBottomBar(
-                    selectedTab = selectedTab,
-                    onTabSelected = onTabSelected,
-                    backdrop = backdrop,
-                    hazeState = hazeState,
-                    visibleTabs = visibleTabs,
-                )
+        LaunchedEffect(lazyGridState.isScrollInProgress) {
+            if (isFabExpanded && lazyGridState.isScrollInProgress) {
+                isFabExpanded = false
             }
         }
-    }
 
-    LaunchedEffect(lazyGridState.isScrollInProgress) {
-        if (isFabExpanded && lazyGridState.isScrollInProgress) {
+        LaunchedEffect(selectionManager.isInSelectionMode) {
+            if (selectionManager.isInSelectionMode) {
+                isFabExpanded = false
+            }
+        }
+
+        BackHandler(enabled = isFabExpanded) {
             isFabExpanded = false
         }
-    }
 
-    LaunchedEffect(selectionManager.isInSelectionMode) {
-        if (selectionManager.isInSelectionMode) {
-            isFabExpanded = false
+        BackHandler(enabled = selectionManager.isInSelectionMode) {
+            selectionManager.exitSelectionMode()
         }
-    }
 
-    BackHandler(enabled = isFabExpanded) {
-        isFabExpanded = false
-    }
+        if (showQuickSettingsDialog) {
+            QuickSettingsDialog(
+                applicationPreferences = uiState.preferences,
+                onDismiss = { showQuickSettingsDialog = false },
+                updatePreferences = { onEvent(MediaPickerUiEvent.UpdateMenu(it)) },
+            )
+        }
 
-    BackHandler(enabled = selectionManager.isInSelectionMode) {
-        selectionManager.exitSelectionMode()
-    }
+        if (showUrlDialog) {
+            NetworkUrlDialog(
+                onDismiss = { showUrlDialog = false },
+                onDone = { onPlayVideo(it.toUri(), null) },
+            )
+        }
 
-    if (showQuickSettingsDialog) {
-        QuickSettingsDialog(
-            applicationPreferences = uiState.preferences,
-            onDismiss = { showQuickSettingsDialog = false },
-            updatePreferences = { onEvent(MediaPickerUiEvent.UpdateMenu(it)) },
-        )
-    }
+        showRenameActionFor?.let { video ->
+            RenameDialog(
+                name = video.displayName,
+                onDismiss = { showRenameActionFor = null },
+                onDone = {
+                    onEvent(MediaPickerUiEvent.RenameVideo(video.uriString.toUri(), it))
+                    showRenameActionFor = null
+                    selectionManager.clearSelection()
+                },
+            )
+        }
 
-    if (showUrlDialog) {
-        NetworkUrlDialog(
-            onDismiss = { showUrlDialog = false },
-            onDone = { onPlayVideo(it.toUri(), null) },
-        )
-    }
+        showInfoActionFor?.let { video ->
+            VideoInfoDialog(
+                video = video,
+                onDismiss = { showInfoActionFor = null },
+            )
+        }
 
-    showRenameActionFor?.let { video ->
-        RenameDialog(
-            name = video.displayName,
-            onDismiss = { showRenameActionFor = null },
-            onDone = {
-                onEvent(MediaPickerUiEvent.RenameVideo(video.uriString.toUri(), it))
-                showRenameActionFor = null
-                selectionManager.clearSelection()
-            },
-        )
-    }
+        if (showLogoutConfirmation) {
+            LogoutConfirmationDialog(
+                onConfirm = {
+                    providerLogout?.invoke()
+                    showLogoutConfirmation = false
+                },
+                onCancel = { showLogoutConfirmation = false },
+            )
+        }
 
-    showInfoActionFor?.let { video ->
-        VideoInfoDialog(
-            video = video,
-            onDismiss = { showInfoActionFor = null },
-        )
-    }
-
-    if (showLogoutConfirmation) {
-        LogoutConfirmationDialog(
-            onConfirm = {
-                providerLogout?.invoke()
-                showLogoutConfirmation = false
-            },
-            onCancel = { showLogoutConfirmation = false },
-        )
-    }
-
-    if (showDeleteVideosConfirmation) {
-        DeleteConfirmationDialog(
-            selectedVideos = selectionManager.selectedVideos,
-            selectedFolders = selectionManager.selectedFolders,
-            onConfirm = {
-                onEvent(MediaPickerUiEvent.DeleteVideos(selectionManager.allSelectedVideos.map { it.uriString }))
-                selectionManager.clearSelection()
-                showDeleteVideosConfirmation = false
-            },
-            onCancel = { showDeleteVideosConfirmation = false },
-        )
-    }
+        if (showDeleteVideosConfirmation) {
+            DeleteConfirmationDialog(
+                selectedVideos = selectionManager.selectedVideos,
+                selectedFolders = selectionManager.selectedFolders,
+                onConfirm = {
+                    onEvent(MediaPickerUiEvent.DeleteVideos(selectionManager.allSelectedVideos.map { it.uriString }))
+                    selectionManager.clearSelection()
+                    showDeleteVideosConfirmation = false
+                },
+                onCancel = { showDeleteVideosConfirmation = false },
+            )
+        }
     } // CompositionLocalProvider
 }
 

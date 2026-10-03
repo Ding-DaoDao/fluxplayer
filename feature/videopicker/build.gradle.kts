@@ -34,6 +34,10 @@ kotlin {
 
 dependencies {
 
+    implementation(project(":feature:tingshu"))
+    implementation(project(":feature:player"))
+    implementation(project(":core:tingshu"))
+    implementation(libs.androidx.lifecycle.viewModelCompose)
     implementation(project(":core:ui"))
     implementation(project(":core:common"))
     implementation(project(":core:data"))

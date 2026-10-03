@@ -34,6 +34,8 @@ kotlin {
 dependencies {
 
     implementation(project(":core:ui"))
+    implementation(project(":feature:tingshu"))
+    implementation(libs.androidx.activity.compose)
     implementation(project(":core:data"))
     implementation(project(":core:datastore"))
     implementation(project(":core:domain"))

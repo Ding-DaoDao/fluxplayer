@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.PixelCopy
 import android.view.SurfaceView
 import android.view.WindowManager
@@ -22,7 +23,6 @@ import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
 import androidx.activity.viewModels
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -40,26 +40,25 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import com.google.common.util.concurrent.ListenableFuture
-import dagger.hilt.android.AndroidEntryPoint
 import com.fluxplayer.app.core.common.extensions.getMediaContentUri
-import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
-import com.fluxplayer.app.feature.player.extensions.registerForSuspendActivityResult
-import com.fluxplayer.app.feature.player.extensions.setExtras
-import com.fluxplayer.app.feature.player.extensions.uriToSubtitleConfiguration
-import com.fluxplayer.app.feature.player.service.PlayerService
-import com.fluxplayer.app.feature.player.service.addSubtitleTrack
-import com.fluxplayer.app.feature.player.service.PlayerFrameCapture
-import com.fluxplayer.app.feature.player.service.stopPlayerSession
-import com.fluxplayer.app.feature.player.utils.PlayerApi
+import com.fluxplayer.app.core.common.sortedByNaturalName
 import com.fluxplayer.app.core.data.extractor.ThumbnailExtractor
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.AccentPreset
 import com.fluxplayer.app.core.model.ComposeEngine
 import com.fluxplayer.app.core.model.ThemeConfig
 import com.fluxplayer.app.core.model.ThemeStyle
-import com.fluxplayer.app.core.model.VideoSource
-import android.util.Log
+import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
+import com.fluxplayer.app.feature.player.extensions.registerForSuspendActivityResult
+import com.fluxplayer.app.feature.player.extensions.setExtras
+import com.fluxplayer.app.feature.player.extensions.uriToSubtitleConfiguration
+import com.fluxplayer.app.feature.player.service.PlayerFrameCapture
+import com.fluxplayer.app.feature.player.service.PlayerService
+import com.fluxplayer.app.feature.player.service.addSubtitleTrack
+import com.fluxplayer.app.feature.player.service.stopPlayerSession
+import com.fluxplayer.app.feature.player.utils.PlayerApi
+import com.google.common.util.concurrent.ListenableFuture
+import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.Dispatchers
@@ -67,7 +66,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
-import com.fluxplayer.app.core.common.sortedByNaturalName
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
@@ -151,7 +149,7 @@ class PlayerActivity : ComponentActivity() {
             LifecycleStartEffect(Unit) {
                 maybeInitControllerFuture()
                 val job = lifecycleScope.launch {
-                    player = controllerFuture?.await()
+                    player = awaitController()
                 }
                 // 取消未完成的协程，避免多次 start/stop 累积多个 await 协程；
                 // 不设 player = null，保留引用避免 Crossfade 销毁 MediaPlayerScreen
@@ -228,38 +226,38 @@ class PlayerActivity : ComponentActivity() {
                                             }
                                         }
                                     },
-                                onSaveResume = { providedIndex, pos, dur ->
-                                    lifecycleScope.launch {
-                                        val bkPath = bookPath
-                                        // 使用路径反查章节索引，currentMediaItemIndex 在切集过渡期可能为 -1
-                                        val chapterIdx = resolveChapterIndex(providedIndex)
-                                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                                            preferencesRepository.updateApplicationPreferences { p ->
-                                                var map = p.audiobookResumeState.toMutableMap()
-                                                map[bkPath] = "$chapterIdx|$pos"
-                                                var pg = p.audiobookChapterProgress.toMutableMap()
-                                                pg["$bkPath|$chapterIdx"] = "$pos|$dur"
-                                                p.copy(
-                                                    audiobookResumeState = map,
-                                                    audiobookChapterProgress = pg,
-                                                    audiobookLastPlayedAt = p.audiobookLastPlayedAt +
-                                                        (bkPath to System.currentTimeMillis()),
-                                                )
+                                    onSaveResume = { providedIndex, pos, dur ->
+                                        lifecycleScope.launch {
+                                            val bkPath = bookPath
+                                            // 使用路径反查章节索引，currentMediaItemIndex 在切集过渡期可能为 -1
+                                            val chapterIdx = resolveChapterIndex(providedIndex)
+                                            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                                                preferencesRepository.updateApplicationPreferences { p ->
+                                                    var map = p.audiobookResumeState.toMutableMap()
+                                                    map[bkPath] = "$chapterIdx|$pos"
+                                                    var pg = p.audiobookChapterProgress.toMutableMap()
+                                                    pg["$bkPath|$chapterIdx"] = "$pos|$dur"
+                                                    p.copy(
+                                                        audiobookResumeState = map,
+                                                        audiobookChapterProgress = pg,
+                                                        audiobookLastPlayedAt = p.audiobookLastPlayedAt +
+                                                            (bkPath to System.currentTimeMillis()),
+                                                    )
+                                                }
                                             }
                                         }
-                                    }
-                                },
-                                onBackClick = { exitPlayerKeepPlaying() },
-                                onSpeedChanged = { speed ->
-                                    lifecycleScope.launch {
-                                        preferencesRepository.updateApplicationPreferences { p ->
-                                            p.copy(audiobookPlaybackSpeed = speed)
+                                    },
+                                    onBackClick = { exitPlayerKeepPlaying() },
+                                    onSpeedChanged = { speed ->
+                                        lifecycleScope.launch {
+                                            preferencesRepository.updateApplicationPreferences { p ->
+                                                p.copy(audiobookPlaybackSpeed = speed)
+                                            }
                                         }
-                                    }
-                                },
-                            )
+                                    },
+                                )
+                            }
                         }
-                    }
                     }
                 } else {
                     // 视频页保持深色观影体系（黑底），但跟随用户的主题色与引擎设置，
@@ -311,7 +309,8 @@ class PlayerActivity : ComponentActivity() {
                                     ) ?: return@launch
                                     try {
                                         contentResolver.takePersistableUriPermission(
-                                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                            uri,
+                                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
                                         )
                                     } catch (e: SecurityException) {
                                         Log.w("PlayerActivity", "URI does not support persistable permission", e)
@@ -340,7 +339,7 @@ class PlayerActivity : ComponentActivity() {
             // maybeInitControllerFuture 在首次启动时创建 future，恢复时 no-op
             maybeInitControllerFuture()
             // await 在首次启动时等待连接，恢复时 future 已完成立即返回
-            mediaController = controllerFuture?.await()
+            mediaController = awaitController()
 
             mediaController?.run {
                 updateKeepScreenOnFlag()
@@ -379,6 +378,23 @@ class PlayerActivity : ComponentActivity() {
         super.onStop()
     }
 
+    private suspend fun awaitController(): MediaController? {
+        return try {
+            controllerFuture?.await()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.e("PlayerActivity", "播放器连接失败", error)
+            controllerFuture?.let(MediaController::releaseFuture)
+            controllerFuture = null
+            if (!isFinishing) {
+                android.widget.Toast.makeText(this, "播放器连接失败，请重新打开章节", android.widget.Toast.LENGTH_LONG).show()
+                finish()
+            }
+            null
+        }
+    }
+
     private fun maybeInitControllerFuture() {
         if (controllerFuture == null) {
             val sessionToken = SessionToken(applicationContext, ComponentName(applicationContext, PlayerService::class.java))
@@ -392,6 +408,16 @@ class PlayerActivity : ComponentActivity() {
         val returningFromBackground = !isIntentNew && mediaController?.currentMediaItem != null
         val isNewUriTheCurrentMediaItem = mediaController?.currentMediaItem?.localConfiguration?.uri.toString() == uri.toString()
 
+        if (intent.getBooleanExtra("reopen_audiobook", false) && (isNewUriTheCurrentMediaItem || mediaController?.currentMediaItem?.mediaId == uri.path)) {
+            // 首页只打开当前播放页，不改变暂停状态，也不重新装载章节。
+            mediaController?.let { controller ->
+                val items = List(controller.mediaItemCount) { controller.getMediaItemAt(it) }
+                audioBookChapterPaths = items.map { it.mediaId }
+                viewModel.audioChapterNames = items.map { it.mediaMetadata.title?.toString().orEmpty() }
+                viewModel.audioChapterCount = items.size
+            }
+            return
+        }
         if (returningFromBackground || isNewUriTheCurrentMediaItem) {
             // 从后台恢复：媒体源已准备完毕，直接恢复播放即可。
             // 不调用 prepare() —— 云盘下载直链有时效性，re-prepare 可能因 URL 过期而失败。
@@ -434,7 +460,10 @@ class PlayerActivity : ComponentActivity() {
                                 val itemTitle = if (index == startIdx) (title ?: file.nameWithoutExtension) else file.nameWithoutExtension
                                 setTitle(itemTitle)
                                 // 书名放 artist/albumTitle，锁屏大字显示章节名、副行显示书名
-                                bookName?.let { setArtist(it); setAlbumTitle(it) }
+                                bookName?.let {
+                                    setArtist(it)
+                                    setAlbumTitle(it)
+                                }
                                 coverArtworkUri?.let { setArtworkUri(it) }
                             }.build(),
                         )
@@ -477,66 +506,66 @@ class PlayerActivity : ComponentActivity() {
 
         // 视频模式：withContext(Default) 处理 MediaStore 查询 + 目录扫描
         withContext(Dispatchers.Default) {
-        val mediaContentUri = getMediaContentUri(uri)
-        val playlist = playerApi.getPlaylist().takeIf { it.isNotEmpty() }
-            ?: mediaContentUri?.let { mediaUri ->
-                viewModel.getPlaylistFromUri(mediaUri)
-                    .map { it.uriString }
-                    .toMutableList()
-                    .apply {
-                        if (!contains(mediaUri.toString())) {
-                            add(index = 0, element = mediaUri.toString())
+            val mediaContentUri = getMediaContentUri(uri)
+            val playlist = playerApi.getPlaylist().takeIf { it.isNotEmpty() }
+                ?: mediaContentUri?.let { mediaUri ->
+                    viewModel.getPlaylistFromUri(mediaUri)
+                        .map { it.uriString }
+                        .toMutableList()
+                        .apply {
+                            if (!contains(mediaUri.toString())) {
+                                add(index = 0, element = mediaUri.toString())
+                            }
                         }
-                    }
-            } ?: listOf(uri.toString())
+                } ?: listOf(uri.toString())
 
-        // 计算播放列表父目录，用于片头片尾持久化（同目录所有剧集共享）
-        viewModel.resolveParentDirFromPlaylist(playlist)
+            // 计算播放列表父目录，用于片头片尾持久化（同目录所有剧集共享）
+            viewModel.resolveParentDirFromPlaylist(playlist)
 
-        val mediaItemIndexToPlay = playlist.indexOfFirst {
-            it == (mediaContentUri ?: uri).toString()
-        }.takeIf { it >= 0 } ?: 0
-        val defaultTitle = playerApi.title
-        val mediaItems = playlist.mapIndexed { index, uriString ->
-            MediaItem.Builder().apply {
-                val itemUri = Uri.parse(uriString)
-                setUri(itemUri)
-                setMediaId(uriString)
-                val isCurrentItem = index == mediaItemIndexToPlay
-                setMediaMetadata(
-                    MediaMetadata.Builder().apply {
-                        setTitle(
-                            when {
-                                isCurrentItem && !playerApi.title.isNullOrEmpty() -> playerApi.title
-                                isCurrentItem -> playerApi.title
-                                else -> defaultTitle
-                            },
-                        )
-                        if (isCurrentItem) {
-                            setExtras(positionMs = playerApi.position?.toLong())
+            val mediaItemIndexToPlay = playlist.indexOfFirst {
+                it == (mediaContentUri ?: uri).toString()
+            }.takeIf { it >= 0 } ?: 0
+            val defaultTitle = playerApi.title
+            val mediaItems = playlist.mapIndexed { index, uriString ->
+                MediaItem.Builder().apply {
+                    val itemUri = Uri.parse(uriString)
+                    setUri(itemUri)
+                    setMediaId(uriString)
+                    val isCurrentItem = index == mediaItemIndexToPlay
+                    setMediaMetadata(
+                        MediaMetadata.Builder().apply {
+                            setTitle(
+                                when {
+                                    isCurrentItem && !playerApi.title.isNullOrEmpty() -> playerApi.title
+                                    isCurrentItem -> playerApi.title
+                                    else -> defaultTitle
+                                },
+                            )
+                            if (isCurrentItem) {
+                                setExtras(positionMs = playerApi.position?.toLong())
+                            }
+                        }.build(),
+                    )
+                    if (isCurrentItem) {
+                        val apiSubs = playerApi.getSubs().map { subtitle ->
+                            uriToSubtitleConfiguration(
+                                uri = subtitle.uri,
+                                subtitleEncoding = playerPreferences?.subtitleTextEncoding ?: "",
+                                isSelected = subtitle.isSelected,
+                            )
                         }
-                    }.build(),
-                )
-                if (isCurrentItem) {
-                    val apiSubs = playerApi.getSubs().map { subtitle ->
-                        uriToSubtitleConfiguration(
-                            uri = subtitle.uri,
-                            subtitleEncoding = playerPreferences?.subtitleTextEncoding ?: "",
-                            isSelected = subtitle.isSelected,
-                        )
+                        setSubtitleConfigurations(apiSubs)
                     }
-                    setSubtitleConfigurations(apiSubs)
-                }
-            }.build()
-        }
-
-        withContext(Dispatchers.Main) {
-            mediaController?.run {
-                setMediaItems(mediaItems, mediaItemIndexToPlay, playerApi.position?.toLong() ?: C.TIME_UNSET)
-                playWhenReady = viewModel.playWhenReady
-                prepare()
+                }.build()
             }
-        }
+
+            withContext(Dispatchers.Main) {
+                mediaController?.run {
+                    setMediaItems(mediaItems, mediaItemIndexToPlay, playerApi.position?.toLong() ?: C.TIME_UNSET)
+                    playWhenReady = viewModel.playWhenReady
+                    prepare()
+                }
+            }
         } // end withContext(Dispatchers.Default)
     } // end playVideo
 
@@ -615,6 +644,14 @@ class PlayerActivity : ComponentActivity() {
         // 保存当前正在播放的媒体 URI，以便息屏/旋转重建后恢复
         // intent.data 由 onMediaItemTransition 回调实时更新为当前集的 URI
         intent.data?.toString()?.let { outState.putString("current_media_uri", it) }
+    }
+
+    override fun onDestroy() {
+        mediaController?.removeListener(playbackStateListener)
+        controllerFuture?.let(MediaController::releaseFuture)
+        controllerFuture = null
+        mediaController = null
+        super.onDestroy()
     }
 
     private fun updateKeepScreenOnFlag() {
@@ -710,7 +747,8 @@ class PlayerActivity : ComponentActivity() {
                     val bitmap = Bitmap.createBitmap(thumbW, thumbH, Bitmap.Config.ARGB_8888)
                     val copyResult = suspendCancellableCoroutine { cont ->
                         PixelCopy.request(
-                            sv, bitmap,
+                            sv,
+                            bitmap,
                             { result -> cont.resume(result) {} },
                             Handler(Looper.getMainLooper()),
                         )
@@ -786,7 +824,6 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", "wma", "opus")
-
 
         private fun scanAudioFiles(dir: File?): List<File> {
             if (dir == null || !dir.isDirectory) return emptyList()

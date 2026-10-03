@@ -54,9 +54,6 @@ data class ApplicationPreferences(
     // 听书倍速（独立于视频播放的全局倍速设置）
     val audiobookPlaybackSpeed: Float = 1.0f,
 
-    // 听书收藏的书籍（文件夹路径）
-    val audiobookFavorites: Set<String> = emptySet(),
-
     // 听书最近播放时间 (key=书籍文件夹路径, value=epochMillis)，用于书架排序
     val audiobookLastPlayedAt: Map<String, Long> = emptyMap(),
 

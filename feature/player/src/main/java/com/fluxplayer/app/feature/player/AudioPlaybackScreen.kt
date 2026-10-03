@@ -1,8 +1,8 @@
 package com.fluxplayer.app.feature.player
 
 import android.net.Uri
-import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -33,28 +32,21 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.AccessTime
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -63,20 +55,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -84,22 +74,17 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.media3.common.Player
 import coil3.compose.AsyncImage
-import com.fluxplayer.app.core.model.FluxMessageEvent
+import com.fluxplayer.app.core.ui.R as coreUiR
 import com.fluxplayer.app.core.ui.components.ChapterDragScrollbar
 import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
 import com.fluxplayer.app.core.ui.components.FluxNotificationState
+import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.service.AudioSleepTimer
 import com.fluxplayer.app.feature.player.state.rememberMediaPresentationState
 import com.fluxplayer.app.feature.player.state.rememberMetadataState
-import com.fluxplayer.app.core.ui.R as coreUiR
-import com.fluxplayer.app.core.ui.theme.FluxTheme
-import com.fluxplayer.app.feature.player.R
-import androidx.compose.ui.res.stringResource
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // region ── 播放器主题颜色（如 FluxTheme.colorScheme 获取，自动适配 MD3 / MIUIX 双引擎） ──
 // 播放器始终使用暗色模式（NextPlayerTheme(darkTheme = true)），但具体暗色值由引擎决定
@@ -162,12 +147,42 @@ fun AudioPlaybackScreen(
     onSaveResume: (Int, Long, Long) -> Unit = { _, _, _ -> },
     onSpeedChanged: (Float) -> Unit = {},
     chapterProgress: Map<Int, Pair<Long, Long>> = emptyMap(),
+    currentChapterIndex: Int? = null,
+    onSelectChapter: ((Int) -> Unit)? = null,
+    sleepState: AudioSleepTimer.State? = null,
+    onSleepChange: ((Int, Int) -> Unit)? = null,
+    coverModel: Any? = null,
+    loading: Boolean = false,
+    playbackError: String? = null,
+    onRetry: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val view = LocalView.current
+    val lightBackground = FluxTheme.colorScheme.background.luminance() > 0.5f
+    SideEffect {
+        val activity = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<android.app.Activity>().firstOrNull()
+        activity?.let {
+            androidx.core.view.WindowCompat.getInsetsController(it.window, view).apply {
+                isAppearanceLightStatusBars = lightBackground
+                isAppearanceLightNavigationBars = lightBackground
+            }
+        }
+    }
     val metadataState = rememberMetadataState(player)
     val mediaState = rememberMediaPresentationState(player)
 
-    val title = metadataState.title ?: ""
+    val title = metadataState.title ?: chapterNames.getOrNull(currentChapterIndex ?: 0).orEmpty()
+    val selectedIndex = currentChapterIndex ?: player.currentMediaItemIndex.coerceAtLeast(0)
+    fun selectChapter(index: Int) {
+        if (index !in chapterNames.indices) return
+        if (onSelectChapter != null) {
+            onSelectChapter(index)
+        } else {
+            player.seekToDefaultPosition(index)
+            player.playWhenReady = true
+        }
+    }
 
     val artworkUri: Uri? = coverArtworkUri
         ?: player.currentMediaItem?.mediaMetadata?.artworkUri
@@ -183,14 +198,26 @@ fun AudioPlaybackScreen(
     LaunchedEffect(player.playbackParameters) { currentSpeed = player.playbackParameters.speed }
 
     // ── 定时关闭（状态由 AudioSleepTimer 单例持有、Service 驱动倒计时，Activity 重建不丢） ──
-    val sleepTimerState by AudioSleepTimer.state.collectAsState()
+    val localSleepState by AudioSleepTimer.state.collectAsState()
+    val sleepTimerState = sleepState ?: localSleepState
     val sleepRemaining = sleepTimerState.remainingSeconds
     val sleepEpisodes = sleepTimerState.remainingEpisodes
+    fun changeSleep(seconds: Int = 0, episodes: Int = 0) {
+        if (onSleepChange != null) {
+            onSleepChange(seconds, episodes)
+        } else {
+            when {
+                episodes > 0 -> AudioSleepTimer.startEpisodes(episodes, selectedIndex)
+                seconds > 0 -> AudioSleepTimer.startMinutes(seconds)
+                else -> AudioSleepTimer.cancel()
+            }
+        }
+    }
     var showSleepSheet by remember { mutableStateOf(false) }
-    var sleepModeMinutes by remember { mutableStateOf(true) }  // 定时弹窗：true=按分钟，false=按集数
-    var sleepHourIdx by remember { mutableIntStateOf(0) }  // 定时弹窗：小时滚轮索引
-    var sleepMinIdx by remember { mutableIntStateOf(0) }  // 定时弹窗：分钟滚轮索引
-    var sleepEpisodeIdx by remember { mutableIntStateOf(0) }  // 定时弹窗：集数滚轮索引
+    var sleepModeMinutes by remember { mutableStateOf(true) } // 定时弹窗：true=按分钟，false=按集数
+    var sleepHourIdx by remember { mutableIntStateOf(0) } // 定时弹窗：小时滚轮索引
+    var sleepMinIdx by remember { mutableIntStateOf(0) } // 定时弹窗：分钟滚轮索引
+    var sleepEpisodeIdx by remember { mutableIntStateOf(0) } // 定时弹窗：集数滚轮索引
     LaunchedEffect(showSleepSheet) {
         if (showSleepSheet) {
             // 打开弹窗时回显：按当前激活状态设置模式与滚轮位置
@@ -216,7 +243,8 @@ fun AudioPlaybackScreen(
     // ── 定时保存播放进度（本地进度每 5 秒刷新，落盘节流到每 20 秒） ──
     // 落盘写的是全量 preferences map，高频写放大明显；切章与退出另有即时保存兜底
     var localProgress by remember { mutableStateOf(chapterProgress) }
-    LaunchedEffect(mediaState.isPlaying) {
+    LaunchedEffect(mediaState.isPlaying, currentChapterIndex) {
+        if (onSelectChapter != null) return@LaunchedEffect
         if (!mediaState.isPlaying) return@LaunchedEffect
         var tick = 0
         while (true) {
@@ -240,12 +268,15 @@ fun AudioPlaybackScreen(
         }
     }
 
+    LaunchedEffect(chapterProgress) { localProgress = chapterProgress }
+
     // ── 切章时立即保存上一章进度 ──
     // 心跳保存每 5 秒一次，快速连点下一章时上一章进度会丢；自然播完的章节记为已播完
     DisposableEffect(player, chapterPaths) {
         var lastIndex = player.currentMediaItemIndex
         val listener = object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                if (onSelectChapter != null) return
                 val prevIndex = lastIndex
                 lastIndex = player.currentMediaItemIndex
                 if (prevIndex == player.currentMediaItemIndex) return
@@ -365,7 +396,8 @@ fun AudioPlaybackScreen(
     // 鈹€鈹€ 閫熷害鑿滃崟 鈹€鈹€
 
     // ── 片头跳过（设置变化 / 切集 / 恢复播放时重新应用，保证设置即时生效） ──
-    LaunchedEffect(introSkipSeconds, mediaState.isPlaying, player.currentMediaItemIndex) {
+    LaunchedEffect(introSkipSeconds, mediaState.isPlaying, selectedIndex) {
+        if (onSelectChapter != null) return@LaunchedEffect
         if (mediaState.isPlaying && introSkipSeconds > 0) {
             delay(400) // 如 ExoPlayer 缓冲就绪（含续播 seek 完成）
             // 当前已在片头之后（续播/拖拽等场景）则不跳
@@ -377,6 +409,7 @@ fun AudioPlaybackScreen(
 
     // ── 片尾跳过（设置变化立即生效；轮询在单协程内，避免每秒重建 effect） ──
     LaunchedEffect(outroSkipSeconds, player) {
+        if (onSelectChapter != null) return@LaunchedEffect
         if (outroSkipSeconds <= 0) return@LaunchedEffect
         // armed：当前章是否允许触发跳过。续播时若直接落在片尾区内，
         // 先回到片尾区起点重听该段，而不是一打开就跳下一章
@@ -397,7 +430,7 @@ fun AudioPlaybackScreen(
                     }
                 }
                 if (armed && player.isPlaying && position >= threshold && position > 0) {
-                    player.seekToNext()
+                    selectChapter(selectedIndex + 1)
                     armed = false
                 }
             }
@@ -540,7 +573,7 @@ fun AudioPlaybackScreen(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
                         .clickable {
-                            AudioSleepTimer.startEpisodes(1, player.currentMediaItemIndex)
+                            changeSleep(episodes = 1)
                             showSleepSheet = false
                         }
                         .padding(vertical = 8.dp),
@@ -566,7 +599,7 @@ fun AudioPlaybackScreen(
                                 "2小时" -> 7200
                                 else -> 10800
                             }
-                            AudioSleepTimer.startMinutes(seconds)
+                            changeSleep(seconds = seconds)
                             sleepHourIdx = seconds / 3600
                             sleepMinIdx = (seconds % 3600) / 60
                         },
@@ -587,7 +620,7 @@ fun AudioPlaybackScreen(
                                 else -> 10
                             }
                             sleepEpisodeIdx = episodes
-                            AudioSleepTimer.startEpisodes(episodes, player.currentMediaItemIndex)
+                            changeSleep(episodes = episodes)
                         },
                     )
                 }
@@ -633,7 +666,7 @@ fun AudioPlaybackScreen(
                             value = sleepHourIdx.toFloat(),
                             onValueChange = { sleepHourIdx = it.toInt() },
                             onValueChangeFinished = {
-                                AudioSleepTimer.startMinutes(sleepHourIdx * 3600 + sleepMinIdx * 60)
+                                changeSleep(seconds = sleepHourIdx * 3600 + sleepMinIdx * 60)
                             },
                             valueRange = 0f..23f,
                             steps = 22,
@@ -647,7 +680,7 @@ fun AudioPlaybackScreen(
                             value = sleepMinIdx.toFloat(),
                             onValueChange = { sleepMinIdx = it.toInt() },
                             onValueChangeFinished = {
-                                AudioSleepTimer.startMinutes(sleepHourIdx * 3600 + sleepMinIdx * 60)
+                                changeSleep(seconds = sleepHourIdx * 3600 + sleepMinIdx * 60)
                             },
                             valueRange = 0f..59f,
                             steps = 58,
@@ -675,9 +708,9 @@ fun AudioPlaybackScreen(
                             onValueChange = { sleepEpisodeIdx = it.toInt() },
                             onValueChangeFinished = {
                                 if (sleepEpisodeIdx > 0) {
-                                    AudioSleepTimer.startEpisodes(sleepEpisodeIdx, player.currentMediaItemIndex)
+                                    changeSleep(episodes = sleepEpisodeIdx)
                                 } else {
-                                    AudioSleepTimer.cancel()
+                                    changeSleep()
                                 }
                             },
                             valueRange = 0f..10f,
@@ -702,7 +735,7 @@ fun AudioPlaybackScreen(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
-                                AudioSleepTimer.cancel()
+                                changeSleep()
                                 showSleepSheet = false
                             }
                             .padding(vertical = 8.dp),
@@ -720,7 +753,7 @@ fun AudioPlaybackScreen(
             localProgress.filterValues { (pos, dur) -> dur > 0 && pos > 0 }.keys
         }
         val playlistScope = rememberCoroutineScope()
-        val playlistCurrentIndex = player.currentMediaItemIndex.coerceAtLeast(0)
+        val playlistCurrentIndex = selectedIndex
 
         // 打开弹窗自动滚动定位到当前播放集（等全屏展开动画进入尾声再滚，避免动画+跳转叠加掉帧）
         LaunchedEffect(showPlaylistSheet) {
@@ -760,17 +793,18 @@ fun AudioPlaybackScreen(
                         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
                     ) {
                         itemsIndexed(chapterNames) { index, name ->
-                            val isActive = index == player.currentMediaItemIndex
+                            val isActive = index == selectedIndex
                             val progress = localProgress[index]
                             val progressText = if (progress != null && progress.second > 0) {
                                 val pct = (progress.first * 100 / progress.second).coerceIn(0, 100)
                                 stringResource(R.string.audio_played_percent, pct)
-                            } else null
+                            } else {
+                                null
+                            }
 
                             Surface(
                                 onClick = {
-                                    player.seekToDefaultPosition(index)
-                                    player.playWhenReady = true
+                                    selectChapter(index)
                                     showPlaylistSheet = false
                                 },
                                 modifier = Modifier
@@ -880,7 +914,7 @@ fun AudioPlaybackScreen(
             .background(playerBg()),
     ) {
         // 当前章节索引
-        val currentIndex = player.currentMediaItemIndex.coerceAtLeast(0)
+        val currentIndex = selectedIndex
         val chapterTitle = chapterNames.getOrElse(currentIndex) { "" }
         val hasChapters = chapterNames.isNotEmpty()
         // 书名和章节名相同时只显示一次，避免重复
@@ -890,6 +924,7 @@ fun AudioPlaybackScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.statusBars)
+                .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(horizontal = 24.dp),
         ) {
             TopBar(onBackClick = onBackClick)
@@ -898,7 +933,7 @@ fun AudioPlaybackScreen(
 
             // ── 封面（缩如 + 加强阴影，形成悬浮感如 ──
             AlbumCover(
-                artworkUri = artworkUri,
+                artworkUri = coverModel ?: artworkUri,
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
 
@@ -970,7 +1005,10 @@ fun AudioPlaybackScreen(
             AudioSeekbar(
                 position = displayPosition,
                 duration = mediaState.duration.toFloat(),
-                onSeek = { scrubPosition = it; isScrubbing = true },
+                onSeek = {
+                    scrubPosition = it
+                    isScrubbing = true
+                },
                 onSeekFinished = {
                     player.seekTo(scrubPosition.toLong())
                     isScrubbing = false
@@ -980,12 +1018,12 @@ fun AudioPlaybackScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             // ── 控制条（最底部） ──
-            TransportRow(player = player, isPlaying = mediaState.isPlaying)
+            TransportRow(player = player, isPlaying = mediaState.isPlaying, currentIndex = selectedIndex, chapterCount = chapterNames.size, onSelectChapter = ::selectChapter)
 
             Spacer(modifier = Modifier.height(32.dp))
         }
 
-        if (mediaState.isBuffering) {
+        if (mediaState.isBuffering || loading) {
             CircularProgressIndicator(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -995,6 +1033,14 @@ fun AudioPlaybackScreen(
             )
         }
 
+        if (playbackError != null) {
+            Surface(modifier = Modifier.align(Alignment.BottomCenter).padding(20.dp), shape = RoundedCornerShape(16.dp), color = playerSurfaceContainer()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(playbackError, color = FluxTheme.colorScheme.error)
+                    androidx.compose.material3.TextButton(onClick = onRetry) { Text("重试本章") }
+                }
+            }
+        }
         FluxNotificationBanner(
             event = notificationState.currentEvent,
             onDismiss = { notificationState.dismiss() },
@@ -1056,6 +1102,7 @@ private fun SheetHeader(
         }
     }
 }
+
 @Composable
 private fun SleepModeTab(
     text: String,
@@ -1080,6 +1127,7 @@ private fun SleepModeTab(
         )
     }
 }
+
 @Composable
 private fun CircleNavButton(
     text: String,
@@ -1103,6 +1151,7 @@ private fun CircleNavButton(
         }
     }
 }
+
 @Composable
 private fun CompactSlider(
     value: Float,
@@ -1291,7 +1340,7 @@ private fun TopBar(onBackClick: () -> Unit) {
 }
 
 @Composable
-private fun AlbumCover(artworkUri: Uri?, modifier: Modifier = Modifier) {
+private fun AlbumCover(artworkUri: Any?, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxWidth(0.72f)
@@ -1333,7 +1382,6 @@ private fun InfoTag(text: String) {
         )
     }
 }
-
 
 @Composable
 private fun AudioSeekbar(
@@ -1429,7 +1477,7 @@ private fun AudioSeekbar(
 }
 
 @Composable
-private fun TransportRow(player: Player, isPlaying: Boolean) {
+private fun TransportRow(player: Player, isPlaying: Boolean, currentIndex: Int, chapterCount: Int, onSelectChapter: (Int) -> Unit) {
     val playPauseState = androidx.media3.ui.compose.state.rememberPlayPauseButtonState(player)
     val onSurface = FluxTheme.colorScheme.onSurface
     val primary = FluxTheme.colorScheme.primary
@@ -1453,9 +1501,11 @@ private fun TransportRow(player: Player, isPlaying: Boolean) {
 
         // 上一集（对齐小梨 ic_player_seek_to_previous）
         IconButton(onClick = {
-            val idx = player.currentMediaItemIndex
-            if (idx > 0) player.seekToDefaultPosition(idx - 1)
-            else player.seekTo(0)
+            if (currentIndex > 0) {
+                onSelectChapter(currentIndex - 1)
+            } else {
+                player.seekTo(0)
+            }
         }) {
             Icon(
                 painter = painterResource(R.drawable.ic_player_seek_to_previous),
@@ -1476,8 +1526,11 @@ private fun TransportRow(player: Player, isPlaying: Boolean) {
             ) {
                 Icon(
                     painter = painterResource(
-                        if (playPauseState.showPlay) R.drawable.ic_player_play
-                        else R.drawable.ic_player_pause,
+                        if (playPauseState.showPlay) {
+                            R.drawable.ic_player_play
+                        } else {
+                            R.drawable.ic_player_pause
+                        },
                     ),
                     contentDescription = if (playPauseState.showPlay) {
                         stringResource(R.string.audio_play)
@@ -1492,8 +1545,7 @@ private fun TransportRow(player: Player, isPlaying: Boolean) {
 
         // 下一集（对齐小梨 ic_player_seek_to_next）
         IconButton(onClick = {
-            val idx = player.currentMediaItemIndex
-            if (idx < player.mediaItemCount - 1) player.seekToDefaultPosition(idx + 1)
+            if (currentIndex < chapterCount - 1) onSelectChapter(currentIndex + 1)
         }) {
             Icon(
                 painter = painterResource(R.drawable.ic_player_seek_to_next),
@@ -1505,7 +1557,7 @@ private fun TransportRow(player: Player, isPlaying: Boolean) {
 
         // 快进（对齐小梨 ic_player_forward）
         IconButton(onClick = {
-            player.seekTo((player.currentPosition + 10_000L).coerceAtMost(player.duration))
+            player.seekTo((player.currentPosition + 10_000L).coerceAtMost(player.duration.coerceAtLeast(0)))
         }) {
             Icon(
                 painter = painterResource(R.drawable.ic_player_forward),
@@ -1529,8 +1581,10 @@ private fun BottomFunctionRow(
     val sleepLabel = if (sleepRemaining > 0) {
         val mins = sleepRemaining / 60
         val secs = sleepRemaining % 60
-        "${mins}:%02d".format(secs)
-    } else stringResource(R.string.audio_sleep_label)
+        "$mins:%02d".format(secs)
+    } else {
+        stringResource(R.string.audio_sleep_label)
+    }
     val onSurfaceAlpha = FluxTheme.colorScheme.onSurface.copy(alpha = 0.8f)
 
     // 4 功能按钮：定时 | 跳过头尾 | 倍速 | 目录

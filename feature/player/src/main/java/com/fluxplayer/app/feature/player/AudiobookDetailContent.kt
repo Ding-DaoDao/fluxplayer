@@ -1,4 +1,4 @@
-package com.fluxplayer.app.feature.videopicker.screens.audiobook
+package com.fluxplayer.app.feature.player
 
 import android.app.Activity
 import android.graphics.Bitmap
@@ -12,11 +12,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -29,16 +27,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -62,8 +56,8 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -81,12 +75,12 @@ import coil3.compose.AsyncImage
 import coil3.imageLoader
 import coil3.request.ImageRequest
 import coil3.toBitmap
-import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.R as coreUiR
 import com.fluxplayer.app.core.ui.components.ChapterDragScrollbar
+import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
-import com.fluxplayer.app.feature.videopicker.model.AudioBook
-import com.fluxplayer.app.feature.videopicker.model.AudioChapter
+import com.fluxplayer.app.feature.player.model.AudioBook
+import com.fluxplayer.app.feature.player.model.AudioChapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -96,9 +90,11 @@ import kotlinx.coroutines.withContext
 /** 封面初始尺寸 */
 private val CoverInitW = 120.dp
 private val CoverInitH = 160.dp
+
 /** 封面收起后尺寸 */
 private val CoverCollapsedW = 48.dp
 private val CoverCollapsedH = 64.dp
+
 /** 收起动画作用的滚动距离 */
 private val CollapseRangeDp = 240.dp
 
@@ -110,8 +106,8 @@ fun AudiobookDetailContent(
     resumeChapterIndex: Int? = null,
     resumePositionMs: Long = 0L,
     chapterProgress: Map<Int, Pair<Long, Long>> = emptyMap(),
-    isFavorite: Boolean = false,
-    onToggleFavorite: () -> Unit = {},
+    coverModel: Any? = book.coverUri,
+    intro: String = "",
     modifier: Modifier = Modifier,
 ) {
     var reversed by remember { mutableStateOf(false) }
@@ -124,21 +120,25 @@ fun AudiobookDetailContent(
     val context = LocalContext.current
     val imageLoader = context.imageLoader
     var paletteColor by remember { mutableStateOf<Color?>(null) }
-    LaunchedEffect(book.coverUri) {
-        val coverUri = book.coverUri ?: return@LaunchedEffect
+    LaunchedEffect(coverModel) {
+        val coverUri = coverModel ?: return@LaunchedEffect
         val bitmap = withContext(Dispatchers.IO) {
             try {
                 val result = imageLoader.execute(
-                    ImageRequest.Builder(context).data(coverUri).size(128, 128).build(),
+                    if (coverUri is ImageRequest) coverUri else ImageRequest.Builder(context).data(coverUri).size(128, 128).build(),
                 )
                 result.image?.toBitmap()
-            } catch (_: Exception) { null }
+            } catch (_: Exception) {
+                null
+            }
         }
         bitmap?.let { bmp ->
             val safeBmp = if (bmp.config == Bitmap.Config.HARDWARE) {
                 bmp.copy(Bitmap.Config.ARGB_8888, false)
-            } else bmp
-            val palette = Palette.from(safeBmp).generate()
+            } else {
+                bmp
+            }
+            val palette = Palette.from(safeBmp ?: return@let).generate()
             val dominant = palette.getDominantColor(0)
             if (dominant != 0) {
                 paletteColor = Color(dominant)
@@ -162,6 +162,7 @@ fun AudiobookDetailContent(
             if (progress != null && progress.second > 0 && progress.first > 0) index else null
         }.toSet()
     }
+
     /** 滚动收起进度 0=完全展开 / 1=完全收起 */
     val collapseFraction by remember {
         derivedStateOf {
@@ -179,9 +180,11 @@ fun AudiobookDetailContent(
     val view = LocalView.current
     SideEffect {
         if (!view.isInEditMode) {
-            val window = (view.context as Activity).window
+            val activity = generateSequence(view.context) { (it as? android.content.ContextWrapper)?.baseContext }
+                .filterIsInstance<Activity>().firstOrNull() ?: return@SideEffect
+            val window = activity.window
             window.statusBarColor = Color.Transparent.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = collapseFraction > 0.5f
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = fluxColors.background.luminance() > 0.5f
         }
     }
 
@@ -216,23 +219,14 @@ fun AudiobookDetailContent(
     // 顶栏纯透明悬浮（无背景色块/分隔线），内容自然从下方滚过；
     // 图标/书名：封面区域（透明背景）白色 → 目录区（浅色内容上）深色，与背景同步过渡
     val topBarIconTint by animateColorAsState(
-        targetValue = if (collapseFraction > 0.35f) fluxColors.onSurface else Color.White,
+        targetValue = fluxColors.onSurface,
         animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
         label = "topBarIcon",
     )
     val topBarTitleColor by animateColorAsState(
-        targetValue = if (collapseFraction > 0.35f) fluxColors.onSurface else Color.White,
+        targetValue = fluxColors.onSurface,
         animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
         label = "topBarTitleColor",
-    )
-
-    // ── 收藏按钮点击微交互 ──
-    val favInteractionSource = remember { MutableInteractionSource() }
-    val isFavPressed by favInteractionSource.collectIsPressedAsState()
-    val favScale by animateFloatAsState(
-        targetValue = if (isFavPressed) 0.75f else 1f,
-        animationSpec = spring(stiffness = 400f, dampingRatio = 0.5f),
-        label = "favScale",
     )
 
     Box(
@@ -241,9 +235,9 @@ fun AudiobookDetailContent(
             .background(fluxColors.background),
     ) {
         // ── 模糊封面背景层 ──
-        if (book.coverUri != null) {
+        if (coverModel != null) {
             AsyncImage(
-                model = book.coverUri,
+                model = coverModel,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -294,9 +288,9 @@ fun AudiobookDetailContent(
                             .graphicsLayer { shadowElevation = 16f },
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (book.coverUri != null) {
+                        if (coverModel != null) {
                             AsyncImage(
-                                model = book.coverUri,
+                                model = coverModel,
                                 contentDescription = book.title,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize(),
@@ -387,7 +381,7 @@ fun AudiobookDetailContent(
                                 )
                                 Text(
                                     text = if (hasResume && resumeChapter != null) {
-                                        "第 ${resumeChapterNum} 集 · ${resumeChapter.title}"
+                                        "第 $resumeChapterNum 集 · ${resumeChapter.title}"
                                     } else {
                                         "${book.chapterCount} 集 · 从头开始"
                                     },
@@ -452,9 +446,14 @@ fun AudiobookDetailContent(
             }
 
             // ── Items 2+: 章节列表 ──
+            if (intro.isNotBlank()) {
+                item(key = "intro") {
+                    Text(intro, color = fluxColors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp), maxLines = 6)
+                }
+            }
             itemsIndexed(
                 items = chapters,
-                key = { _, ch -> ch.uri.toString() },
+                key = { index, ch -> "$index:${ch.uri}" },
             ) { _, chapter ->
                 val realIndex = book.chapters.indexOf(chapter) + 1
                 val chapIdx = realIndex - 1
@@ -591,8 +590,8 @@ fun AudiobookDetailContent(
         }
 
         // ── 右侧可拖拽滚动条：拖动 thumb 快速定位章节 ──
-        // LazyColumn 含 header + catalog 两个固定 item，章节从索引 2 开始
-        val listItemOffset = 2
+        // 简介占用独立条目，滚动条定位时需要计入偏移。
+        val listItemOffset = if (intro.isBlank()) 2 else 3
         ChapterDragScrollbar(
             listState = listState,
             totalCount = chapters.size + listItemOffset,
@@ -639,21 +638,6 @@ fun AudiobookDetailContent(
                     .padding(horizontal = 14.dp, vertical = 6.dp),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
-
-            // 右侧收藏（带点击微交互）
-            IconButton(
-                onClick = onToggleFavorite,
-                modifier = Modifier.graphicsLayer {
-                    scaleX = favScale
-                    scaleY = favScale
-                },
-            ) {
-                Icon(
-                    imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                    contentDescription = "收藏",
-                    tint = if (isFavorite) fluxColors.primary else topBarIconTint,
-                )
-            }
         }
     }
 }

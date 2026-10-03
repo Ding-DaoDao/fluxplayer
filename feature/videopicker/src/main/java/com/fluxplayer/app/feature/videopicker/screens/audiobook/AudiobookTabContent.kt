@@ -1,13 +1,7 @@
 package com.fluxplayer.app.feature.videopicker.screens.audiobook
 
-import android.content.Intent
 import android.net.Uri
-import android.util.Log
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.clickable
+import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,14 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.annotation.OptIn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -39,30 +26,28 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import coil3.compose.AsyncImage
-import coil3.request.ImageRequest
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
+import com.fluxplayer.app.feature.player.AudiobookBookCard
+import com.fluxplayer.app.feature.player.AudiobookDetailContent
+import com.fluxplayer.app.feature.tingshu.TingshuSourceContent
+import com.fluxplayer.app.feature.tingshu.TingshuViewModel
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AudiobookTabContent(
     viewModel: AudiobookViewModel = hiltViewModel(),
@@ -71,31 +56,84 @@ fun AudiobookTabContent(
     onShowingDetailChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val sourceViewModel: TingshuViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val sources by sourceViewModel.repository.sources.collectAsStateWithLifecycle()
+    val localState by viewModel.uiState.collectAsStateWithLifecycle()
+    var destination by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var showingDetail by remember { mutableStateOf(false) }
+    var recentLocalBook by remember { mutableStateOf<AudioBook?>(null) }
+    val detailChanged: (Boolean) -> Unit = {
+        showingDetail = it
+        onShowingDetailChanged(it)
+    }
+    androidx.activity.compose.BackHandler(destination != null && !showingDetail) { destination = null }
+    LaunchedEffect(destination) { if (destination == null) detailChanged(false) }
+    if (destination == null) {
+        com.fluxplayer.app.feature.tingshu.ListeningLibraryHome(
+            sources = sources,
+            localBookCount = (localState.scanState as? DataState.Success)?.value?.size ?: localState.partialBooks.size,
+            hasLocalPath = localState.rootUri != null,
+            onLocalClick = {
+                recentLocalBook = null
+                destination = "local"
+            },
+            localBooks = (localState.scanState as? DataState.Success)?.value ?: localState.partialBooks,
+            localResume = localState.resumeStates,
+            localChapterProgress = localState.chapterProgress,
+            localLastPlayedAt = localState.lastPlayedAt,
+            onLocalRecentClick = { book ->
+                recentLocalBook = book
+                destination = "local"
+            },
+            onSourceClick = { source ->
+                sourceViewModel.open(source)
+                destination = source.id
+            },
+            onRecentClick = { key ->
+                sourceViewModel.openSavedBook(key)
+                destination = "recent"
+            },
+            modifier = modifier,
+        )
+    } else {
+        Column(modifier.fillMaxSize()) {
+            if (!showingDetail) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.IconButton(onClick = { destination = null }) {
+                        Icon(NextIcons.ArrowBack, "返回书库", tint = FluxTheme.colorScheme.onSurface)
+                    }
+                    Text(if (destination == "local") "本地书库" else sources.firstOrNull { it.id == destination }?.name.orEmpty(), style = FluxTheme.typography.titleMedium)
+                }
+            }
+            if (destination == "local") {
+                LocalAudiobookTabContent(viewModel, onBookClick, onPlayChapter, detailChanged, Modifier.weight(1f), recentLocalBook)
+            } else {
+                TingshuSourceContent(onExit = { destination = null }, viewModel = sourceViewModel, modifier = Modifier.weight(1f), onShowingDetailChanged = detailChanged)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LocalAudiobookTabContent(
+    viewModel: AudiobookViewModel = hiltViewModel(),
+    onBookClick: (AudioBook) -> Unit,
+    onPlayChapter: (Uri, Uri?, Long, List<Uri>, Int) -> Unit = { _, _, _, _, _ -> },
+    onShowingDetailChanged: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier,
+    initialBook: AudioBook? = null,
+) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // 选中的书籍（非 null 时显示详情页）
-    var selectedBook by remember { mutableStateOf<AudioBook?>(null) }
+    var selectedBook by remember(initialBook) { mutableStateOf(initialBook) }
 
     // 通知外层顶栏是否隐藏
     LaunchedEffect(selectedBook) {
         onShowingDetailChanged(selectedBook != null)
     }
-
-    // SAF 目录选择器
-    val directoryPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree(),
-        onResult = { uri: Uri? ->
-            if (uri != null) {
-                // 将 SAF URI 持久化
-                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
-
-                // 保存到 DataStore
-                viewModel.setRootUri(uri.toString())
-            }
-        },
-    )
 
     // 详情页
     if (selectedBook != null) {
@@ -126,8 +164,6 @@ fun AudiobookTabContent(
             resumeChapterIndex = resumeChapterIndex,
             resumePositionMs = resumePositionMs,
             chapterProgress = chapterProgressPairs,
-            isFavorite = book.folderPath in uiState.favorites,
-            onToggleFavorite = { viewModel.toggleFavorite(book.folderPath) },
             modifier = Modifier.fillMaxSize(),
         )
         return
@@ -137,7 +173,6 @@ fun AudiobookTabContent(
         // 空状态：未选择听书目录
         EmptySelectionView(
             onSelectDirectory = {
-                directoryPickerLauncher.launch(null)
             },
             modifier = modifier,
         )
@@ -205,19 +240,16 @@ fun AudiobookTabContent(
                 val books = state.value
                 if (books.isEmpty()) {
                     EmptyBooksView(
-                        onChangeDirectory = { directoryPickerLauncher.launch(null) },
+                        onChangeDirectory = { },
                         modifier = modifier,
                     )
                 } else {
-                    // 收藏置顶，其余按最近播放排序（未播放过的保持扫描顺序）
-                    val sortedBooks = remember(books, uiState.favorites, uiState.lastPlayedAt) {
+                    // 按最近播放排序（未播放过的保持扫描顺序）
+                    val sortedBooks = remember(books, uiState.lastPlayedAt) {
                         books.sortedWith(
-                            compareByDescending<AudioBook> { it.folderPath in uiState.favorites }
-                                .thenComparator { a, b ->
-                                    val ta = uiState.lastPlayedAt[a.folderPath] ?: 0L
-                                    val tb = uiState.lastPlayedAt[b.folderPath] ?: 0L
-                                    tb.compareTo(ta)
-                                },
+                            compareByDescending<AudioBook> {
+                                uiState.lastPlayedAt[it.folderPath] ?: 0L
+                            },
                         )
                     }
                     PullToRefreshBox(
@@ -228,7 +260,6 @@ fun AudiobookTabContent(
                         BookshelfList(
                             books = sortedBooks,
                             resumeStates = uiState.resumeStates,
-                            favorites = uiState.favorites,
                             onBookClick = { selectedBook = it },
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -284,7 +315,7 @@ private fun EmptySelectionView(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "选择包含有声书的文件夹，系统将自动扫描并整理你的书籍",
+                text = "请在设置 → 听书配置中选择本地书库路径，系统将自动整理书籍",
                 style = FluxTheme.typography.bodyMedium,
                 color = FluxTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -292,23 +323,6 @@ private fun EmptySelectionView(
             )
 
             Spacer(modifier = Modifier.height(32.dp))
-
-            Button(
-                onClick = onSelectDirectory,
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = FluxTheme.colorScheme.primary,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth(0.6f)
-                    .height(52.dp),
-            ) {
-                Text(
-                    text = "选择文件夹",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
         }
     }
 }
@@ -337,9 +351,7 @@ private fun EmptyBooksView(
                 color = FluxTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onChangeDirectory) {
-                Text("重新选择")
-            }
+            Text("请到设置 → 听书配置更换路径", color = FluxTheme.colorScheme.primary)
         }
     }
 }
@@ -349,7 +361,6 @@ private fun BookshelfList(
     books: List<AudioBook>,
     onBookClick: (AudioBook) -> Unit,
     resumeStates: Map<String, String> = emptyMap(),
-    favorites: Set<String> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -358,133 +369,11 @@ private fun BookshelfList(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(books, key = { it.folderPath }) { book ->
-            BookListItem(
+            AudiobookBookCard(
                 book = book,
                 resumeChapterIndex = resumeStates[book.folderPath]
                     ?.substringBefore('|')?.toIntOrNull(),
-                isFavorite = book.folderPath in favorites,
                 onClick = { onBookClick(book) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun BookListItem(
-    book: AudioBook,
-    resumeChapterIndex: Int? = null,
-    isFavorite: Boolean = false,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = FluxTheme.colorScheme
-
-    Card(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp, pressedElevation = 4.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // ── 封面缩略图 ──
-            Box(
-                modifier = Modifier
-                    .size(width = 72.dp, height = 96.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colors.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (book.coverUri != null) {
-                    // 显式限定解码尺寸（2x 显示尺寸），避免大封面全尺寸解码拖慢列表
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(book.coverUri)
-                            .size(144, 192)
-                            .build(),
-                        contentDescription = book.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else {
-                    Icon(
-                        imageVector = NextIcons.Audio,
-                        contentDescription = null,
-                        modifier = Modifier.size(32.dp),
-                        tint = colors.onSurfaceVariant.copy(alpha = 0.4f),
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            // ── 书籍信息 ──
-            Column(
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(
-                    text = book.title,
-                    style = FluxTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 20.sp,
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    // 章节数标签
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = colors.primary.copy(alpha = 0.1f),
-                    ) {
-                        Text(
-                            text = "${book.chapterCount} 章节",
-                            color = colors.primary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        )
-                    }
-                    // 上次听到第 N 集
-                    if (resumeChapterIndex != null && resumeChapterIndex < book.chapterCount) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = colors.surfaceVariant,
-                        ) {
-                            Text(
-                                text = "听到第 ${resumeChapterIndex + 1} 集",
-                                color = colors.onSurfaceVariant,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            )
-                        }
-                    }
-                    if (isFavorite) {
-                        Icon(
-                            imageVector = Icons.Filled.Favorite,
-                            contentDescription = "收藏",
-                            tint = colors.primary.copy(alpha = 0.6f),
-                            modifier = Modifier.size(13.dp),
-                        )
-                    }
-                }
-            }
-
-            // ── 右箭头 ──
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = colors.onSurfaceVariant.copy(alpha = 0.3f),
-                modifier = Modifier.size(22.dp),
             )
         }
     }

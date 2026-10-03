@@ -503,4 +503,6 @@
     <string name="accent_ink">Ink</string>
     <string name="accent_seal">Cinnabar</string>
     <string name="accent_violet">Violet</string>
+    <string name="audiobook_settings">听书配置</string>
+    <string name="audiobook_settings_description">本地书库路径、书源导入与配置</string>
 </resources>

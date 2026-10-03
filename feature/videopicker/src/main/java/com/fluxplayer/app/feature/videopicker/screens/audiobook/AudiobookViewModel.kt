@@ -54,7 +54,6 @@ class AudiobookViewModel @Inject constructor(
                         rootUri = prefs.audiobookRootUri.takeIf { it.isNotBlank() },
                         resumeStates = prefs.audiobookResumeState,
                         chapterProgress = prefs.audiobookChapterProgress,
-                        favorites = prefs.audiobookFavorites,
                         lastPlayedAt = prefs.audiobookLastPlayedAt,
                     )
                 }
@@ -75,17 +74,6 @@ class AudiobookViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences { prefs ->
                 prefs.copy(audiobookRootUri = uriString)
-            }
-        }
-    }
-
-    /** 收藏/取消收藏一本书。 */
-    fun toggleFavorite(bookPath: String) {
-        viewModelScope.launch {
-            preferencesRepository.updateApplicationPreferences { prefs ->
-                val favorites = prefs.audiobookFavorites.toMutableSet()
-                if (!favorites.remove(bookPath)) favorites.add(bookPath)
-                prefs.copy(audiobookFavorites = favorites)
             }
         }
     }
@@ -134,11 +122,9 @@ class AudiobookViewModel @Inject constructor(
                     idx < count
                 }
                 val resumes = prefs.audiobookResumeState.filterKeys { it in bookPaths }
-                val favorites = prefs.audiobookFavorites.filterTo(HashSet()) { it in bookPaths }
                 val lastPlayed = prefs.audiobookLastPlayedAt.filterKeys { it in bookPaths }
                 if (progress.size == prefs.audiobookChapterProgress.size &&
                     resumes.size == prefs.audiobookResumeState.size &&
-                    favorites.size == prefs.audiobookFavorites.size &&
                     lastPlayed.size == prefs.audiobookLastPlayedAt.size
                 ) {
                     prefs // 无变化，避免无效写盘
@@ -146,7 +132,6 @@ class AudiobookViewModel @Inject constructor(
                     prefs.copy(
                         audiobookChapterProgress = progress,
                         audiobookResumeState = resumes,
-                        audiobookFavorites = favorites,
                         audiobookLastPlayedAt = lastPlayed,
                     )
                 }
@@ -331,8 +316,6 @@ data class AudiobookUiState(
     val resumeStates: Map<String, String> = emptyMap(),
     /** key: "bookPath|chapterIndex", value: "positionMs|durationMs" */
     val chapterProgress: Map<String, String> = emptyMap(),
-    /** 收藏的书籍文件夹路径 */
-    val favorites: Set<String> = emptySet(),
     /** 书籍最近播放时间（epochMillis），用于书架排序 */
     val lastPlayedAt: Map<String, Long> = emptyMap(),
 )

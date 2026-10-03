@@ -4,14 +4,13 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
-import android.util.Log
 import android.os.Bundle
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -33,15 +32,13 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import coil3.ImageLoader
-import com.google.common.util.concurrent.ListenableFuture
-import dagger.hilt.android.AndroidEntryPoint
-import com.fluxplayer.app.core.common.extensions.deleteFiles
+import com.fluxplayer.app.core.common.CloudAwareCacheKeyRegistry
 import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.Pan123FallbackCache
-import com.fluxplayer.app.core.data.cloud.CloudUriResolver
-import com.fluxplayer.app.core.data.cache.PlaybackCacheManager
-import com.fluxplayer.app.core.common.CloudAwareCacheKeyRegistry
+import com.fluxplayer.app.core.common.extensions.deleteFiles
 import com.fluxplayer.app.core.common.extensions.subtitleCacheDir
+import com.fluxplayer.app.core.data.cache.PlaybackCacheManager
+import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.repository.MediaRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
@@ -50,6 +47,8 @@ import com.fluxplayer.app.core.model.LoopMode
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.model.Resume
 import com.fluxplayer.app.core.ui.R as coreUiR
+import com.fluxplayer.app.feature.player.LocalAudiobookPlayback
+import com.fluxplayer.app.feature.player.LocalAudiobookPlaybackState
 import com.fluxplayer.app.feature.player.PlayerActivity
 import com.fluxplayer.app.feature.player.extensions.addAdditionalSubtitleConfiguration
 import com.fluxplayer.app.feature.player.extensions.audioTrackIndex
@@ -65,6 +64,8 @@ import com.fluxplayer.app.feature.player.extensions.subtitleSpeed
 import com.fluxplayer.app.feature.player.extensions.subtitleTrackIndex
 import com.fluxplayer.app.feature.player.extensions.switchTrack
 import com.fluxplayer.app.feature.player.extensions.uriToSubtitleConfiguration
+import com.google.common.util.concurrent.ListenableFuture
+import dagger.hilt.android.AndroidEntryPoint
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import io.github.anilbeesetti.nextlib.media3ext.renderer.subtitleDelayMilliseconds
 import io.github.anilbeesetti.nextlib.media3ext.renderer.subtitleSpeed
@@ -80,13 +81,13 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
 class PlayerService : MediaSessionService() {
 
     private val serviceScope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
     /** 持久化写入专用 scope，不受 serviceScope 取消影响 */
     private val saveScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var mediaSession: MediaSession? = null
@@ -160,6 +161,13 @@ class PlayerService : MediaSessionService() {
     private var currentVolumeGain: Int = 0
 
     private val playbackStateListener = object : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) {
+            publishLocalAudiobook(player)
+            if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                saveLocalAudiobookProgress()
+            }
+        }
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             super.onMediaItemTransition(mediaItem, reason)
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) return
@@ -181,10 +189,13 @@ class PlayerService : MediaSessionService() {
             // 听书会话：同步刷新通知栏点击的 PendingIntent，携带听书上下文
             updateSessionActivityForAudiobook()
             val meta = mediaItem?.mediaMetadata
-            Log.d(TAG, "onMediaItemTransition: mediaId=${mediaItem?.mediaId}, " +
-                "positionMs=${meta?.positionMs}, playbackSpeed=${meta?.playbackSpeed}, " +
-                "introMs=${meta?.introMs}, outroMs=${meta?.outroMs}, " +
-                "sessionSpeed=$sessionPlaybackSpeed")
+            Log.d(
+                TAG,
+                "onMediaItemTransition: mediaId=${mediaItem?.mediaId}, " +
+                    "positionMs=${meta?.positionMs}, playbackSpeed=${meta?.playbackSpeed}, " +
+                    "introMs=${meta?.introMs}, outroMs=${meta?.outroMs}, " +
+                    "sessionSpeed=$sessionPlaybackSpeed",
+            )
             mediaItem?.mediaMetadata?.let { metadata ->
                 mediaSession?.player?.run {
                     // 从 DB 恢复该视频的上次倍速，覆盖全局默认值
@@ -207,8 +218,11 @@ class PlayerService : MediaSessionService() {
                     resumePos != null -> resumePos
                     else -> null
                 }
-                Log.d(TAG, "onMediaItemTransition seek: intro=$introMs resume=$resumePos " +
-                    "resumeEnabled=${playerPreferences.resume} target=$seekTargetMs")
+                Log.d(
+                    TAG,
+                    "onMediaItemTransition seek: intro=$introMs resume=$resumePos " +
+                        "resumeEnabled=${playerPreferences.resume} target=$seekTargetMs",
+                )
                 seekTargetMs?.let { target ->
                     mediaSession?.player?.seekTo(target)
                 }
@@ -380,7 +394,7 @@ class PlayerService : MediaSessionService() {
             // Update the media metadata duration so that it will be used later in position discontinuity handling
             player.replaceMediaItem(
                 player.currentMediaItemIndex,
-                currentMediaItem.copy(durationMs = player.duration.coerceAtLeast(0))
+                currentMediaItem.copy(durationMs = player.duration.coerceAtLeast(0)),
             )
         }
 
@@ -439,13 +453,13 @@ class PlayerService : MediaSessionService() {
             Log.e(TAG, "========== onPlayerError ==========")
             Log.e(TAG, "onPlayerError: errorCode=${error.errorCode}, errorCodeName=${error.errorCodeName}")
             Log.e(TAG, "onPlayerError: message=${error.message}")
-            
+
             // 获取当前播放的媒体项信息
             val currentMediaItem = mediaSession?.player?.currentMediaItem
             val currentUri = currentMediaItem?.localConfiguration?.uri
             Log.e(TAG, "onPlayerError: currentMediaItem=${currentMediaItem?.mediaId}")
             Log.e(TAG, "onPlayerError: currentMediaItem URI=$currentUri")
-            
+
             // pan123 HLS fallback: MP4 直链失败时自动切换到 HLS
             if (currentMediaItem != null && currentUri != null && currentUri.toString().contains("#pan123Play=true#")) {
                 val provider = CloudUriScheme.getProvider(currentMediaItem.mediaId.toUri())
@@ -458,7 +472,7 @@ class PlayerService : MediaSessionService() {
                         val newItem = currentMediaItem.buildUpon().setUri(newUri).build()
                         mediaSession?.player?.replaceMediaItem(
                             mediaSession?.player?.currentMediaItemIndex ?: 0,
-                            newItem
+                            newItem,
                         )
                         mediaSession?.player?.prepare()
                         mediaSession?.player?.play()
@@ -466,7 +480,7 @@ class PlayerService : MediaSessionService() {
                     }
                 }
             }
-            
+
             // 记录详细的错误信息
             when (error.errorCode) {
                 PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> {
@@ -489,7 +503,7 @@ class PlayerService : MediaSessionService() {
                     Log.e(TAG, "onPlayerError: Other error code=${error.errorCode}")
                 }
             }
-            
+
             // 打印完整的堆栈跟踪
             Log.e(TAG, "onPlayerError: stack trace:", error)
             Log.e(TAG, "========== onPlayerError END ==========")
@@ -788,11 +802,57 @@ class PlayerService : MediaSessionService() {
         serviceScope.launch {
             while (true) {
                 delay(1000)
+                mediaSession?.player?.let { publishLocalAudiobook(it) }
+                if (LocalAudiobookPlayback.state.value.playing && ++localProgressTicks >= 5) {
+                    localProgressTicks = 0
+                    saveLocalAudiobookProgress()
+                }
                 if (AudioSleepTimer.state.value.remainingSeconds <= 0) continue
                 val currentPlayer = mediaSession?.player ?: continue
                 if (currentPlayer.isPlaying && AudioSleepTimer.tickSecond()) {
                     currentPlayer.pause()
                 }
+            }
+        }
+    }
+
+    private var localProgressTicks = 0
+
+    private fun publishLocalAudiobook(player: Player) {
+        val item = player.currentMediaItem
+        if (!isAudioSession || item == null || !persistence.isAudioFile(item.mediaId)) {
+            LocalAudiobookPlayback.mutableState.value = LocalAudiobookPlaybackState()
+            return
+        }
+        val path = File(item.mediaId).parent ?: return
+        val previous = LocalAudiobookPlayback.state.value
+        val started = previous.bookPath != path || (player.isPlaying && !previous.playing)
+        LocalAudiobookPlayback.mutableState.value = LocalAudiobookPlaybackState(
+            bookPath = path,
+            title = item.mediaMetadata.albumTitle?.toString() ?: File(path).name,
+            chapterUri = Uri.fromFile(File(item.mediaId)).toString(),
+            chapterTitle = item.mediaMetadata.title?.toString() ?: File(item.mediaId).nameWithoutExtension,
+            coverUri = item.mediaMetadata.artworkUri?.toString(),
+            index = player.currentMediaItemIndex.coerceAtLeast(0),
+            position = player.currentPosition.coerceAtLeast(0),
+            duration = player.duration.coerceAtLeast(0),
+            playing = player.isPlaying,
+            playWhenReady = player.playWhenReady,
+            loading = player.playbackState == Player.STATE_BUFFERING,
+            lastPlayedAt = if (started) System.currentTimeMillis() else previous.lastPlayedAt,
+        )
+    }
+
+    private fun saveLocalAudiobookProgress() {
+        val state = LocalAudiobookPlayback.state.value
+        if (state.bookPath.isBlank() || state.duration <= 0) return
+        saveScope.launch {
+            preferencesRepository.updateApplicationPreferences { prefs ->
+                prefs.copy(
+                    audiobookResumeState = prefs.audiobookResumeState + (state.bookPath to "${state.index}|${state.position}"),
+                    audiobookChapterProgress = prefs.audiobookChapterProgress + ("${state.bookPath}|${state.index}" to "${state.position}|${state.duration}"),
+                    audiobookLastPlayedAt = prefs.audiobookLastPlayedAt + (state.bookPath to state.lastPlayedAt),
+                )
             }
         }
     }
@@ -811,6 +871,8 @@ class PlayerService : MediaSessionService() {
     override fun onDestroy() {
         super.onDestroy()
 
+        saveLocalAudiobookProgress()
+        LocalAudiobookPlayback.mutableState.value = LocalAudiobookPlaybackState()
         // 播放会话结束，睡眠定时随之失效
         AudioSleepTimer.cancel()
 
@@ -819,8 +881,11 @@ class PlayerService : MediaSessionService() {
         val currentUri = currentPlayer?.currentMediaItem?.mediaId
         val currentPos = currentPlayer?.currentPosition ?: 0L
         val currentSpeed = sessionPlaybackSpeed
-        Log.d(TAG, "onDestroy: mediaId=$currentUri, position=$currentPos, speed=$currentSpeed, " +
-            "willSave=${currentUri != null && currentPos > 0}")
+        Log.d(
+            TAG,
+            "onDestroy: mediaId=$currentUri, position=$currentPos, speed=$currentSpeed, " +
+                "willSave=${currentUri != null && currentPos > 0}",
+        )
         if (currentUri != null) {
             if (currentPos > 0) {
                 persistence.savePosition(currentUri, currentPos)
@@ -904,6 +969,8 @@ class PlayerService : MediaSessionService() {
     private fun buildMediaSession(player: ExoPlayer) {
         try {
             mediaSession = MediaSession.Builder(this, player).apply {
+                // 本地与视频播放器使用独立标识，避免与书源播放服务冲突。
+                setId("fluxplayer.main")
                 setSessionActivity(
                     PendingIntent.getActivity(
                         this@PlayerService,
@@ -1019,8 +1086,11 @@ class PlayerService : MediaSessionService() {
                 newPlayer.prepare()
             }
 
-            Log.w(TAG, "handleDecoderFallback: player rebuilt with PREFER_APP, " +
-                "items=${savedItems.size}, index=$savedIndex, position=$savedPosition")
+            Log.w(
+                TAG,
+                "handleDecoderFallback: player rebuilt with PREFER_APP, " +
+                    "items=${savedItems.size}, index=$savedIndex, position=$savedPosition",
+            )
         }
     }
 

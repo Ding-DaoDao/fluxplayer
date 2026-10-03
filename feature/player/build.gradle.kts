@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
 
     implementation(libs.coil.compose)
+    implementation(libs.androidx.palette)
 
     // Reorderable list for drag-and-drop
     implementation(libs.reorderable)

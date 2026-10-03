@@ -61,6 +61,7 @@ enum class Setting {
     GESTURES,
     DECODER,
     AUDIO,
+    AUDIOBOOK,
     SUBTITLE,
     WEBDAV,
     OPENLIST,
@@ -109,6 +110,12 @@ private enum class SettingRow(
         descriptionResId = R.string.audio_desc,
         icon = NextIcons.Audio,
         setting = Setting.AUDIO,
+    ),
+    AUDIOBOOK(
+        titleResId = R.string.audiobook_settings,
+        descriptionResId = R.string.audiobook_settings_description,
+        icon = NextIcons.Audio,
+        setting = Setting.AUDIOBOOK,
     ),
     SUBTITLE(
         titleResId = R.string.subtitle,
