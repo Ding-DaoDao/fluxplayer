@@ -52,3 +52,5 @@ include(":feature:videopicker")
 
 include(":core:tingshu")
 include(":feature:tingshu")
+
+include(":core:jdr-engine")

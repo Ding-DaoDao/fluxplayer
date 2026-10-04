@@ -43,12 +43,12 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
     var deleting by remember { mutableStateOf<String?>(null) }
     var showImportInfo by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) viewModel.importJar(uri)
+        if (uri != null) viewModel.importSource(uri)
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("听书书源", style = FluxTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
-            TextButton(onClick = { showImportInfo = true }, enabled = !state.loading) { Text("导入 JAR") }
+            TextButton(onClick = { showImportInfo = true }, enabled = !state.loading) { Text("导入书源") }
         }
         if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         state.error?.let { Text(it, color = FluxTheme.colorScheme.error) }
@@ -65,8 +65,12 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
                     }
                     pkg.error?.let { Text(it, color = FluxTheme.colorScheme.error) }
                     sources.filter { it.packageEntry == pkg.entry }.forEach { source ->
-                        TextButton(onClick = { viewModel.configure(source) }, enabled = !state.loading, modifier = Modifier.fillMaxWidth()) {
-                            Text("${source.name} · 配置")
+                        if (source.id.startsWith("jdr:")) {
+                            Text(source.name, modifier = Modifier.padding(vertical = 8.dp))
+                        } else {
+                            TextButton(onClick = { viewModel.configure(source) }, enabled = !state.loading, modifier = Modifier.fillMaxWidth()) {
+                                Text("${source.name} · 配置")
+                            }
                         }
                     }
                     TextButton(onClick = { deleting = pkg.entry }, enabled = !state.loading) { Text("删除书源包") }
@@ -78,7 +82,7 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
         AlertDialog(
             onDismissRequest = { showImportInfo = false },
             title = { Text("导入听书书源") },
-            text = { Text("请选择可信作者提供的 JAR，书源会在应用内执行。文件需保留原名，例如 sources_by_pan123.jar；再次导入同名文件会更新该书源包。") },
+            text = { Text("支持 Timbre 的 .jdr 源包和听书 JAR。JAR 文件需保留原名，例如 sources_by_pan123.jar。重新导入同一包会更新书源。") },
             confirmButton = {
                 TextButton(onClick = {
                     showImportInfo = false

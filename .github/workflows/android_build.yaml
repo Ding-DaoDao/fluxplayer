@@ -1,4 +1,4 @@
-name: Build pagination fix APK
+name: Build Flux Player APK
 
 on:
   push:
@@ -33,12 +33,12 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.4.1'
-      - name: Build APK and compile regression tests
-        run: gradle --no-daemon --max-workers=2 --info -I .github/ci-repositories.gradle assembleDebug :core:data:assembleDebugAndroidTest :feature:videopicker:assembleDebugAndroidTest
+      - name: Test JDR engine, build APK and compile regression tests
+        run: gradle --no-daemon --max-workers=2 --info -I .github/ci-repositories.gradle :core:jdr-engine:test assembleDebug :core:tingshu:assembleDebugAndroidTest :core:data:assembleDebugAndroidTest :feature:videopicker:assembleDebugAndroidTest
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: fluxplayer-123-pagination-fix-arm64-debug
+          name: fluxplayer-jdr-support-arm64-debug
           path: app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
           if-no-files-found: error
           retention-days: 30

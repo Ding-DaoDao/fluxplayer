@@ -241,12 +241,13 @@ class TingshuPlaybackService : MediaSessionService() {
                 val resource = repository.resolve(book, index)
                 repository.markPlayed(book)
                 val http = DefaultHttpDataSource.Factory()
+                    .setDefaultRequestProperties(resource.headers)
                     .setConnectTimeoutMs(20_000).setReadTimeoutMs(20_000)
                     .setAllowCrossProtocolRedirects(true)
                 // 解析器在媒体加载线程运行，为每个音频或 HLS 分片分别获取该书源的请求头。
                 val dataSource = ResolvingDataSource.Factory(DefaultDataSource.Factory(this@TingshuPlaybackService, http)) { spec ->
                     val headers = runBlocking { repository.playbackHeaders(book.sourceId, spec.uri.toString()) }
-                    spec.withRequestHeaders(spec.httpRequestHeaders + headers)
+                    spec.withRequestHeaders(resource.headers + spec.httpRequestHeaders + headers)
                 }
                 val factory = DefaultMediaSourceFactory(dataSource)
                 val episode = book.episodes[index]

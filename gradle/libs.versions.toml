@@ -43,8 +43,14 @@ jsoup = "1.13.1"
 gson = "2.9.0"
 rxjava = "2.2.21"
 rxkotlin = "2.4.0"
+quickjs = "1.0.15"
+bouncycastle = "1.83"
 
 [libraries]
+bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+quickjs = { module = "io.github.dokar3:quickjs-kt", version.ref = "quickjs" }
 fuel-core = { module = "com.github.kittinunf.fuel:fuel", version.ref = "fuel" }
 fuel-json = { module = "com.github.kittinunf.fuel:fuel-json", version.ref = "fuel" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }

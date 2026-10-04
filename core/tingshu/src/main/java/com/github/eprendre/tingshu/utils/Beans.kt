@@ -12,6 +12,8 @@ data class Book(
     // 演播
     var artist: String,
 ) {
+    /** JDR 搜索结果透传字段，保留到章节请求。 */
+    var jdrExtras: String = "{}"
     var id: Int? = null
     var intro: String = ""
     var currentEpisodeUrl: String? = null

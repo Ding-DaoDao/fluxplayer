@@ -52,7 +52,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
     private val history = mutableListOf<SourceBrowseState>()
     private var loadJob: Job? = null
 
-    fun importJar(uri: Uri) = operation { repository.importJar(uri) }
+    fun importSource(uri: Uri) = operation { repository.importSource(uri) }
 
     fun enable(entry: String, enabled: Boolean) = operation { repository.setEnabled(entry, enabled) }
 

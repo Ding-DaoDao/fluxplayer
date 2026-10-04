@@ -25,6 +25,8 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -46,6 +48,8 @@ data class ListeningBook(
     val coverUrl: String,
     val intro: String,
     val episodes: List<Episode>,
+    val jdrBookExtras: String = "{}",
+    val jdrChapterExtras: Map<String, String> = emptyMap(),
 )
 
 data class ListeningProgress(val episodeUrl: String = "", val position: Long = 0, val duration: Long = 0)
@@ -60,6 +64,8 @@ class TingshuRepository private constructor(private val context: Context) {
     private val bookDirectory = File(context.filesDir, "tingshu/books").apply { mkdirs() }
     private val prefs = context.getSharedPreferences("tingshu_library", Context.MODE_PRIVATE)
     private val loaded = linkedMapOf<String, TingShu>()
+    private val jdr = JdrSourceBackend()
+    private val packageMutex = Mutex()
     private val _packages = MutableStateFlow<List<SourcePackage>>(emptyList())
     val packages = _packages.asStateFlow()
     private val _sources = MutableStateFlow<List<ListeningSource>>(emptyList())
@@ -72,7 +78,7 @@ class TingshuRepository private constructor(private val context: Context) {
     init {
         SourceHost.initialize(context)
         scope.launch {
-            reload(readPackages())
+            managePackages { reload(readPackages()) }
             readRecentKeys().forEach { key ->
                 runCatching { book(key) }.getOrNull()?.let { _recentBooks.value += it }
             }
@@ -84,13 +90,19 @@ class TingshuRepository private constructor(private val context: Context) {
         }
     }
 
-    suspend fun importJar(uri: Uri): Unit = withContext(dispatcher) {
+    suspend fun importJar(uri: Uri) = importSource(uri)
+
+    suspend fun importSource(uri: Uri): Unit = managePackages {
         val filename = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
             if (it.moveToFirst()) it.getString(0) else null
         } ?: uri.lastPathSegment.orEmpty()
+        if (filename.endsWith(".jdr", ignoreCase = true)) {
+            importJdr(uri)
+            return@managePackages
+        }
         val entry = filename.removeSuffix(".jar")
         require(filename.endsWith(".jar") && entry.matches(Regex("[A-Za-z_][A-Za-z0-9_]*"))) {
-            "请选择保留原文件名的书源 JAR，例如 sources_by_pan123.jar"
+            "请选择 Timbre .jdr 或保留原文件名的 JAR，例如 sources_by_pan123.jar"
         }
         val destination = File(directory, "$entry-${UUID.randomUUID()}.jar")
         try {
@@ -124,13 +136,13 @@ class TingshuRepository private constructor(private val context: Context) {
         }
     }
 
-    suspend fun setEnabled(entry: String, enabled: Boolean) = withContext(dispatcher) {
+    suspend fun setEnabled(entry: String, enabled: Boolean) = managePackages {
         val updated = readPackages().map { if (it.entry == entry) it.copy(enabled = enabled) else it }
         persistPackages(updated)
         reload(updated)
     }
 
-    suspend fun remove(entry: String) = withContext(dispatcher) {
+    suspend fun remove(entry: String) = managePackages {
         val previous = readPackages()
         val updated = previous.filter { it.entry != entry }
         persistPackages(updated)
@@ -139,7 +151,7 @@ class TingshuRepository private constructor(private val context: Context) {
     }
 
     suspend fun menus(sourceId: String): List<CategoryMenu> = withContext(dispatcher) {
-        source(sourceId).getCategoryMenus()
+        if (jdr.handles(sourceId)) emptyList() else source(sourceId).getCategoryMenus()
     }
 
     suspend fun category(sourceId: String, url: String): Category = withContext(dispatcher) {
@@ -147,12 +159,18 @@ class TingshuRepository private constructor(private val context: Context) {
     }
 
     suspend fun search(sourceId: String, keywords: String, page: Int): Pair<List<Book>, Int> = withContext(dispatcher) {
+        if (jdr.handles(sourceId)) return@withContext jdr.search(sourceId, keywords, page)
         val selected = source(sourceId)
         require(selected.isSearchable()) { "该书源不支持搜索" }
         selected.search(keywords, page)
     }
 
     suspend fun detail(sourceId: String, book: Book): ListeningBook = withContext(dispatcher) {
+        if (jdr.handles(sourceId)) {
+            val snapshot = jdr.detail(sourceId, book, digest("$sourceId\u0000${book.bookUrl}"))
+            writeBook(snapshot)
+            return@withContext snapshot
+        }
         val selected = source(sourceId)
         SourceHost.currentBook.set(book)
         try {
@@ -189,10 +207,15 @@ class TingshuRepository private constructor(private val context: Context) {
                     Episode(item.getString("title"), item.getString("url"))
                 }
             },
+            data.optString("jdrBookExtras", "{}"),
+            data.optJSONObject("jdrChapterExtras")?.let { extras ->
+                extras.keys().asSequence().associateWith { extras.getString(it) }
+            }.orEmpty(),
         )
     }
 
     suspend fun resolve(book: ListeningBook, index: Int): ListeningResource = withContext(dispatcher) {
+        if (jdr.handles(book.sourceId)) return@withContext jdr.resolve(book, index)
         val selected = source(book.sourceId)
         val episode = book.episodes[index]
         SourceHost.currentBook.set(
@@ -215,13 +238,14 @@ class TingshuRepository private constructor(private val context: Context) {
     }
 
     suspend fun coverHeaders(sourceId: String, url: String): Map<String, String> = withContext(dispatcher) {
+        if (jdr.handles(sourceId)) return@withContext emptyMap()
         val result = mutableMapOf<String, String>()
         (source(sourceId) as? CoverUrlExtraHeaders)?.coverHeaders(url, result)
         result
     }
 
     suspend fun playbackHeaders(sourceId: String, url: String): Map<String, String> = withContext(dispatcher) {
-        (source(sourceId) as? AudioUrlExtraHeaders)?.headers(url).orEmpty()
+        if (jdr.handles(sourceId)) emptyMap() else (source(sourceId) as? AudioUrlExtraHeaders)?.headers(url).orEmpty()
     }
 
     fun lastPlayedAt(key: String): Long = prefs.getLong("playedAt.$key", 0L)
@@ -239,12 +263,13 @@ class TingshuRepository private constructor(private val context: Context) {
     }
 
     suspend fun config(sourceId: String): List<ConfigItem> = withContext(dispatcher) {
-        (source(sourceId) as? ConfigurableSource)?.getCustomConfigItems().orEmpty()
+        if (jdr.handles(sourceId)) emptyList() else (source(sourceId) as? ConfigurableSource)?.getCustomConfigItems().orEmpty()
     }
 
     suspend fun configAction(action: () -> Unit) = withContext(dispatcher) { action() }
 
     suspend fun saveConfig(sourceId: String, values: Map<String, String>) = withContext(dispatcher) {
+        if (jdr.handles(sourceId)) return@withContext
         source(sourceId).reset()
         val editor = context.getSharedPreferences("tingshu_source_config", Context.MODE_PRIVATE).edit()
         values.forEach { (key, value) -> editor.putString("$sourceId.$key", value) }
@@ -291,11 +316,52 @@ class TingshuRepository private constructor(private val context: Context) {
         _progresses.value = _progresses.value + (key to progress)
     }
 
+    private suspend fun <T> managePackages(block: suspend () -> T): T = withContext(dispatcher) {
+        packageMutex.withLock { block() }
+    }
+
     private fun source(id: String): TingShu = checkNotNull(loaded[id]) { "书源已禁用、已删除或加载失败" }
 
-    private fun loadPackage(pkg: SourcePackage): List<Pair<ListeningSource, TingShu>> {
+    private fun packageFile(pkg: SourcePackage): File {
         val file = File(directory, pkg.file)
-        require(file.canonicalFile.parentFile == directory.canonicalFile && file.exists()) { "书源文件不存在" }
+        require(file.canonicalFile.parentFile == directory.canonicalFile && file.isFile) { "书源文件不存在" }
+        require(file.length() <= MAX_JAR_SIZE) { "书源包不能超过 20 MB" }
+        return file
+    }
+
+    private suspend fun importJdr(uri: Uri) {
+        val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+            val output = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                require(output.size() + count <= MAX_JAR_SIZE) { "书源包不能超过 20 MB" }
+                output.write(buffer, 0, count)
+            }
+            output.toByteArray()
+        } ?: error("无法读取所选文件")
+        val archive = voice.core.extension.engine.JdrArchive.parse(bytes)
+        val entry = "jdr:${archive.manifest.id}"
+        val otherIds = _sources.value.filter { it.packageEntry != entry }.map { it.id }.toSet()
+        require(archive.manifest.sources.none { "jdr:${it.id}" in otherIds }) { "书源 ID 与已导入的其他包重复" }
+        val destination = File(directory, "${archive.manifest.id}-${UUID.randomUUID()}.jdr")
+        try {
+            destination.writeBytes(bytes)
+            val previous = readPackages()
+            val pkg = SourcePackage(entry, destination.name, previous.find { it.entry == entry }?.enabled ?: true)
+            val updated = previous.filter { it.entry != entry } + pkg
+            persistPackages(updated)
+            reload(updated)
+            previous.filter { it.entry == entry }.forEach { File(directory, it.file).delete() }
+        } catch (error: Throwable) {
+            destination.delete()
+            throw error
+        }
+    }
+
+    private fun loadPackage(pkg: SourcePackage): List<Pair<ListeningSource, TingShu>> {
+        val file = packageFile(pkg)
         require(!file.canWrite()) { "书源文件必须是只读文件，请重新导入" }
         val loader = DexClassLoader(file.absolutePath, context.codeCacheDir.absolutePath, null, context.classLoader)
         val entry = loader.loadClass("com.github.eprendre.${pkg.entry}.SourceEntry")
@@ -305,6 +371,7 @@ class TingshuRepository private constructor(private val context: Context) {
         val sources = result.map { item ->
             val source = item as? TingShu ?: error("该 JAR 不兼容我的听书接口")
             val id = source.getSourceId()
+            require(!id.startsWith("jdr:")) { "JAR 书源不能使用 JDR 保留前缀" }
             require(id.isNotBlank()) { "书源 ID 不能为空" }
             ListeningSource(id, source.getName(), source.getDesc(), pkg.entry) to source
         }
@@ -312,14 +379,22 @@ class TingshuRepository private constructor(private val context: Context) {
         return sources
     }
 
-    private fun reload(packages: List<SourcePackage>) {
+    private suspend fun reload(packages: List<SourcePackage>) {
         loaded.clear()
+        jdr.clear()
         val sources = mutableListOf<ListeningSource>()
         _packages.value = packages.map { pkg ->
             if (!pkg.enabled) return@map pkg
             try {
+                if (pkg.file.endsWith(".jdr")) {
+                    val file = packageFile(pkg)
+                    val entries = jdr.load(pkg.entry, file.readBytes())
+                    require(entries.none { it.id in loaded || sources.any { existing -> existing.id == it.id } }) { "书源 ID 重复" }
+                    sources.addAll(entries)
+                    return@map pkg.copy(error = null)
+                }
                 val entries = loadPackage(pkg)
-                require(entries.none { it.first.id in loaded }) { "书源 ID 重复" }
+                require(entries.none { entry -> entry.first.id in loaded || sources.any { it.id == entry.first.id } }) { "书源 ID 重复" }
                 entries.forEach { (metadata, source) ->
                     loaded[metadata.id] = source
                     sources.add(metadata)
@@ -355,6 +430,7 @@ class TingshuRepository private constructor(private val context: Context) {
         book.episodes.forEach { episodes.put(JSONObject().put("title", it.title).put("url", it.url)) }
         val data = JSONObject().put("sourceId", book.sourceId).put("url", book.url).put("title", book.title)
             .put("coverUrl", book.coverUrl).put("intro", book.intro).put("episodes", episodes)
+            .put("jdrBookExtras", book.jdrBookExtras).put("jdrChapterExtras", JSONObject(book.jdrChapterExtras))
         val file = File(bookDirectory, "${book.key}.json")
         val temporary = File(bookDirectory, "${book.key}.tmp")
         temporary.writeText(data.toString())
