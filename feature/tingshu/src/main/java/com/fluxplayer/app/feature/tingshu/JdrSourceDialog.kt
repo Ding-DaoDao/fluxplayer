@@ -69,12 +69,23 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
             busy = false
         }
     }
+    suspend fun requestLogin(action: String, cookies: String = "") {
+        val next = repository.jdrLogin(source.id, action, login.state, cookies)
+        login = if (action == "poll" && next.authenticated != true) {
+            next.copy(
+                qrImage = next.qrImage.ifBlank { login.qrImage },
+                state = next.state.takeIf { it.isNotEmpty() } ?: login.state,
+            )
+        } else {
+            next
+        }
+        message = login.message
+    }
     fun authenticate(action: String, cookies: String = "") {
         scope.launch {
             runAction {
                 if (action == "login") repository.saveJdrConfiguration(source.id, values)
-                login = repository.jdrLogin(source.id, action, login.state, cookies)
-                message = login.message
+                requestLogin(action, cookies)
             }
         }
     }
@@ -90,7 +101,7 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
         repeat(40) {
             delay(3000)
             if (!busy) {
-                runAction { login = repository.jdrLogin(source.id, "poll", login.state) }
+                runAction { requestLogin("poll") }
                 if (login.authenticated == true || error != null) return@LaunchedEffect
             }
         }
