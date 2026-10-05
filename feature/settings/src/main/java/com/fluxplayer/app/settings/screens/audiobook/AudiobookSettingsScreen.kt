@@ -58,6 +58,7 @@ fun AudiobookSettingsScreen(onNavigateUp: () -> Unit, viewModel: AudiobookSettin
             Text("每本书放在独立的子文件夹中，章节和封面会自动整理。修改路径后，返回本地书库即可查看。", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
             if (preferences.audiobookRootUri.isNotBlank()) TextButton(onClick = { viewModel.setRootUri("") }) { Text("清除书库路径") }
             error?.let { Text(it, color = FluxTheme.colorScheme.error) }
+            com.fluxplayer.app.feature.tingshu.AppListeningCacheSettings()
             TingshuConfigContent()
         }
     }

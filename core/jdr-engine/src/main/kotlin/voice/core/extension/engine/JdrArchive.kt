@@ -68,7 +68,7 @@ public class JdrArchive private constructor(
         private val MANIFEST_ID_REGEX = Regex("^[a-z0-9][a-z0-9._-]{1,63}$")
         private val SOURCE_ID_REGEX = Regex("^[a-z0-9][a-z0-9_-]{0,63}$")
         private val KNOWN_CAPABILITIES =
-            setOf(ExtensionSourceMeta.CAP_SEARCH, ExtensionSourceMeta.CAP_CHAPTERS, ExtensionSourceMeta.CAP_AUDIO, "login", "browse")
+            setOf(ExtensionSourceMeta.CAP_SEARCH, ExtensionSourceMeta.CAP_CHAPTERS, ExtensionSourceMeta.CAP_AUDIO, "login", "browse", "config")
 
         private val json = Json { ignoreUnknownKeys = true }
 

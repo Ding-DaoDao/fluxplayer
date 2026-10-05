@@ -54,7 +54,6 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
         if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         state.error?.let { Text(it, color = FluxTheme.colorScheme.error) }
         if (packages.isEmpty()) Text("暂无书源。导入后将在听书首页显示。", style = FluxTheme.typography.bodyMedium)
-        ListeningCacheSettings()
         packages.forEach { pkg ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -121,7 +120,7 @@ private fun SourceConfigDialog(
     busy: Boolean,
     onDismiss: () -> Unit,
     onSave: (Map<String, String>) -> Unit,
-    onAction: (() -> Unit) -> Unit,
+    onAction: (() -> Unit, Map<String, String>) -> Unit,
     revision: Int,
     error: String?,
 ) {
@@ -193,7 +192,7 @@ private fun SourceConfigDialog(
                                 }
                             }
                         }
-                        is ConfigItem.Button -> TextButton(onClick = { onAction(item.click) }, enabled = !busy) { Text(item.label) }
+                        is ConfigItem.Button -> TextButton(onClick = { onAction(item.click, values) }, enabled = !busy) { Text(item.label) }
                     }
                 }
                 if (busy) CircularProgressIndicator()

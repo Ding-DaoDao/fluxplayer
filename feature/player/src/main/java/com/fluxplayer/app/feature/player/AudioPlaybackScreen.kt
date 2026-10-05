@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.media3.common.Player
+import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import coil3.compose.AsyncImage
 import com.fluxplayer.app.core.ui.R as coreUiR
 import com.fluxplayer.app.core.ui.components.ChapterDragScrollbar
@@ -1352,6 +1353,7 @@ private fun AlbumCover(artworkUri: Any?, modifier: Modifier = Modifier) {
     ) {
         if (artworkUri != null) {
             AsyncImage(
+                    imageLoader = rememberBookCoverImageLoader(),
                 model = artworkUri,
                 contentDescription = stringResource(R.string.audio_album_cover),
                 contentScale = ContentScale.Crop,
@@ -1725,6 +1727,7 @@ fun AudioLoadingScreen(coverArtworkUri: Uri? = null, title: String? = null) {
                         .background(FluxTheme.colorScheme.surface),
                 ) {
                     AsyncImage(
+                    imageLoader = rememberBookCoverImageLoader(),
                         model = coverArtworkUri,
                         contentDescription = stringResource(R.string.audio_album_cover),
                         contentScale = ContentScale.Crop,

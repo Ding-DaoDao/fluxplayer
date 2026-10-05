@@ -332,7 +332,7 @@ internal fun rememberSourceCover(sourceId: String, url: String, repository: Ting
         } catch (_: Exception) {
             emptyMap()
         }
-        request = ImageRequest.Builder(context).data(url).httpHeaders(
+        request = ImageRequest.Builder(context).data(url).diskCacheKey("$sourceId:$url").memoryCacheKey("$sourceId:$url").httpHeaders(
             NetworkHeaders.Builder().apply { headers.forEach { (key, value) -> set(key, value) } }.build(),
         ).build()
     }

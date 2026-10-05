@@ -18,10 +18,14 @@ public data class SourceSetting(
     val type: String = "text",
     val default: String = "",
     val options: List<String> = emptyList(),
+    val action: String = "",
 )
 
 /** Host implementations scope every call to the package and source. */
 public interface SourceHostBridge {
+    public fun putSetting(key: String, value: String?) {
+        error("宿主不支持修改配置")
+    }
     public fun settings(): String
     public fun get(key: String): String?
     public fun set(key: String, value: String)
@@ -31,7 +35,11 @@ public interface SourceHostBridge {
 
 public class MemorySourceHost : SourceHostBridge {
     private val values = ConcurrentHashMap<String, String>()
-    override fun settings(): String = "{}"
+    private val settings = ConcurrentHashMap<String, String>()
+    override fun settings(): String = JsonObject(settings.mapValues { JsonPrimitive(it.value) }).toString()
+    override fun putSetting(key: String, value: String?) {
+        if (value == null) settings.remove(key) else settings[key] = value
+    }
     override fun get(key: String): String? = values[key]
     override fun set(key: String, value: String) {
         values[key] = value
@@ -62,10 +70,36 @@ public object SourceFeatures {
         require(fields.map { it.key }.distinct().size == fields.size) { "书源配置键重复" }
         fields.forEach {
             require(it.key.matches(Regex("[a-zA-Z][a-zA-Z0-9_.-]{0,63}")) && it.label.isNotBlank()) { "无效的书源配置项" }
-            require(it.type in setOf("text", "password", "switch", "select", "directory")) { "未知配置类型 ${it.type}" }
+            require(it.type in setOf("text", "password", "switch", "select", "directory", "multiselect", "button")) { "未知配置类型 ${it.type}" }
             require(it.type != "directory" || canBrowse) { "目录设置需要 browse 能力" }
-            require(it.type != "select" || it.options.isNotEmpty()) { "选择项不能为空" }
+            require(it.type !in setOf("select", "multiselect") || it.options.isNotEmpty()) { "选择项不能为空" }
         }
+    }
+
+    /** Accept the familiar JAR configuration shape from JavaScript hooks. */
+    public fun parseSettings(raw: String, canBrowse: Boolean): List<SourceSetting> {
+        val result = Json.parseToJsonElement(raw)
+        val items = if (result is JsonObject) result["items"] else result
+        val array = items as? JsonArray ?: throw SourceContractException("配置必须返回数组或 items 数组")
+        val fields = array.mapIndexed { index, element ->
+            val obj = element as? JsonObject ?: throw SourceContractException("配置项必须是对象")
+            val type = obj.text("type").lowercase().ifBlank { "text" }
+            val default = when (val value = obj["default"]) {
+                is JsonArray -> value.joinToString(",") { (it as? JsonPrimitive)?.contentOrNull.orEmpty() }
+                is JsonPrimitive -> value.contentOrNull.orEmpty()
+                else -> ""
+            }
+            SourceSetting(
+                key = obj.text("key").ifBlank { if (type == "button") "action$index" else "" },
+                label = obj.text("label"),
+                type = type,
+                default = default,
+                options = (obj["options"] as? JsonArray)?.map { (it as? JsonPrimitive)?.contentOrNull ?: error("选项必须是字符串") }.orEmpty(),
+                action = obj.text("action").ifBlank { obj.text("key").ifBlank { "action$index" } },
+            )
+        }
+        validateSettings(fields, canBrowse)
+        return fields
     }
 
     public fun parseLogin(raw: String): SourceLogin {

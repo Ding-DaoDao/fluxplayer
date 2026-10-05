@@ -71,8 +71,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.palette.graphics.Palette
+import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import coil3.compose.AsyncImage
-import coil3.imageLoader
 import coil3.request.ImageRequest
 import coil3.toBitmap
 import com.fluxplayer.app.core.ui.R as coreUiR
@@ -118,7 +118,7 @@ fun AudiobookDetailContent(
 
     // ── 从封面提取主色调（作为背景渐变的基准色） ──
     val context = LocalContext.current
-    val imageLoader = context.imageLoader
+    val imageLoader = rememberBookCoverImageLoader()
     var paletteColor by remember { mutableStateOf<Color?>(null) }
     LaunchedEffect(coverModel) {
         val coverUri = coverModel ?: return@LaunchedEffect
@@ -237,6 +237,7 @@ fun AudiobookDetailContent(
         // ── 模糊封面背景层 ──
         if (coverModel != null) {
             AsyncImage(
+                    imageLoader = rememberBookCoverImageLoader(),
                 model = coverModel,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
@@ -290,6 +291,7 @@ fun AudiobookDetailContent(
                     ) {
                         if (coverModel != null) {
                             AsyncImage(
+                    imageLoader = rememberBookCoverImageLoader(),
                                 model = coverModel,
                                 contentDescription = book.title,
                                 contentScale = ContentScale.Crop,

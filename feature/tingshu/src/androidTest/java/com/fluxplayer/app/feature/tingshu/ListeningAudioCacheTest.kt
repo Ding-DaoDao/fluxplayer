@@ -32,6 +32,7 @@ class ListeningAudioCacheTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val repository = TingshuRepository.get(context)
         val cache = ListeningAudioCache.get(context)
+        val originalAutomatic = cache.state.value.automatic
         val server = MockWebServer()
         val bytes = ByteArray(32_000) { (it % 127).toByte() }
         server.dispatcher = object : Dispatcher() {
@@ -67,6 +68,24 @@ class ListeningAudioCacheTest {
             cache.clear()
             repository.importSource(Uri.fromFile(file))
             val book = repository.detail("jdr:cachetest", repository.search("jdr:cachetest", "缓存", 1).first.single())
+            suspend fun listenOnce() {
+                val resource = repository.resolve(book, 0)
+                val stream = cache.dataSource(book, 0, resource).createDataSource()
+                try {
+                    stream.open(DataSpec(Uri.parse(resource.url)))
+                    val buffer = ByteArray(8192)
+                    while (stream.read(buffer, 0, buffer.size) >= 0) Unit
+                } finally {
+                    stream.close()
+                }
+            }
+            cache.setAutomatic(false)
+            listenOnce()
+            assertNull(cache.offlineResource(book, 0))
+            cache.setAutomatic(true)
+            listenOnce()
+            assertNotNull(cache.offlineResource(book, 0))
+            cache.setAutomatic(false)
             cache.download(book, 0, wholeBook = true)
             withTimeout(30_000) { while (cache.state.value.download != null) delay(100) }
             assertEquals("整本书已缓存", cache.state.value.message)
@@ -101,6 +120,7 @@ class ListeningAudioCacheTest {
             assertNull(cache.offlineResource(book, 0))
             assertNull(cache.offlineResource(book, 1))
         } finally {
+            cache.setAutomatic(originalAutomatic)
             cache.clear()
             repository.remove(entry)
             file.delete()

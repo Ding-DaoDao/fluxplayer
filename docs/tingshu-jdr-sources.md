@@ -6,7 +6,7 @@
 
 ## Flux 的登录、配置和目录扩展
 
-这些是 Flux 的附加能力，旧 Timbre 包无需修改即可继续搜索和播放；旧包不会自动获得真实网盘登录。网盘源作者需要添加 `settings` 声明和 `login`、`browse` 实现。其他 JDR 宿主是否接受这些字段取决于其实现。
+这些是 Flux 的附加能力，旧 Timbre 包无需修改即可继续搜索和播放；App 会提供通用的账号、密码、Cookie、Token 和听书路径输入项，也能读取脚本的配置接口；这些值需要由脚本读取并用于请求。真实网盘登录和目录 API 仍由书源实现。其他 JDR 宿主是否接受这些字段取决于其实现。
 
 源设置可从「听书配置 → 源名称 · 配置」或书源首页的设置按钮打开。配置和登录状态按包 ID、源 ID 隔离，使用 Android Keystore 加密存储。停用再启用、更新同 ID 包或重建引擎不会丢失配置。
 
@@ -29,7 +29,7 @@
 }
 ```
 
-每源最多 32 项，键必须唯一；`directory` 需要 `browse` 能力。保存配置后重建脚本引擎。文本、密码、选择、目录值在脚本中为字符串，开关为布尔值。
+配置类型还支持 `multiselect`（多选、逗号分隔保存）和 `button`（操作按钮，使用 `action` 标识操作）。每源最多 32 项，键必须唯一；`directory` 需要 `browse` 能力。保存配置后重建脚本引擎。文本、密码、选择、目录值在脚本中为字符串，开关为布尔值。
 
 ### 宿主 API
 
@@ -93,9 +93,46 @@ return {
 
 当前页 ID 必须唯一。`nextPage` 省略或 null 表示结束；提供时必须大于当前页。目录项可点击进入，返回按钮回到父目录；触底加载下一页。书籍项进入原有 chapters/audio 流程，其额外字段也会传递。首页从第一项 directory 设置的已选路径开始，未配置时使用 initialDirectory；路径选择器从 initialDirectory 开始浏览整个网盘。
 
-## 音频缓存
+## 与 JAR 对齐的配置接口
 
-播放页提供「缓存本章」「缓存整本」「取消」，听书配置页显示占用和已完整缓存章节数，可设置上限或清除缓存。默认上限 512 MB，达到上限按最近使用情况淘汰。支持普通 HTTP 音频及按 URL 识别的 HLS/DASH 下载，沿用源的请求头。
+除了 manifest 的 settings，也支持 registerSource 对象中的 `getCustomConfigItems()`、`settings` 或 `configItems` 数组。配置项的类型可用 Text、Switch、Select、MultiSelect、Button，也支持小写类型。按钮可直接携带 click 回调；无需另外声明 config 能力。
+
+```js
+registerSource({
+  id: 'my-drive',
+  getCustomConfigItems() {
+    return [
+      {type: 'Text', key: 'cookie', label: 'Cookie'},
+      {type: 'MultiSelect', key: 'formats', label: '音频格式', options: ['mp3', 'm4a'], default: ['mp3']},
+      {type: 'Button', label: '验证凭证', async click() {
+        const cookie = ExternalSourcePrefs.getString('my-drive.cookie', '');
+        // 调用该网盘的真实验证接口，成功后保存需要更新的凭证。
+        return {message: '验证结果由源接口返回'};
+      }}
+    ];
+  },
+  onConfigChanged(values) { /* 保存后的回调，可省略 */ },
+  reset() { /* 重置源内状态，可省略 */ }
+  // search/chapters/audio 等接口继续按 JDR 协议实现。
+});
+```
+
+`ExternalSourcePrefs.getString('<源ID>.<键>', 默认值)` 和 `putString('<源ID>.<键>', 值)` 与 JAR 的配置用法一致；也可使用 `host.settings.get/set/all`。凭证加密保存，按钮写回凭证后配置页会重新加载。保存前先提交表单值，再执行按钮回调。
+
+也支持统一的 `config(params)` 方法：action=get 返回配置数组（或 items 数组），action=save 接收 values；按钮 action 为配置项的 action 或 key。回调可返回字符串或 message 对象作为操作结果。
+
+没有配置声明的源会显示通用凭证字段。填写只表示配置保存成功，不会伪造登录成功；如果原脚本把凭证写死、从不读取宿主配置，需要修改源脚本。App 不会把 Cookie 或 Token 自动发送到任意网站。JDR 是 JavaScript 协议，不能直接执行 JAR 的 Java 类或未移植的宿主调用。
+
+## App 统一音频与封面缓存
+
+入口在「设置 → 听书配置 → App 缓存管理」，即使没有导入任何源也能管理缓存。音频和封面都有自动缓存开关、占用统计及清理操作，适用于全部 JAR/JDR 来源；本地文件直接读取，不再复制进缓存。
+
+播放时缓存已加载的音频，供后续播放和跳转复用。普通直链音频完整读完且缓存未被淘汰时，可直接从本地重播，无需重新解析地址。部分音频和部分 HLS/DASH 分片不等于完整离线下载。自动缓存关闭后仍能读取已有缓存，手动下载继续可用。
+
+书库、详情、播放、加载页面和封面取色共用独立的封面磁盘缓存（上限 128 MB）。停止自动缓存封面后仍可读取已有内容；音频和封面分别清理，不删除登录凭证、书库或收听进度。封面缓存独立于视频缩略图。
+
+
+作为自动缓存以外的完整下载功能，播放页提供「缓存本章」「缓存整本」「取消」，听书配置页显示占用和已完整缓存章节数，可设置上限或清除缓存。默认上限 512 MB，达到上限按最近使用情况淘汰。支持普通 HTTP 音频及按 URL 识别的 HLS/DASH 下载，沿用源的请求头。
 
 在线播放也使用同一个缓存，但只有完整下载且内容仍齐全的章节会标为可离线播放。离线章节直接读取本地缓存，无需再次调用源解析地址，网盘令牌过期或源停用时仍可播放已缓存内容。整本大于上限时会提示提高上限，不会把已淘汰的章节算作完整下载。清缓存或降低上限可能移除离线章节。
 

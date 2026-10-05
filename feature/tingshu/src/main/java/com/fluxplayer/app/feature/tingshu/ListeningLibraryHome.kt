@@ -57,6 +57,7 @@ import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.tingshu.ListeningProgress
 import com.fluxplayer.app.core.tingshu.ListeningSource
 import com.fluxplayer.app.core.tingshu.TingshuRepository
+import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import com.fluxplayer.app.core.ui.components.FluxLinearProgressIndicator
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
@@ -664,6 +665,7 @@ private fun CoverBox(
     ) {
         if (coverModel != null) {
             AsyncImage(
+                imageLoader = rememberBookCoverImageLoader(),
                 model = coverModel,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,

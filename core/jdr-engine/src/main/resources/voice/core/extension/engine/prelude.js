@@ -211,6 +211,7 @@
         return Object.prototype.hasOwnProperty.call(settings, key) ? settings[key] : fallback;
       },
       all() { return JSON.parse(host('__sourceSettings')()); },
+      set(key, value) { host('__settingSet')(String(key), value == null ? null : String(value)); },
     }),
     storage,
     cache: Object.freeze({
@@ -228,9 +229,42 @@
     }),
   });
 
+  globalThis.ExternalSourcePrefs = Object.freeze({
+    putString(key, value) {
+      const prefix = registered ? registered.id + '.' : '';
+      globalThis.host.settings.set(key.startsWith(prefix) ? key.slice(prefix.length) : key, value);
+    },
+    getString(key, fallback = '') {
+      const prefix = registered ? registered.id + '.' : '';
+      const normalized = key.startsWith(prefix) ? key.slice(prefix.length) : key;
+      const value = globalThis.host.settings.get(normalized, fallback);
+      return value == null ? fallback : String(value);
+    },
+  });
+
   // ---------- host-facing hooks ----------
   globalThis.__invoke = async (stage, paramsJson) => {
     if (!registered) throw new Error('源脚本未调用 registerSource');
+    if (stage === 'config' && typeof registered.config !== 'function') {
+      if (paramsJson) {
+        const p = JSON.parse(paramsJson);
+        if (p.action === 'get') {
+          const items = typeof registered.getCustomConfigItems === 'function'
+            ? await registered.getCustomConfigItems() : registered.settings || registered.configItems || [];
+          return JSON.stringify(items);
+        }
+        if (p.action === 'save') {
+          if (typeof registered.onConfigChanged === 'function') await registered.onConfigChanged(p.values);
+          if (typeof registered.reset === 'function') await registered.reset();
+          return 'null';
+        }
+        if (typeof registered.configAction === 'function') return JSON.stringify(await registered.configAction(p));
+        const items = typeof registered.getCustomConfigItems === 'function' ? await registered.getCustomConfigItems() : registered.configItems || [];
+        const item = items.find((it, index) => (it.action || it.key || 'action' + index) === p.action);
+        if (!item || typeof item.click !== 'function') throw Error('配置操作未实现');
+        return JSON.stringify((await item.click()) ?? null);
+      }
+    }
     const fn = registered[stage];
     if (typeof fn !== 'function') throw new Error('该源未实现 ' + stage + '()');
     const params = paramsJson ? JSON.parse(paramsJson) : {};
@@ -245,6 +279,9 @@
       search: typeof registered.search === 'function',
       chapters: typeof registered.chapters === 'function',
       audio: typeof registered.audio === 'function',
+      login: typeof registered.login === 'function',
+      browse: typeof registered.browse === 'function',
+      config: typeof registered.config === 'function' || typeof registered.getCustomConfigItems === 'function' || Array.isArray(registered.settings) || Array.isArray(registered.configItems),
     });
   };
 })();

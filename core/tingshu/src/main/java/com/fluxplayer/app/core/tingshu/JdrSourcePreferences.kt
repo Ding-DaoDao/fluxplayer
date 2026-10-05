@@ -22,7 +22,7 @@ internal class JdrSourcePreferences(context: Context, namespace: String, private
 
     fun values(): Map<String, String> {
         val saved = read("settings")?.let { Json.parseToJsonElement(it) as? JsonObject }
-        return fields.associate { field ->
+        return fields.filter { it.type != "button" }.associate { field ->
             val default = when (field.type) {
                 "switch" -> field.default.ifBlank { "false" }
                 "select" -> field.default.ifBlank { field.options.first() }
@@ -35,22 +35,32 @@ internal class JdrSourcePreferences(context: Context, namespace: String, private
     fun save(values: Map<String, String>) {
         require(values.keys.all { key -> fields.any { it.key == key } }) { "未知的书源配置项" }
         val updated = this.values() + values
-        fields.forEach { field ->
+        fields.filter { it.type != "button" }.forEach { field ->
             val value = updated.getValue(field.key)
             require(value.length <= 16_384) { "配置内容过长" }
             if (field.type == "select") require(value in field.options) { "无效的配置选项" }
+            if (field.type == "multiselect") require(value.split(',').filter { it.isNotBlank() }.all { it in field.options }) { "无效的多选项" }
             if (field.type == "switch") require(value in setOf("true", "false")) { "开关值无效" }
         }
-        write("settings", JsonObject(updated.mapValues { JsonPrimitive(it.value) }).toString())
+        val previous = read("settings")?.let { Json.parseToJsonElement(it) as? JsonObject } ?: JsonObject(emptyMap())
+        write("settings", JsonObject(previous + updated.mapValues { JsonPrimitive(it.value) }).toString())
     }
 
     override fun settings(): String {
         val values = values()
         return JsonObject(
-            fields.associate { field ->
+            (read("settings")?.let { Json.parseToJsonElement(it) as? JsonObject } ?: JsonObject(emptyMap())) + fields.filter { it.type != "button" }.associate { field ->
                 field.key to if (field.type == "switch") JsonPrimitive(values[field.key] == "true") else JsonPrimitive(values[field.key].orEmpty())
             },
         ).toString()
+    }
+
+    override fun putSetting(key: String, value: String?) {
+        synchronized(writeLock) {
+            val current = read("settings")?.let { Json.parseToJsonElement(it) as? JsonObject } ?: JsonObject(emptyMap())
+            val updated = if (value == null) current - key else current + (key to JsonPrimitive(value))
+            write("settings", JsonObject(updated).toString())
+        }
     }
 
     override fun get(key: String): String? = read(stateKey(key))

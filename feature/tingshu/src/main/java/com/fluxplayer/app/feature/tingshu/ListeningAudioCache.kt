@@ -44,6 +44,7 @@ import org.json.JSONObject
 
 internal data class AudioCacheState(
     val usedBytes: Long = 0,
+    val automatic: Boolean = true,
     val limitMb: Int = 512,
     val completedChapters: Int = 0,
     val download: String? = null,
@@ -58,7 +59,7 @@ internal class ListeningAudioCache private constructor(context: Context) {
     private val repository = TingshuRepository.get(context)
     private val prefs = context.getSharedPreferences("listening_audio_cache", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val mutableState = MutableStateFlow(AudioCacheState(limitMb = prefs.getInt("limitMb", 512)))
+    private val mutableState = MutableStateFlow(AudioCacheState(limitMb = prefs.getInt("limitMb", 512), automatic = prefs.getBoolean("automatic", true)))
     val state = mutableState.asStateFlow()
     private val evictor = ResizableEvictor(mutableState.value.limitMb * MB)
     private val cache = SimpleCache(File(context.filesDir, "tingshu/audio-cache"), evictor, StandaloneDatabaseProvider(context))
@@ -84,7 +85,11 @@ internal class ListeningAudioCache private constructor(context: Context) {
         resource: ListeningResource,
         offline: Boolean,
         requests: MutableSet<RequestRange>? = null,
+        forceWrite: Boolean = false,
     ): CacheDataSource.Factory {
+        if (!offline && (forceWrite || mutableState.value.automatic) && Util.inferContentType(Uri.parse(resource.url)) == C.CONTENT_TYPE_OTHER) {
+            prefs.edit().putString("stream:" + chapterKey(book, index), resource.url).apply()
+        }
         val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(resource.headers)
             .setConnectTimeoutMs(20_000).setReadTimeoutMs(20_000).setAllowCrossProtocolRedirects(true)
         val upstream = ResolvingDataSource.Factory(http) { spec ->
@@ -94,6 +99,7 @@ internal class ListeningAudioCache private constructor(context: Context) {
         return CacheDataSource.Factory().setCache(cache)
             .setUpstreamDataSourceFactory(if (offline) null else upstream)
             .setFlags(CacheDataSource.FLAG_BLOCK_ON_CACHE)
+            .apply { if (!forceWrite && !mutableState.value.automatic) setCacheWriteDataSinkFactory(null) }
             .setCacheKeyFactory { spec ->
                 val key = if (spec.uri.toString() == resource.url) chapterKey(book, index) else spec.key ?: spec.uri.toString()
                 requests?.let { synchronized(it) { it.add(RequestRange(key, spec.position, spec.length)) } }
@@ -104,13 +110,15 @@ internal class ListeningAudioCache private constructor(context: Context) {
     suspend fun offlineResource(book: ListeningBook, index: Int): ListeningResource? = withContext(Dispatchers.IO) {
         if (index !in book.episodes.indices) return@withContext null
         val key = chapterKey(book, index)
-        val raw = prefs.getString(key, null) ?: return@withContext null
-        val record = JSONObject(raw)
-        if (!ready(record)) {
+        val raw = prefs.getString(key, null)
+        if (raw != null) {
+            val record = JSONObject(raw)
+            if (ready(record)) return@withContext ListeningResource(record.getString("url"), emptyMap())
             prefs.edit().remove(key).apply()
-            return@withContext null
         }
-        ListeningResource(record.getString("url"), emptyMap())
+        val url = prefs.getString("stream:$key", null) ?: return@withContext null
+        val length = ContentMetadata.getContentLength(cache.getContentMetadata(key))
+        if (length > 0 && cache.isCached(key, 0, length)) ListeningResource(url, emptyMap()) else null
     }
 
     @Synchronized
@@ -150,7 +158,7 @@ internal class ListeningAudioCache private constructor(context: Context) {
         }
         val resource = repository.resolve(book, index)
         val requests = mutableSetOf<RequestRange>()
-        val factory = cacheFactory(book, index, resource, false, requests)
+        val factory = cacheFactory(book, index, resource, false, requests, forceWrite = true)
         val type = Util.inferContentType(Uri.parse(resource.url))
         val item = MediaItem.fromUri(resource.url)
         val downloader: Downloader = when (type) {
@@ -178,6 +186,11 @@ internal class ListeningAudioCache private constructor(context: Context) {
         check(prefs.edit().putString(chapterKey(book, index), record.toString()).commit())
     }
 
+    fun setAutomatic(enabled: Boolean) {
+        prefs.edit().putBoolean("automatic", enabled).apply()
+        mutableState.update { it.copy(automatic = enabled) }
+    }
+
     fun cancelDownload() {
         downloadJob?.cancel()
     }
@@ -199,7 +212,7 @@ internal class ListeningAudioCache private constructor(context: Context) {
             downloadJob?.cancelAndJoin()
             cache.keys.toList().forEach(cache::removeResource)
             val edit = prefs.edit()
-            prefs.all.keys.filter { it.startsWith("chapter:") }.forEach(edit::remove)
+            prefs.all.keys.filter { it.startsWith("chapter:") || it.startsWith("stream:") }.forEach(edit::remove)
             check(edit.commit())
             mutableState.update { it.copy(message = "音频缓存已清除") }
             refresh()
@@ -217,9 +230,15 @@ internal class ListeningAudioCache private constructor(context: Context) {
     }.getOrDefault(false)
 
     private fun refresh() {
-        val count = prefs.all.filterKeys { it.startsWith("chapter:") }.values.count { raw ->
+        val complete = prefs.all.filterKeys { it.startsWith("chapter:") }.filterValues { raw ->
             runCatching { ready(JSONObject(raw as String)) }.getOrDefault(false)
+        }.keys.toMutableSet()
+        prefs.all.keys.filter { it.startsWith("stream:") }.forEach { key ->
+            val chapter = key.removePrefix("stream:")
+            val length = ContentMetadata.getContentLength(cache.getContentMetadata(chapter))
+            if (length > 0 && cache.isCached(chapter, 0, length)) complete.add(chapter)
         }
+        val count = complete.size
         mutableState.update { it.copy(usedBytes = cache.cacheSpace, completedChapters = count) }
     }
 

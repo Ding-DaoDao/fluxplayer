@@ -47,6 +47,11 @@ public class JsSourceEngine private constructor(
         }
     }
 
+    public suspend fun features(): Set<String> = withContext(dispatcher) {
+        Json.parseToJsonElement(quickJs.evaluate<String>("__sourceInfo()")).jsonObject
+            .filter { (key, value) -> key != "id" && value.toString() == "true" }.keys
+    }
+
     override fun close() {
         runQuietly { quickJs.close() }
         dispatcher.close()
@@ -115,6 +120,14 @@ public class JsSourceEngine private constructor(
             log: (String) -> Unit,
             host: SourceHostBridge,
         ) {
+            quickJs.function("__settingSet") { args ->
+                val key = args[0] as String
+                require(key.matches(Regex("[a-zA-Z][a-zA-Z0-9_.-]{0,63}"))) { "无效配置键" }
+                val value = args.getOrNull(1) as? String
+                require(value == null || value.length <= 16_384) { "配置内容过长" }
+                host.putSetting(key, value)
+                null
+            }
             quickJs.function("__sourceSettings") { _ -> host.settings() }
             quickJs.function("__storageGet") { args -> host.get(storageKey(args.string(0))) }
             quickJs.function("__storageSet") { args ->

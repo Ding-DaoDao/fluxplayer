@@ -33,6 +33,7 @@ dependencies {
 
     implementation(project(":core:model"))
 
+    implementation(libs.coil.compose)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.google.android.material)

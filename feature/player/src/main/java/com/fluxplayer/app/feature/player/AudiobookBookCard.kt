@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import coil3.compose.AsyncImage
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
@@ -69,6 +70,7 @@ fun AudiobookBookCard(
                 if (coverModel != null) {
                     // 显式限定解码尺寸（2x 显示尺寸），避免大封面全尺寸解码拖慢列表
                     AsyncImage(
+                    imageLoader = rememberBookCoverImageLoader(),
                         model = coverModel,
                         contentDescription = book.title,
                         contentScale = ContentScale.Crop,

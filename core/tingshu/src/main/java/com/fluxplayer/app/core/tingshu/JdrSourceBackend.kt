@@ -31,7 +31,7 @@ data class JdrFolder(val id: String, val name: String)
 data class JdrBrowserPage(val directoryId: String, val folders: List<JdrFolder>, val books: List<Book>, val nextPage: Int?)
 
 internal class JdrSourceBackend(private val context: Context) {
-    private data class Source(val archive: JdrArchive, val metadata: ExtensionSourceMeta)
+    private data class Source(val archive: JdrArchive, val metadata: ExtensionSourceMeta, var fields: List<SourceSetting> = metadata.settings.ifEmpty { commonSettings })
 
     private val sources = linkedMapOf<String, Source>()
     private val engines = linkedMapOf<String, JsSourceEngine>()
@@ -102,33 +102,65 @@ internal class JdrSourceBackend(private val context: Context) {
 
     private suspend fun invoke(id: String, stage: String, params: String, timeout: Long): String = mutex.withLock {
         val source = checkNotNull(sources[id]) { "书源已禁用、已删除或加载失败" }
-        require(stage in source.metadata.capabilities) { "该书源不支持 $stage" }
-        val engine = engines[id] ?: JsSourceEngine.create(
-            source.metadata.id,
-            source.archive.scriptFor(source.metadata),
-            source.metadata.script,
-            OkHttpSandboxHttp(httpClient(source.archive.manifest.allowInsecure)),
-            host = preferences(source),
-        ).also { engines[id] = it }
+        val engine = engine(id, source)
+        require(stage in source.metadata.capabilities || stage in engine.features()) { "该书源不支持 $stage" }
         try {
             engine.invoke(stage, params, timeout)
         } catch (error: Exception) {
-            // A timed-out/cancelled sandbox must not be reused by the next request.
-            if (error is CancellationException) {
-                engines.remove(id)?.close()
-            }
+            if (error is CancellationException) engines.remove(id)?.close()
             throw error
         }
     }
 
+    private suspend fun engine(id: String, source: Source): JsSourceEngine = engines[id] ?: JsSourceEngine.create(
+        source.metadata.id,
+        source.archive.scriptFor(source.metadata),
+        source.metadata.script,
+        OkHttpSandboxHttp(httpClient(source.archive.manifest.allowInsecure)),
+        host = preferences(source),
+    ).also { engines[id] = it }
     suspend fun configuration(id: String): JdrConfiguration = mutex.withLock {
         val source = requireSource(id)
-        JdrConfiguration(source.metadata.settings, preferences(source).values(), "login" in source.metadata.capabilities, "browse" in source.metadata.capabilities, source.metadata.initialDirectory)
+        val engine = engine(id, source)
+        val features = engine.features()
+        val fields = if ("config" in features) {
+            SourceFeatures.parseSettings(engine.invoke("config", "{\"action\":\"get\"}", 30_000), "browse" in features)
+        } else {
+            emptyList()
+        }
+        val merged = (source.metadata.settings + fields).associateBy { it.key }.values.toList().ifEmpty {
+            commonSettings.map { if (it.key == "root" && "browse" in features) it.copy(type = "directory", default = source.metadata.initialDirectory) else it }
+        }
+        SourceFeatures.validateSettings(merged, "browse" in features)
+        if (source.fields != merged) {
+            source.fields = merged
+            engines.remove(id)?.close()
+        }
+        JdrConfiguration(source.fields, preferences(source).values(), "login" in features, "browse" in features, source.metadata.initialDirectory)
     }
 
     suspend fun saveConfiguration(id: String, values: Map<String, String>) = mutex.withLock {
-        preferences(requireSource(id)).save(values)
-        engines.remove(id)?.close()
+        val source = requireSource(id)
+        preferences(source).save(values)
+        val engine = engine(id, source)
+        try {
+            if ("config" in engine.features()) engine.invoke("config", JsonObject(mapOf("action" to JsonPrimitive("save"), "values" to JsonObject(values.mapValues { JsonPrimitive(it.value) }))).toString(), 30_000)
+        } finally {
+            engines.remove(id)?.close()
+        }
+    }
+
+    suspend fun configAction(id: String, action: String, values: Map<String, String>): String {
+        val config = configuration(id)
+        require(config.fields.any { it.type == "button" && (it.action.ifBlank { it.key }) == action }) { "未知配置操作" }
+        saveConfiguration(id, values)
+        val result = invoke(id, "config", JsonObject(mapOf("action" to JsonPrimitive(action), "values" to JsonObject(values.mapValues { JsonPrimitive(it.value) }))).toString(), 30_000)
+        val data = Json.parseToJsonElement(result)
+        return when (data) {
+            is JsonPrimitive -> if (data.toString() == "null") "操作完成" else data.content
+            is JsonObject -> (data["message"] as? JsonPrimitive)?.content ?: "操作完成"
+            else -> "操作完成"
+        }
     }
 
     suspend fun login(id: String, action: String, state: JsonObject = JsonObject(emptyMap()), cookies: String = ""): SourceLogin {
@@ -147,8 +179,8 @@ internal class JdrSourceBackend(private val context: Context) {
     suspend fun browse(id: String, directory: String?, page: Int): JdrBrowserPage {
         val root = mutex.withLock {
             val source = requireSource(id)
-            source.metadata.settings.firstOrNull { it.type == "directory" }?.let { preferences(source).values()[it.key] }
-                ?.takeIf { it.isNotBlank() } ?: source.metadata.initialDirectory
+            source.fields.firstOrNull { it.type == "directory" }?.let { preferences(source).values()[it.key] }
+                ?.takeIf { it.isNotBlank() } ?: preferences(source).values()["root"]?.takeIf { it.isNotBlank() } ?: source.metadata.initialDirectory
         }
         val selected = directory ?: root
         val result = SourceFeatures.parseDirectory(invoke(id, "browse", params(mapOf("directoryId" to selected, "page" to page, "limit" to 100)), 30_000), page)
@@ -167,7 +199,7 @@ internal class JdrSourceBackend(private val context: Context) {
     suspend fun clearMetadataCache(id: String) = mutex.withLock { preferences(requireSource(id)).clearCache() }
 
     private fun requireSource(id: String): Source = checkNotNull(sources[id]) { "书源已禁用、已删除或加载失败" }
-    private fun preferences(source: Source) = JdrSourcePreferences(context, source.archive.manifest.id + ":" + source.metadata.id, source.metadata.settings)
+    private fun preferences(source: Source) = JdrSourcePreferences(context, source.archive.manifest.id + ":" + source.metadata.id, source.fields)
 
     private fun params(base: Map<String, Any>, extras: String = "{}"): String {
         val merged = Json.parseToJsonElement(extras) as? JsonObject ?: error("无效的 JDR 附加数据")
@@ -176,6 +208,16 @@ internal class JdrSourceBackend(private val context: Context) {
                 if (value is Number) JsonPrimitive(value) else JsonPrimitive(value.toString())
             },
         ).toString()
+    }
+
+    companion object {
+        private val commonSettings = listOf(
+            SourceSetting("username", "账号"),
+            SourceSetting("password", "密码", "password"),
+            SourceSetting("cookie", "登录 Cookie", "password"),
+            SourceSetting("token", "登录 Token", "password"),
+            SourceSetting("root", "听书路径"),
+        )
     }
 
     /** Match Timbre's explicit per-package allowInsecure flag; default uses normal TLS. */

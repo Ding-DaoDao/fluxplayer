@@ -263,20 +263,45 @@ class TingshuRepository private constructor(private val context: Context) {
     }
 
     suspend fun clearJdrMetadataCache(id: String) = withContext(dispatcher) { jdr.clearMetadataCache(id) }
-    suspend fun jdrConfiguration(id: String) = withContext(dispatcher) { jdr.configuration(id) }
+    suspend fun jdrConfiguration(id: String) = withContext(dispatcher) {
+        jdr.configuration(id).also { config ->
+            _sources.value = _sources.value.map { source ->
+                if (source.id == id) source.copy(capabilities = source.capabilities + listOfNotNull("login".takeIf { config.canLogin }, "browse".takeIf { config.canBrowse })) else source
+            }
+        }
+    }
     suspend fun saveJdrConfiguration(id: String, values: Map<String, String>) = withContext(dispatcher) { jdr.saveConfiguration(id, values) }
     suspend fun jdrLogin(id: String, action: String, state: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap()), cookies: String = "") =
         withContext(dispatcher) { jdr.login(id, action, state, cookies) }
+    suspend fun jdrConfigAction(id: String, action: String, values: Map<String, String>) = withContext(dispatcher) { jdr.configAction(id, action, values) }
     suspend fun browseJdr(id: String, directory: String?, page: Int = 1) = withContext(dispatcher) { jdr.browse(id, directory, page) }
 
     suspend fun config(sourceId: String): List<ConfigItem> = withContext(dispatcher) {
-        if (jdr.handles(sourceId)) emptyList() else (source(sourceId) as? ConfigurableSource)?.getCustomConfigItems().orEmpty()
+        if (!jdr.handles(sourceId)) return@withContext (source(sourceId) as? ConfigurableSource)?.getCustomConfigItems().orEmpty()
+        val config = jdr.configuration(sourceId)
+        config.fields.map { field ->
+            val value = config.values[field.key].orEmpty()
+            when (field.type) {
+                "switch" -> ConfigItem.Switch(field.key, field.label, value == "true")
+                "select" -> ConfigItem.Select(field.key, field.label, field.options, value)
+                "multiselect" -> ConfigItem.MultiSelect(field.key, field.label, field.options, value.split(',').filter { it.isNotBlank() })
+                "button" -> ConfigItem.Button(field.label) {
+                    kotlinx.coroutines.runBlocking {
+                        jdr.configAction(sourceId, field.action.ifBlank { field.key }, jdr.configuration(sourceId).values)
+                    }
+                }
+                else -> ConfigItem.Text(field.key, field.label, value)
+            }
+        }
     }
 
     suspend fun configAction(action: () -> Unit) = withContext(dispatcher) { action() }
 
     suspend fun saveConfig(sourceId: String, values: Map<String, String>) = withContext(dispatcher) {
-        if (jdr.handles(sourceId)) return@withContext
+        if (jdr.handles(sourceId)) {
+            jdr.saveConfiguration(sourceId, values)
+            return@withContext
+        }
         source(sourceId).reset()
         val editor = context.getSharedPreferences("tingshu_source_config", Context.MODE_PRIVATE).edit()
         values.forEach { (key, value) -> editor.putString("$sourceId.$key", value) }

@@ -17,6 +17,57 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class JdrFeaturesTest {
     @Test
+    fun jarStyleConfigSavesCredentialsRunsButtonsAndPreservesHiddenState(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val repository = TingshuRepository.get(context)
+        val file = File(context.cacheDir, "config-parity.jdr")
+        val id = "jdr:configparity"
+        val entry = "jdr:flux-config-parity"
+        val manifest = """{"id":"flux-config-parity","name":"Config","version":"1","sources":[{"id":"configparity","name":"Config","script":"source.js"}]}"""
+        val script = """
+            registerSource({id:'configparity',
+              getCustomConfigItems(){return [
+                {type:'Text',key:'cookie',label:'Cookie'},
+                {type:'Text',key:'token',label:'Token'},
+                {type:'MultiSelect',key:'formats',label:'格式',options:['mp3','m4a'],default:['mp3']},
+                {type:'Button',key:'verify',label:'验证',click(){
+                  ExternalSourcePrefs.putString('configparity.token','updated-token');
+                  ExternalSourcePrefs.putString('configparity.opaque','hidden-state');
+                  return {message:'done'};
+                }}
+              ];},
+              search(){return [{id:'book',bookTitle:ExternalSourcePrefs.getString('configparity.cookie','')+'|'+ExternalSourcePrefs.getString('configparity.token','')+'|'+ExternalSourcePrefs.getString('configparity.opaque','')}];}
+            });
+        """.trimIndent()
+        ZipOutputStream(file.outputStream()).use { output ->
+            mapOf("manifest.json" to manifest, "source.js" to script).forEach { (name, data) ->
+                output.putNextEntry(ZipEntry(name))
+                output.write(data.toByteArray())
+                output.closeEntry()
+            }
+        }
+        try {
+            repository.importSource(Uri.fromFile(file))
+            val config = repository.jdrConfiguration(id)
+            assertEquals(listOf("text", "text", "multiselect", "button"), config.fields.map { it.type })
+            repository.saveConfig(id, mapOf("cookie" to "test-cookie", "formats" to "mp3,m4a"))
+            assertEquals("done", repository.jdrConfigAction(id, "verify", repository.jdrConfiguration(id).values))
+            assertEquals("updated-token", repository.jdrConfiguration(id).values["token"])
+            repository.saveConfig(id, mapOf("cookie" to "changed-cookie"))
+            repository.setEnabled(entry, false)
+            repository.setEnabled(entry, true)
+            assertTrue(repository.config(id).any { it is com.github.eprendre.tingshu.utils.ConfigItem.Button })
+            assertEquals("changed-cookie|updated-token|hidden-state", repository.search(id, "test", 1).first.single().title)
+            val stored = context.getSharedPreferences("jdr_state", android.content.Context.MODE_PRIVATE).all.values.joinToString()
+            assertFalse(stored.contains("changed-cookie"))
+            assertFalse(stored.contains("updated-token"))
+        } finally {
+            repository.remove(entry)
+            file.delete()
+        }
+    }
+
+    @Test
     fun encryptedSettingsSessionRootAndCacheSurviveReload(): Unit = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val repository = TingshuRepository.get(context)

@@ -188,7 +188,8 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
      */
     fun refresh() {
         val state = state.value
-        val source = state.source ?: return
+        val source = repository.sources.value.firstOrNull { it.id == state.source?.id } ?: state.source ?: return
+        mutableState.update { it.copy(source = source) }
         if (state.refreshing) return
         mutableState.update { it.copy(refreshing = true, error = null) }
         operation {
@@ -300,9 +301,10 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun configAction(action: () -> Unit) = operation {
-        repository.configAction(action)
+    fun configAction(action: () -> Unit, values: Map<String, String>) = operation {
         val source = state.value.source ?: return@operation
+        repository.saveConfig(source.id, values)
+        repository.configAction(action)
         val items = repository.config(source.id)
         mutableState.update { it.copy(configItems = items, configRevision = it.configRevision + 1) }
     }

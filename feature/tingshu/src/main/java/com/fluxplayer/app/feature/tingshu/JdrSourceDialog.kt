@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -116,10 +117,33 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
                 error?.let { Text(it, color = FluxTheme.colorScheme.error) }
                 (message ?: login.message).takeIf { !it.isNullOrBlank() }?.let { Text(it) }
                 configuration?.let { config ->
-                    if (config.fields.isEmpty() && !config.canLogin) Text("这个源包未提供登录或配置项")
+                    if (!config.canLogin) Text("可手动填写登录凭证；登录方式由书源提供")
                     config.fields.forEach { field ->
                         val value = values[field.key].orEmpty()
                         when (field.type) {
+                            "button" -> TextButton(onClick = {
+                                scope.launch {
+                                    runAction {
+                                        message = repository.jdrConfigAction(source.id, field.action.ifBlank { field.key }, values)
+                                        configuration = repository.jdrConfiguration(source.id)
+                                        values = configuration!!.values
+                                        if (configuration!!.canLogin) login = repository.jdrLogin(source.id, "status")
+                                    }
+                                }
+                            }, enabled = !busy) { Text(field.label) }
+                            "multiselect" -> {
+                                Text(field.label)
+                                field.options.forEach { option ->
+                                    Row {
+                                        Checkbox(option in value.split(','), { checked ->
+                                            val selected = value.split(',').filter { it.isNotBlank() }.toMutableSet()
+                                            if (checked) selected.add(option) else selected.remove(option)
+                                            values = values + (field.key to selected.joinToString(","))
+                                        }, enabled = !busy)
+                                        Text(option, Modifier.padding(top = 12.dp))
+                                    }
+                                }
+                            }
                             "switch" -> Row {
                                 Text(field.label, Modifier.weight(1f).padding(top = 12.dp))
                                 Switch(value == "true", { values = values + (field.key to it.toString()) }, enabled = !busy)
@@ -135,7 +159,7 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
                                     label = { Text(field.label) },
                                     enabled = !busy,
                                     modifier = Modifier.fillMaxWidth(),
-                                    visualTransformation = if (field.type == "password") PasswordVisualTransformation() else VisualTransformation.None,
+                                    visualTransformation = if (field.type == "password" || listOf("password", "token", "cookie").any { field.key.contains(it, true) }) PasswordVisualTransformation() else VisualTransformation.None,
                                 )
                                 if (field.type == "directory") {
                                     TextButton(onClick = {
