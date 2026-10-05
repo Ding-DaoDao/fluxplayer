@@ -1,5 +1,6 @@
 package com.fluxplayer.app.core.tingshu
 
+import android.content.Context
 import com.github.eprendre.tingshu.utils.Book
 import com.github.eprendre.tingshu.utils.Episode
 import java.security.SecureRandom
@@ -11,6 +12,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.OkHttpClient
@@ -19,9 +21,16 @@ import voice.core.extension.engine.JdrArchive
 import voice.core.extension.engine.JsSourceEngine
 import voice.core.extension.engine.OkHttpSandboxHttp
 import voice.core.extension.engine.SourceContract
+import voice.core.extension.engine.SourceFeatures
+import voice.core.extension.engine.SourceLogin
+import voice.core.extension.engine.SourceSetting
 
 /** Confined to the repository dispatcher; each script has its own QuickJS thread. */
-internal class JdrSourceBackend {
+data class JdrConfiguration(val fields: List<SourceSetting>, val values: Map<String, String>, val canLogin: Boolean, val canBrowse: Boolean, val initialDirectory: String)
+data class JdrFolder(val id: String, val name: String)
+data class JdrBrowserPage(val directoryId: String, val folders: List<JdrFolder>, val books: List<Book>, val nextPage: Int?)
+
+internal class JdrSourceBackend(private val context: Context) {
     private data class Source(val archive: JdrArchive, val metadata: ExtensionSourceMeta)
 
     private val sources = linkedMapOf<String, Source>()
@@ -35,7 +44,7 @@ internal class JdrSourceBackend {
         val archive = JdrArchive.parse(bytes)
         require(entry == "jdr:${archive.manifest.id}") { "JDR 包标识不匹配，请重新导入" }
         val entries = archive.manifest.sources.map { metadata ->
-            ListeningSource("jdr:${metadata.id}", metadata.name, archive.manifest.description, entry)
+            ListeningSource("jdr:${metadata.id}", metadata.name, archive.manifest.description, entry, metadata.capabilities.toSet())
         }
         require(entries.none { it.id in sources }) { "书源 ID 重复" }
         entries.zip(archive.manifest.sources).forEach { (entry, metadata) ->
@@ -99,6 +108,7 @@ internal class JdrSourceBackend {
             source.archive.scriptFor(source.metadata),
             source.metadata.script,
             OkHttpSandboxHttp(httpClient(source.archive.manifest.allowInsecure)),
+            host = preferences(source),
         ).also { engines[id] = it }
         try {
             engine.invoke(stage, params, timeout)
@@ -110,6 +120,54 @@ internal class JdrSourceBackend {
             throw error
         }
     }
+
+    suspend fun configuration(id: String): JdrConfiguration = mutex.withLock {
+        val source = requireSource(id)
+        JdrConfiguration(source.metadata.settings, preferences(source).values(), "login" in source.metadata.capabilities, "browse" in source.metadata.capabilities, source.metadata.initialDirectory)
+    }
+
+    suspend fun saveConfiguration(id: String, values: Map<String, String>) = mutex.withLock {
+        preferences(requireSource(id)).save(values)
+        engines.remove(id)?.close()
+    }
+
+    suspend fun login(id: String, action: String, state: JsonObject = JsonObject(emptyMap()), cookies: String = ""): SourceLogin {
+        require(action in setOf("status", "login", "poll", "webComplete", "logout")) { "未知登录操作" }
+        val params = JsonObject(mapOf("action" to JsonPrimitive(action), "state" to state, "cookies" to JsonPrimitive(cookies))).toString()
+        val result = SourceFeatures.parseLogin(invoke(id, "login", params, 30_000))
+        if (action == "logout" && result.authenticated == false) {
+            mutex.withLock {
+                preferences(requireSource(id)).clear()
+                engines.remove(id)?.close()
+            }
+        }
+        return result
+    }
+
+    suspend fun browse(id: String, directory: String?, page: Int): JdrBrowserPage {
+        val root = mutex.withLock {
+            val source = requireSource(id)
+            source.metadata.settings.firstOrNull { it.type == "directory" }?.let { preferences(source).values()[it.key] }
+                ?.takeIf { it.isNotBlank() } ?: source.metadata.initialDirectory
+        }
+        val selected = directory ?: root
+        val result = SourceFeatures.parseDirectory(invoke(id, "browse", params(mapOf("directoryId" to selected, "page" to page, "limit" to 100)), 30_000), page)
+        val books = result.items.filterNot { it.directory }.map { item ->
+            val extra = item.extra + mapOf("bookTitle" to JsonPrimitive(item.name))
+            val parsed = SourceContract.parseSearchResults(JsonArray(listOf(JsonObject(extra))).toString()).single()
+            Book(parsed.cover, parsed.id, parsed.title, parsed.author, "").apply {
+                sourceId = id
+                intro = parsed.intro
+                jdrExtras = parsed.extra.toString()
+            }
+        }
+        return JdrBrowserPage(selected, result.items.filter { it.directory }.map { JdrFolder(it.id, it.name) }, books, result.nextPage)
+    }
+
+    suspend fun clearMetadataCache(id: String) = mutex.withLock { preferences(requireSource(id)).clearCache() }
+
+    private fun requireSource(id: String): Source = checkNotNull(sources[id]) { "书源已禁用、已删除或加载失败" }
+    private fun preferences(source: Source) = JdrSourcePreferences(context, source.archive.manifest.id + ":" + source.metadata.id, source.metadata.settings)
 
     private fun params(base: Map<String, Any>, extras: String = "{}"): String {
         val merged = Json.parseToJsonElement(extras) as? JsonObject ?: error("无效的 JDR 附加数据")

@@ -193,6 +193,41 @@
       JSON.parse(await host('__httpRequest')('POST', String(url), JSON.stringify(options))),
   };
 
+  // Flux extensions: settings are read-only; state/cache are isolated by source.
+  const storage = Object.freeze({
+    get(key, fallback = null) {
+      const value = host('__storageGet')(String(key));
+      return value == null ? fallback : JSON.parse(value);
+    },
+    set(key, value) { host('__storageSet')(String(key), JSON.stringify(value)); },
+    remove(key) { host('__storageRemove')(String(key)); },
+    clear() { host('__storageClear')(); },
+  });
+  globalThis.host = Object.freeze({
+    version: 1,
+    settings: Object.freeze({
+      get(key, fallback = null) {
+        const settings = JSON.parse(host('__sourceSettings')());
+        return Object.prototype.hasOwnProperty.call(settings, key) ? settings[key] : fallback;
+      },
+      all() { return JSON.parse(host('__sourceSettings')()); },
+    }),
+    storage,
+    cache: Object.freeze({
+      get(key, fallback = null) {
+        const item = storage.get('cache:' + key);
+        if (!item) return fallback;
+        if (item.expiresAt <= Date.now()) { storage.remove('cache:' + key); return fallback; }
+        return item.value;
+      },
+      set(key, value, ttlSeconds = 3600) {
+        if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) throw Error('缓存时长必须大于 0');
+        storage.set('cache:' + key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+      },
+      remove(key) { storage.remove('cache:' + key); },
+    }),
+  });
+
   // ---------- host-facing hooks ----------
   globalThis.__invoke = async (stage, paramsJson) => {
     if (!registered) throw new Error('源脚本未调用 registerSource');

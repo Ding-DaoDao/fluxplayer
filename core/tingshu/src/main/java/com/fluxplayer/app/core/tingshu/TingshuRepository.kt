@@ -38,7 +38,7 @@ data class SourcePackage(
     val error: String? = null,
 )
 
-data class ListeningSource(val id: String, val name: String, val description: String, val packageEntry: String)
+data class ListeningSource(val id: String, val name: String, val description: String, val packageEntry: String, val capabilities: Set<String> = emptySet())
 
 data class ListeningBook(
     val key: String,
@@ -64,7 +64,7 @@ class TingshuRepository private constructor(private val context: Context) {
     private val bookDirectory = File(context.filesDir, "tingshu/books").apply { mkdirs() }
     private val prefs = context.getSharedPreferences("tingshu_library", Context.MODE_PRIVATE)
     private val loaded = linkedMapOf<String, TingShu>()
-    private val jdr = JdrSourceBackend()
+    private val jdr = JdrSourceBackend(context)
     private val packageMutex = Mutex()
     private val _packages = MutableStateFlow<List<SourcePackage>>(emptyList())
     val packages = _packages.asStateFlow()
@@ -261,6 +261,13 @@ class TingshuRepository private constructor(private val context: Context) {
         val keys = JSONArray(prefs.getString("recentBooks", "[]"))
         return List(keys.length()) { keys.getString(it) }
     }
+
+    suspend fun clearJdrMetadataCache(id: String) = withContext(dispatcher) { jdr.clearMetadataCache(id) }
+    suspend fun jdrConfiguration(id: String) = withContext(dispatcher) { jdr.configuration(id) }
+    suspend fun saveJdrConfiguration(id: String, values: Map<String, String>) = withContext(dispatcher) { jdr.saveConfiguration(id, values) }
+    suspend fun jdrLogin(id: String, action: String, state: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap()), cookies: String = "") =
+        withContext(dispatcher) { jdr.login(id, action, state, cookies) }
+    suspend fun browseJdr(id: String, directory: String?, page: Int = 1) = withContext(dispatcher) { jdr.browse(id, directory, page) }
 
     suspend fun config(sourceId: String): List<ConfigItem> = withContext(dispatcher) {
         if (jdr.handles(sourceId)) emptyList() else (source(sourceId) as? ConfigurableSource)?.getCustomConfigItems().orEmpty()

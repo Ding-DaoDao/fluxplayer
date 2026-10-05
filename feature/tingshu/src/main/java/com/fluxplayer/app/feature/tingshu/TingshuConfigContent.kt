@@ -40,6 +40,7 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
     val state by viewModel.state.collectAsStateWithLifecycle()
     val sources by viewModel.repository.sources.collectAsStateWithLifecycle()
     val packages by viewModel.repository.packages.collectAsStateWithLifecycle()
+    var configuringJdr by remember { mutableStateOf<com.fluxplayer.app.core.tingshu.ListeningSource?>(null) }
     var deleting by remember { mutableStateOf<String?>(null) }
     var showImportInfo by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -53,6 +54,7 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
         if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         state.error?.let { Text(it, color = FluxTheme.colorScheme.error) }
         if (packages.isEmpty()) Text("暂无书源。导入后将在听书首页显示。", style = FluxTheme.typography.bodyMedium)
+        ListeningCacheSettings()
         packages.forEach { pkg ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -66,7 +68,7 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
                     pkg.error?.let { Text(it, color = FluxTheme.colorScheme.error) }
                     sources.filter { it.packageEntry == pkg.entry }.forEach { source ->
                         if (source.id.startsWith("jdr:")) {
-                            Text(source.name, modifier = Modifier.padding(vertical = 8.dp))
+                            TextButton(onClick = { configuringJdr = source }, enabled = !state.loading) { Text("${source.name} · 配置") }
                         } else {
                             TextButton(onClick = { viewModel.configure(source) }, enabled = !state.loading, modifier = Modifier.fillMaxWidth()) {
                                 Text("${source.name} · 配置")
@@ -106,6 +108,7 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } },
         )
     }
+    configuringJdr?.let { source -> JdrSourceDialog(source, viewModel.repository) { configuringJdr = null } }
     state.configItems?.let { items ->
         SourceConfigDialog(state.source!!.id, items, state.loading, viewModel::dismissConfig, viewModel::saveConfig, viewModel::configAction, state.configRevision, state.error)
     }

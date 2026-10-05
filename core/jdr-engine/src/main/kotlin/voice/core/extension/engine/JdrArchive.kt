@@ -15,6 +15,8 @@ public data class ExtensionSourceMeta(
     public val script: String,
     /** Subset of `search`, `chapters`, `audio`. */
     public val capabilities: List<String> = listOf(CAP_SEARCH, CAP_CHAPTERS, CAP_AUDIO),
+    public val settings: List<SourceSetting> = emptyList(),
+    public val initialDirectory: String = "0",
 ) {
     public companion object {
         public const val CAP_SEARCH: String = "search"
@@ -66,7 +68,7 @@ public class JdrArchive private constructor(
         private val MANIFEST_ID_REGEX = Regex("^[a-z0-9][a-z0-9._-]{1,63}$")
         private val SOURCE_ID_REGEX = Regex("^[a-z0-9][a-z0-9_-]{0,63}$")
         private val KNOWN_CAPABILITIES =
-            setOf(ExtensionSourceMeta.CAP_SEARCH, ExtensionSourceMeta.CAP_CHAPTERS, ExtensionSourceMeta.CAP_AUDIO)
+            setOf(ExtensionSourceMeta.CAP_SEARCH, ExtensionSourceMeta.CAP_CHAPTERS, ExtensionSourceMeta.CAP_AUDIO, "login", "browse")
 
         private val json = Json { ignoreUnknownKeys = true }
 
@@ -158,6 +160,7 @@ public class JdrArchive private constructor(
                 }
                 if (source.name.isBlank()) throw JdrFormatException("源 ${source.id} 的 name 不能为空")
                 if (source.script.isBlank()) throw JdrFormatException("源 ${source.id} 的 script 不能为空")
+                SourceFeatures.validateSettings(source.settings, "browse" in source.capabilities)
                 val unknown = source.capabilities - KNOWN_CAPABILITIES
                 if (unknown.isNotEmpty()) {
                     throw JdrFormatException("源 ${source.id} 含未知能力: $unknown")

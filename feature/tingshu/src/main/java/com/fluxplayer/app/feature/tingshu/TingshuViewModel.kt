@@ -4,6 +4,7 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.fluxplayer.app.core.tingshu.JdrFolder
 import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.tingshu.ListeningSource
 import com.fluxplayer.app.core.tingshu.TingshuRepository
@@ -21,6 +22,9 @@ data class SourceBrowseState(
     val source: ListeningSource? = null,
     val menus: List<CategoryMenu> = emptyList(),
     val books: List<Book> = emptyList(),
+    val folders: List<JdrFolder> = emptyList(),
+    val directoryId: String? = null,
+    val browseNextPage: Int? = null,
     val detail: ListeningBook? = null,
     /** 播放确认弹窗预解析出的详情，就绪后可一键起播 */
     val pendingDetail: ListeningBook? = null,
@@ -43,7 +47,7 @@ data class SourceBrowseState(
 )
 
 internal val ListeningSource.isCloudLibrary: Boolean
-    get() = packageEntry in setOf("sources_by_pan123", "sources_by_quark", "sources_by_cloud189", "sources_by_yun139")
+    get() = "browse" in capabilities || packageEntry in setOf("sources_by_pan123", "sources_by_quark", "sources_by_cloud189", "sources_by_yun139")
 
 class TingshuViewModel(application: Application) : AndroidViewModel(application) {
     val repository = TingshuRepository.get(application)
@@ -62,6 +66,11 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         history.clear()
         mutableState.value = SourceBrowseState(source = source, title = source.name)
         operation {
+            if ("browse" in source.capabilities) {
+                val page = repository.browseJdr(source.id, null)
+                mutableState.update { it.copy(books = page.books, folders = page.folders, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
+                return@operation
+            }
             val menus = repository.menus(source.id)
             val tabs = menus.flatMap { it.tabs }
             // 云盘源的单入口代表配置的根目录，直接加载，不把隐藏入口显示为书籍。
@@ -78,6 +87,24 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
                 }
             } else {
                 mutableState.update { it.copy(menus = menus.filter { menu -> menu.tabs.isNotEmpty() }) }
+            }
+        }
+    }
+
+    fun browseDirectory(id: String, name: String, append: Boolean = false) {
+        val source = state.value.source ?: return
+        val previous = state.value
+        val pageNumber = if (append) previous.browseNextPage ?: return else 1
+        operation {
+            val page = repository.browseJdr(source.id, id, pageNumber)
+            if (!append) history.add(previous.copy(loading = false, error = null))
+            mutableState.update {
+                it.copy(
+                    books = if (append) (it.books + page.books).distinctBy { book -> book.bookUrl } else page.books,
+                    folders = if (append) (it.folders + page.folders).distinctBy { folder -> folder.id } else page.folders,
+                    directoryId = page.directoryId, browseNextPage = page.nextPage, page = pageNumber,
+                    menus = emptyList(), title = name, query = "", canGoBack = history.isNotEmpty(),
+                )
             }
         }
     }
@@ -118,6 +145,9 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
                     menus = emptyList(),
                     title = "搜索：${query.trim()}",
                     query = query.trim(),
+                    folders = emptyList(),
+                    directoryId = null,
+                    browseNextPage = null,
                     page = page,
                     totalPages = total,
                     nextUrl = "",
@@ -133,6 +163,8 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         if (!hasMore(state)) return
         if (state.query.isNotBlank()) {
             search(state.query, true)
+        } else if (state.directoryId != null && state.browseNextPage != null) {
+            browseDirectory(state.directoryId, state.title, true)
         } else if (state.nextUrl.isNotBlank()) {
             category(state.nextUrl, state.title, true)
         }
@@ -140,13 +172,12 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
 
     /** 是否还有下一页：搜索看 totalPages，分类看 nextUrl。 */
     private fun hasMore(state: SourceBrowseState): Boolean =
-        if (state.query.isNotBlank()) state.page < state.totalPages else state.nextUrl.isNotBlank()
+        if (state.query.isNotBlank()) state.page < state.totalPages else state.browseNextPage != null || state.nextUrl.isNotBlank()
 
     /** 供列表触底回调：返回是否真的发起了加载（已到末页或正在加载时为 false）。 */
     fun loadMoreIfNeeded(): Boolean {
         val state = state.value
         if (state.loading || state.loadingMore || !hasMore(state)) return false
-        mutableState.update { it.copy(loadingMore = true) }
         nextPage()
         return true
     }
@@ -161,6 +192,11 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         if (state.refreshing) return
         mutableState.update { it.copy(refreshing = true, error = null) }
         operation {
+            if (state.query.isBlank() && "browse" in source.capabilities) {
+                val page = repository.browseJdr(source.id, if (state.canGoBack) state.directoryId else null)
+                mutableState.update { it.copy(books = page.books, folders = page.folders, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
+                return@operation
+            }
             val refreshed = when {
                 state.canGoBack && state.query.isNotBlank() ->
                     repository.search(source.id, state.query, 1)
@@ -229,7 +265,6 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         history.clear()
         mutableState.value = SourceBrowseState(loading = true)
         val book = repository.book(key)
-        require(repository.sources.value.any { it.id == book.sourceId }) { "请先启用或重新导入这本书的书源" }
         mutableState.update { it.copy(detail = book) }
     }
 
@@ -241,7 +276,6 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         history.clear()
         mutableState.update { it.copy(loading = true, error = null) }
         val book = repository.book(key)
-        require(repository.sources.value.any { it.id == book.sourceId }) { "请先启用或重新导入这本书的书源" }
         onReady(book)
     }
 

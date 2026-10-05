@@ -32,6 +32,7 @@ kotlin {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
     implementation(project(":core:tingshu"))
     implementation(project(":core:ui"))
     implementation(project(":core:model"))
@@ -43,6 +44,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtimeCompose)
     implementation(libs.androidx.lifecycle.viewModel.ktx)
     implementation(libs.androidx.lifecycle.viewModelCompose)
+    implementation(libs.androidx.media3.database)
+    implementation(libs.androidx.media3.datasource)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.androidx.media3.exoplayer.dash)

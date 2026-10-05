@@ -10,9 +10,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
@@ -35,7 +32,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 data class ListeningPlaybackState(
     val book: ListeningBook? = null,
@@ -238,18 +234,11 @@ class TingshuPlaybackService : MediaSessionService() {
                 val book = repository.book(key)
                 require(index in book.episodes.indices) { "章节不存在" }
                 ListeningPlayback.mutableState.value = ListeningPlaybackState(book = book, index = index, loading = true, lastPlayedAt = System.currentTimeMillis())
-                val resource = repository.resolve(book, index)
+                val audioCache = ListeningAudioCache.get(this@TingshuPlaybackService)
+                val offline = audioCache.offlineResource(book, index)
+                val resource = offline ?: repository.resolve(book, index)
                 repository.markPlayed(book)
-                val http = DefaultHttpDataSource.Factory()
-                    .setDefaultRequestProperties(resource.headers)
-                    .setConnectTimeoutMs(20_000).setReadTimeoutMs(20_000)
-                    .setAllowCrossProtocolRedirects(true)
-                // 解析器在媒体加载线程运行，为每个音频或 HLS 分片分别获取该书源的请求头。
-                val dataSource = ResolvingDataSource.Factory(DefaultDataSource.Factory(this@TingshuPlaybackService, http)) { spec ->
-                    val headers = runBlocking { repository.playbackHeaders(book.sourceId, spec.uri.toString()) }
-                    spec.withRequestHeaders(resource.headers + spec.httpRequestHeaders + headers)
-                }
-                val factory = DefaultMediaSourceFactory(dataSource)
+                val factory = DefaultMediaSourceFactory(audioCache.dataSource(book, index, resource, offline != null))
                 val episode = book.episodes[index]
                 val item = MediaItem.Builder().setUri(resource.url)
                     .setMediaId("tingshu://${book.key}/$index")

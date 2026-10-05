@@ -71,6 +71,7 @@ public class JsSourceEngine private constructor(
             http: SandboxHttp,
             log: (String) -> Unit = {},
             memoryLimitBytes: Long = DEFAULT_MEMORY_LIMIT_BYTES,
+            host: SourceHostBridge = MemorySourceHost(),
         ): JsSourceEngine {
             val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "js-source-$sourceId") }
             val dispatcher = executor.asCoroutineDispatcher()
@@ -78,7 +79,7 @@ public class JsSourceEngine private constructor(
             try {
                 withContext(dispatcher) {
                     quickJs.memoryLimit = memoryLimitBytes
-                    defineBindings(quickJs, http, log)
+                    defineBindings(quickJs, http, log, host)
                     quickJs.evaluate<Unit>(readPrelude(), "prelude.js")
                     quickJs.evaluate<Unit>(script, scriptName)
                     val info = quickJs.evaluate<String?>("__sourceInfo()")
@@ -112,7 +113,25 @@ public class JsSourceEngine private constructor(
             quickJs: QuickJs,
             http: SandboxHttp,
             log: (String) -> Unit,
+            host: SourceHostBridge,
         ) {
+            quickJs.function("__sourceSettings") { _ -> host.settings() }
+            quickJs.function("__storageGet") { args -> host.get(storageKey(args.string(0))) }
+            quickJs.function("__storageSet") { args ->
+                val value = args.string(1)
+                require(value.toByteArray().size <= 256 * 1024) { "书源存储单项不能超过 256 KB" }
+                Json.parseToJsonElement(value)
+                host.set(storageKey(args.string(0)), value)
+                null
+            }
+            quickJs.function("__storageRemove") { args ->
+                host.remove(storageKey(args.string(0)))
+                null
+            }
+            quickJs.function("__storageClear") { _ ->
+                host.clear()
+                null
+            }
             quickJs.function("__md5Hex") { args -> CryptoOps.md5Hex(args.string(0)) }
             quickJs.function("__sha256Hex") { args -> CryptoOps.sha256Hex(args.string(0)) }
             quickJs.function("__hmacSha256Hex") { args -> CryptoOps.hmacSha256Hex(args.string(0), args.string(1)) }
@@ -149,6 +168,11 @@ public class JsSourceEngine private constructor(
             quickJs.asyncFunction("__httpRequest") { args ->
                 http.request(args.string(0), args.string(1), args.string(2))
             }
+        }
+
+        private fun storageKey(key: String): String {
+            require(key.isNotBlank() && key.length <= 128) { "无效的书源存储键" }
+            return key
         }
 
         private fun readPrelude(): String {

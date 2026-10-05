@@ -1,0 +1,19 @@
+{
+  "id": "flux.netdisk.demo",
+  "name": "网盘能力演示（不连接真实网盘）",
+  "version": "1.0.0",
+  "description": "用于验证登录、保存状态、目录选择和缓存的演示源。请勿填写真实网盘凭证。音频地址需要自行填写。",
+  "sources": [{
+    "id": "flux-netdisk-demo",
+    "name": "网盘能力演示",
+    "script": "source.js",
+    "capabilities": ["search", "chapters", "audio", "login", "browse"],
+    "initialDirectory": "0",
+    "settings": [
+      {"key": "username", "label": "演示账号（不要填真实账号）", "default": "demo"},
+      {"key": "password", "label": "演示密码（任意值）", "type": "password", "default": "demo"},
+      {"key": "root", "label": "听书根目录", "type": "directory", "default": "0"},
+      {"key": "audioUrl", "label": "用于测试缓存的 HTTP 音频地址"}
+    ]
+  }]
+}

@@ -37,7 +37,7 @@ dependencies {
     api(libs.rxjava)
     api(libs.rxkotlin)
     implementation(libs.okhttp.core)
-    implementation(project(":core:jdr-engine"))
+    api(project(":core:jdr-engine"))
     implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit4)
     androidTestImplementation(libs.androidx.test.ext)

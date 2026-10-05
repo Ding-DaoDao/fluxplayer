@@ -105,8 +105,20 @@ fun TingshuSourceContent(
         viewModel.back()
         if (state.source == null) onExit()
     }
+    var showJdrSettings by remember { mutableStateOf(false) }
+    if (showJdrSettings) {
+        state.source?.let { source ->
+            JdrSourceDialog(source, viewModel.repository) {
+                showJdrSettings = false
+                viewModel.refresh()
+            }
+        }
+    }
     Column(modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (state.source?.isCloudLibrary != true) {
+        if (state.source?.id?.startsWith("jdr:") == true) {
+            TextButton(onClick = { showJdrSettings = true }, enabled = !state.loading) { Text("登录与书源设置") }
+        }
+        if (state.source?.let { if (it.id.startsWith("jdr:")) "search" in it.capabilities else !it.isCloudLibrary } == true) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -165,7 +177,7 @@ fun TingshuSourceContent(
         }
         val listState = rememberLazyListState()
         // 触底自动加载下一页：提前 3 项预加载，滚到底后不再触发
-        LaunchedEffect(listState, state.books.size, state.nextUrl, state.totalPages) {
+        LaunchedEffect(listState, state.books.size + state.folders.size, state.nextUrl, state.totalPages, state.browseNextPage) {
             snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
                 .collect { lastVisible ->
                     val total = listState.layoutInfo.totalItemsCount
@@ -217,6 +229,11 @@ fun TingshuSourceContent(
                         )
                     }
                 }
+                items(state.folders, key = { "folder-${it.id}" }) { folder ->
+                    TextButton(onClick = { viewModel.browseDirectory(folder.id, folder.name) }, enabled = !state.loading, modifier = Modifier.fillMaxWidth()) {
+                        Text("目录 · ${folder.name}")
+                    }
+                }
                 items(state.books) { book ->
                     AudiobookBookCard(
                         book = AudioBook(book.title, book.bookUrl, null, 0, emptyList()),
@@ -230,7 +247,7 @@ fun TingshuSourceContent(
                         },
                     )
                 }
-                if (state.books.isEmpty() && state.menus.isEmpty() && !state.loading) {
+                if (state.books.isEmpty() && state.folders.isEmpty() && state.menus.isEmpty() && !state.loading) {
                     item {
                         Column(
                             Modifier.fillMaxWidth().padding(vertical = 48.dp),
