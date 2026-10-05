@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <application>
         <activity android:name=".TingshuPlayerActivity" android:exported="false" android:theme="@style/NextPlayer" />
+        <!-- 书源 WebView 登录页：加载网盘登录页，让 Cookie 落进系统 CookieManager -->
+        <activity android:name=".SourceLoginActivity" android:exported="false" android:theme="@style/NextPlayer" />
         <service
             android:name=".TingshuPlaybackService"
             android:exported="false"

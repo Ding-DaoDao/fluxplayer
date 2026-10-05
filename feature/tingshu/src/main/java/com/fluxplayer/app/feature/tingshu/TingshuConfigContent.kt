@@ -21,11 +21,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -45,6 +47,14 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
     var showImportInfo by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.importSource(uri)
+    }
+    val context = LocalContext.current
+    // 书源声明 ILogin 后，登录页地址由源提供；此处只负责启动并消费一次性事件
+    LaunchedEffect(state.pendingLogin) {
+        state.pendingLogin?.let { pending ->
+            SourceLoginActivity.start(context, pending.sourceName, pending.url, pending.userAgent)
+            viewModel.consumePendingLogin()
+        }
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -69,8 +79,18 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
                         if (source.id.startsWith("jdr:")) {
                             TextButton(onClick = { configuringJdr = source }, enabled = !state.loading) { Text("${source.name} · 配置") }
                         } else {
-                            TextButton(onClick = { viewModel.configure(source) }, enabled = !state.loading, modifier = Modifier.fillMaxWidth()) {
-                                Text("${source.name} · 配置")
+                            Row(Modifier.fillMaxWidth()) {
+                                TextButton(
+                                    onClick = { viewModel.configure(source) },
+                                    enabled = !state.loading,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("${source.name} · 配置")
+                                }
+                                // 天翼/夸克/移动等网盘源：登录页由源提供，Cookie 落到系统 CookieManager
+                                TextButton(onClick = { viewModel.startWebLogin(source) }, enabled = !state.loading) {
+                                    Text("登录")
+                                }
                             }
                         }
                     }

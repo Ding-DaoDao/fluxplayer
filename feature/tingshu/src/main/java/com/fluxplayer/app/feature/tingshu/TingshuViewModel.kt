@@ -44,6 +44,16 @@ data class SourceBrowseState(
     val configItems: List<ConfigItem>? = null,
     val configRevision: Int = 0,
     val canGoBack: Boolean = false,
+    /** 待启动的书源 WebView 登录页，UI 侧消费后调SourceLoginActivity 并清空 */
+    val pendingLogin: PendingLogin? = null,
+)
+
+/** 书源 WebView 登录所需的全部信息，由 SourceHost.loginInfo() 提供 */
+data class PendingLogin(
+    val sourceId: String,
+    val sourceName: String,
+    val url: String,
+    val userAgent: String,
 )
 
 internal val ListeningSource.isCloudLibrary: Boolean
@@ -310,6 +320,29 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun dismissConfig() = mutableState.update { it.copy(configItems = null) }
+
+    /**
+     * 打开书源 WebView 登录页。
+     *
+     * 天翼/夸克/移动等网盘源实现了 ILogin，登录页地址由书源提供；登录成功后 Cookie
+     * 由 WebView 写入系统 CookieManager，书源随后自行读取，无需在此校验结果。
+     * JDR 源有各自的登录实现，不走这条路径。
+     *
+     * 登录信息写入 [TingshuUiState.pendingLogin]，由 UI 侧消费后启动登录页。
+     */
+    fun startWebLogin(source: ListeningSource) {
+        if (source.id.startsWith("jdr:")) return
+        operation {
+            val info = repository.loginInfo(source.id)
+            if (info == null) {
+                mutableState.update { it.copy(error = "该书源未提供 WebView 登录页") }
+            } else {
+                mutableState.update { it.copy(pendingLogin = PendingLogin(source.id, source.name, info.url, info.userAgent)) }
+            }
+        }
+    }
+
+    fun consumePendingLogin() = mutableState.update { it.copy(pendingLogin = null) }
 
     fun dismissError() = mutableState.update { it.copy(error = null) }
 

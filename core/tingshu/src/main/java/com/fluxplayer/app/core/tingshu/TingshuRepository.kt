@@ -276,6 +276,16 @@ class TingshuRepository private constructor(private val context: Context) {
     suspend fun jdrConfigAction(id: String, action: String, values: Map<String, String>) = withContext(dispatcher) { jdr.configAction(id, action, values) }
     suspend fun browseJdr(id: String, directory: String?, page: Int = 1) = withContext(dispatcher) { jdr.browse(id, directory, page) }
 
+    /**
+     * 取书源的 WebView 登录页信息（URL + UA）。
+     * 天翼/夸克/移动等网盘源实现了 ILogin，仅 JAR 书源走这条路径；
+     * JDR 源有各自的登录实现，不在此列。书源未给出可用地址时返回 null，由调用方降级提示。
+     */
+    suspend fun loginInfo(sourceId: String): SourceHost.LoginInfo? = withContext(dispatcher) {
+        if (jdr.handles(sourceId)) return@withContext null
+        runCatching { SourceHost.loginInfo(source(sourceId)) }.getOrNull()
+    }
+
     suspend fun config(sourceId: String): List<ConfigItem> = withContext(dispatcher) {
         if (!jdr.handles(sourceId)) return@withContext (source(sourceId) as? ConfigurableSource)?.getCustomConfigItems().orEmpty()
         val config = jdr.configuration(sourceId)
