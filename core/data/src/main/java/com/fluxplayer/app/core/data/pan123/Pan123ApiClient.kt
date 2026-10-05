@@ -286,21 +286,25 @@ class Pan123ApiClient(
     // region ==================== 文件操作 ====================
 
     /**
-     * 列出文件 — 使用 Web API + Page 页码分页（参数区分大小写）
+     * 列出文件 — 使用 Web API + `page` 页码分页。
      * API: https://api.123278.com/b/api/file/list/new
+     *
+     * 分页参数必须是小写 `page`：服务端只认小写，写成大写 `Page` 会被静默忽略，
+     * 导致 page=2 仍返回第 1 页数据（表现为「加载更多」转圈后列表不动）。
+     * 不要加 `next` 参数——`Page`/`next` 那套属于分享接口 [listShareFiles]，
+     * 误用到自己网盘列目录上会让分页失效。
      */
     suspend fun listFiles(
         parentFileId: String = "0",
         page: Int = 1,
-        orderBy: String = "update_time",
-        orderDirection: String = "desc",
+        orderBy: String = "file_name",
+        orderDirection: String = "asc",
         searchData: String = ""
     ): Result<Pan123ListResult> = runCatching {
         val url = "$WEB_API_BASE/file/list/new".toHttpUrl().newBuilder()
             .addQueryParameter("driveId", "0")
             .addQueryParameter("limit", "100")
-            .addQueryParameter("next", "0")
-            .addQueryParameter("Page", page.toString())
+            .addQueryParameter("page", page.toString())
             .addQueryParameter("orderBy", orderBy)
             .addQueryParameter("orderDirection", orderDirection)
             .addQueryParameter("parentFileId", parentFileId)
@@ -351,7 +355,8 @@ class Pan123ApiClient(
                 raw = item
             )
         }
-        val next = data?.optString("Next")?.takeIf { it.isNotBlank() && it != "null" }
+        // 自己网盘响应不含 Next 游标；仅当服务端异常下发时才透传，hasMore 不依赖它。
+        val next = data?.optString("Next")?.takeIf { it.isNotBlank() && it != "null" && it != "-1" }
         Pan123ListResult(items, next)
     }
 

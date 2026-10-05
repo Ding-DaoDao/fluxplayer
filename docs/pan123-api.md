@@ -281,10 +281,17 @@ Headers: Web 组
 
 - **成功判定**：`code == 0`
 - **缩略图提取规则**：优先 `Thumbnail`，否则若 `DownloadUrl` 含 `trade_key=123pan-thumbnail` 就用它，否则 `null`
-- **分页**：`page` 递增；`Pan123ListResult.nextCursor` **恒为 `null`**，UI 侧靠 `items.size >= 100` 判断 `hasMore`
+- **分页**：`page` 递增；`Pan123ListResult.nextCursor` **恒为 `null`**（该字段属于分享接口的游标语义），`hasMore` 只依据 `items.size >= 100`（`Pan123ListResult.PAGE_SIZE`）
 - **搜索**：`searchData` 非空即为全局搜索，此时 `parentFileId` 固定 `"0"`
 
-> 代码位置：`Pan123ApiClient.kt:291-352`
+> ⚠️ **踩坑警告（2026-10-05 已修复）**：`page` 必须**小写**。服务端对小写 `page` /大写 `Page` 区分对待，只认小写。
+> 历史上曾误用分享接口（第13 节）的 `Page` + `next=0` 参数组合，大写 `Page` 被服务端**静默忽略**（不报错），
+> 导致 `page=2` 仍返回第 1 页数据；叠加 `hasMore` 依赖 `nextCursor` 后，「加载更多」表现为
+> **转圈 → 列表不动 → 直接提示没有更多**。
+> 回归测试见 `core/data/src/androidTest/.../Pan123PaginationTest.kt`（androidTest，需真机/模拟器）。
+> **切勿**把 `Page`/`next` 与本接口混用。
+
+> 代码位置：`Pan123ApiClient.kt:288-360`
 
 ---
 
@@ -650,7 +657,7 @@ cipherText(Base64) → decode → [ IV(16B) | 密文 ] → AES 解密 → UTF-8 
 
 | 模型 | 字段 |
 |---|---|
-| `Pan123ListResult` | `items`、`nextCursor`（**恒 null**） |
+| `Pan123ListResult` | `items`、`nextCursor`（自己网盘**恒 null**，勿用于分页判断）；派生属性 `hasMore` = `items.size >= PAGE_SIZE(100)`；伴生常量 `PAGE_SIZE` |
 | `VideoPlayResult` | `urls: List<String>`、`names: List<String>`（下标一一对应） |
 | `DownloadInfo` | `url`、`fileName`、`size`、`headers`（当前实现未填充） |
 | `LoginResult` | `token`、`refreshTokenExpireTime`（秒级时间戳） |
