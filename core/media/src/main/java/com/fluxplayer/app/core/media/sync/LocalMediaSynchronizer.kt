@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import coil3.ImageLoader
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.fluxplayer.app.core.common.Dispatcher
+import com.fluxplayer.app.core.common.LOCAL_VIDEO_THUMBNAIL_PREFIX
 import com.fluxplayer.app.core.common.NextDispatchers
 import com.fluxplayer.app.core.common.di.ApplicationScope
 import com.fluxplayer.app.core.common.extensions.VIDEO_COLLECTION_URI
@@ -165,6 +166,11 @@ class LocalMediaSynchronizer @Inject constructor(
         // Delete unwanted thumbnails
         unwantedMedia.forEach { media ->
             try {
+                // 必须与 VideoThumbnailDecoder 的写入键规则一致（统一加前缀），
+                // 否则键对不上，磁盘缩略图删不掉、会一直占空间。
+                val cacheKey = LOCAL_VIDEO_THUMBNAIL_PREFIX + media.mediumEntity.uriString
+                imageLoader.diskCache?.remove(cacheKey)
+                // 兼容升级前遗留的无前缀旧键
                 imageLoader.diskCache?.remove(media.mediumEntity.uriString)
             } catch (e: Exception) {
                 e.printStackTrace()

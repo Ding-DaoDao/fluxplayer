@@ -21,6 +21,7 @@ import coil3.request.Options
 import coil3.toAndroidUri
 import okio.FileSystem
 import androidx.core.graphics.get
+import com.fluxplayer.app.core.common.LOCAL_VIDEO_THUMBNAIL_PREFIX
 import io.github.anilbeesetti.nextlib.mediainfo.MediaThumbnailRetriever
 import kotlin.math.abs
 import coil3.decode.DecodeUtils
@@ -42,11 +43,14 @@ class VideoThumbnailDecoder(
     private val diskCacheKey: String
         get() = options.diskCacheKey ?: run {
             val metadata = source.metadata
-            when {
+            // 加前缀与云盘封面隔离：两类缩略图共用同一磁盘缓存时会互相 LRU 淘汰，
+            // 导致云盘封面被本地视频帧挤掉（回看时重新走网络）。
+            val rawKey = when {
                 metadata is ContentMetadata -> metadata.uri.toAndroidUri().toString()
                 source.fileSystem === FileSystem.SYSTEM -> source.file().toFile().path
                 else -> error("Not supported")
             }
+            LOCAL_VIDEO_THUMBNAIL_PREFIX + rawKey
         }
 
     @OptIn(ExperimentalCoilApi::class)

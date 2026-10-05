@@ -47,6 +47,9 @@ fun FileTypeIcon(item: WebDavResource, modifier: Modifier = Modifier) {
             contentDescription = null,
             modifier = modifier,
             contentScale = ContentScale.Crop,
+            // TODO(P2): 三态目前仍指向同一张图，需拆成 骨架占位 / 失败提示 / 类型图标。
+            // 改造需要新增 drawable 资源（仓库内暂无合适的占位图），本次先靠
+            // ImageLoaderModule 的 CoverImageLoader 日志区分失败原因，不阻塞本次修复。
             placeholder = painterResource(iconRes),
             error = painterResource(iconRes),
             fallback = painterResource(iconRes),
