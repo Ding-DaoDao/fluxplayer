@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -908,6 +907,9 @@ fun AudioPlaybackScreen(
     }
 
     val notificationState = remember { FluxNotificationState() }
+    val playbackArtwork = coverModel ?: artworkUri
+    val displayBookTitle = bookName?.takeIf { it.isNotBlank() } ?: title
+    var artworkTint by remember(playbackArtwork) { mutableStateOf(Color.Transparent) }
 
     // ── UI ──
     Box(
@@ -915,12 +917,13 @@ fun AudioPlaybackScreen(
             .fillMaxSize()
             .background(playerBg()),
     ) {
+        PlaybackArtworkBackground(artworkTint, Modifier.matchParentSize())
         // 当前章节索引
         val currentIndex = selectedIndex
-        val chapterTitle = chapterNames.getOrElse(currentIndex) { "" }
+        val chapterTitle = chapterNames.getOrElse(currentIndex) { title }
         val hasChapters = chapterNames.isNotEmpty()
         // 书名和章节名相同时只显示一次，避免重复
-        val showChapterName = hasChapters && chapterTitle.isNotEmpty() && chapterTitle != title
+        val showChapterName = hasChapters && chapterTitle.isNotEmpty() && chapterTitle != displayBookTitle
 
         Column(
             modifier = Modifier
@@ -934,59 +937,48 @@ fun AudioPlaybackScreen(
             Spacer(modifier = Modifier.weight(0.2f))
 
             // ── 封面（缩如 + 加强阴影，形成悬浮感如 ──
-            AlbumCover(
-                artworkUri = coverModel ?: artworkUri,
+            PlaybackAlbumCover(
+                artwork = playbackArtwork,
+                title = displayBookTitle,
+                onColor = { artworkTint = it },
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // ── 书名（单行跑马灯，超出宽度自动滚动） ──
-            Text(
-                text = title,
-                color = playerOnSurface(),
-                fontSize = 19.sp,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .basicMarquee(),
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // ── 章节如 ──
-            if (showChapterName) {
+            // 书名、章节和集数使用固定区域，切换章节时保持控件位置稳定。
+            Column(
+                Modifier.fillMaxWidth().height(72.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 Text(
-                    text = chapterTitle,
-                    color = playerOnSurfaceVariant(),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Normal,
+                    text = displayBookTitle,
+                    color = playerOnSurface(),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                    modifier = Modifier.fillMaxWidth().basicMarquee(initialDelayMillis = 2500),
                 )
-            }
-
-            // ── 书名（整本书名字，封面下侧最底部） ──
-            if (!bookName.isNullOrEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = bookName,
-                    color = playerOnSurfaceVariant().copy(alpha = 0.8f),
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                )
+                if (showChapterName) {
+                    Text(
+                        text = chapterTitle,
+                        color = playerOnSurfaceVariant(),
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        modifier = Modifier.padding(top = 6.dp).fillMaxWidth().basicMarquee(initialDelayMillis = 4500),
+                    )
+                }
+                if (hasChapters) {
+                    Text(
+                        text = "第 ${currentIndex + 1} / ${chapterNames.size} 集",
+                        modifier = Modifier.padding(top = 6.dp),
+                        color = playerOnSurfaceVariant().copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.weight(0.2f))
@@ -1342,36 +1334,6 @@ private fun TopBar(onBackClick: () -> Unit) {
                 painter = painterResource(coreUiR.drawable.ic_arrow_left),
                 contentDescription = stringResource(R.string.audio_back),
                 tint = FluxTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun AlbumCover(artworkUri: Any?, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth(0.72f)
-            .aspectRatio(1f)
-            .shadow(16.dp, RoundedCornerShape(16.dp))
-            .clip(RoundedCornerShape(16.dp))
-            .background(FluxTheme.colorScheme.surface),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (artworkUri != null) {
-            AsyncImage(
-                imageLoader = rememberBookCoverImageLoader(),
-                model = artworkUri,
-                contentDescription = stringResource(R.string.audio_album_cover),
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            Icon(
-                painter = painterResource(coreUiR.drawable.ic_file_audio),
-                contentDescription = stringResource(R.string.audio_album_cover),
-                tint = FluxTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                modifier = Modifier.size(56.dp),
             )
         }
     }
