@@ -51,6 +51,7 @@ internal class JdrSourceBackend(private val context: Context) {
 
     private val sources = linkedMapOf<String, Source>()
     private val engines = linkedMapOf<String, JsSourceEngine>()
+    private val webLogins = linkedMapOf<String, SourceLogin>()
     private val covers = linkedMapOf<Pair<String, String>, Pair<Long, ListeningResource?>>()
     private val coverRequests = mutableMapOf<Pair<String, String>, Deferred<ListeningResource?>>()
     private val coverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -205,15 +206,37 @@ internal class JdrSourceBackend(private val context: Context) {
             id,
             mapOf("action" to action, "state" to state, "cookies" to cookies),
         )
-        val result = SourceFeatures.parseLogin(invoke(id, "login", params, 30_000))
-        if (action == "logout" && result.authenticated == false) {
-            mutex.withLock {
-                preferences(requireSource(id)).clear()
-                invalidateCovers()
-                engines.remove(id)?.close()
+        if (action == "logout") {
+            val previous = webLogins[id] ?: netdiskWebLogin(requireSource(id).metadata.id, SourceLogin())
+            try {
+                invoke(id, "login", params, 30_000)
+            } finally {
+                withContext(NonCancellable) {
+                    val pendingCovers = mutex.withLock {
+                        val pending = coverRequests.values.toList()
+                        invalidateCovers()
+                        engines.remove(id)?.close()
+                        pending
+                    }
+                    // 等旧封面脚本完全退出，防止其把旧凭证写回共享存储。
+                    pendingCovers.forEach { it.join() }
+                    mutex.withLock { preferences(requireSource(id)).clearLogin() }
+                    SourceWebSession.clear(listOf(previous.webUrl, previous.cookieUrl))
+                }
             }
+            return login(id, "status").copy(message = "已退出登录，保存的凭证已清除")
         }
-        return result
+        val result = SourceFeatures.parseLogin(invoke(id, "login", params, 30_000))
+        val source = requireSource(id)
+        val remembered = webLogins[id]
+        val retained = if (result.webUrl.isBlank() && remembered != null) {
+            result.copy(webUrl = remembered.webUrl, cookieUrl = result.cookieUrl.ifBlank { remembered.cookieUrl }, desktopUserAgent = remembered.desktopUserAgent)
+        } else {
+            result
+        }
+        val completed = if (source.archive.manifest.id == "com.timbre.tingshu-netdisk") netdiskWebLogin(source.metadata.id, retained) else retained
+        if (completed.webUrl.isNotBlank()) webLogins[id] = completed
+        return completed
     }
 
     suspend fun browse(id: String, directory: String?, page: Int): JdrBrowserPage {

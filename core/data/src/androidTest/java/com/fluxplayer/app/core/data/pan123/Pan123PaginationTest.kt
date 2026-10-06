@@ -113,7 +113,7 @@ class Pan123PaginationTest {
         ids.forEach { id ->
             items.put(
                 JSONObject()
-                    .put("FileId", id.toString())
+                    .put("FileId", if (id % 2 == 0) id.toString() else id)
                     .put("FileName", "$id.mp4")
                     .put("Type", 0),
             )

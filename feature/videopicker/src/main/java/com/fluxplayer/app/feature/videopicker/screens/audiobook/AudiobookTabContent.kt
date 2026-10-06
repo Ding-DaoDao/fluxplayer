@@ -13,18 +13,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,17 +43,21 @@ import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.AudiobookBookCard
+import com.fluxplayer.app.feature.player.AudiobookLoadingIndicator
 import com.fluxplayer.app.feature.player.PlayConfirmDialog
 import com.fluxplayer.app.feature.tingshu.TingshuPlayerActivity
 import com.fluxplayer.app.feature.tingshu.TingshuSourceContent
 import com.fluxplayer.app.feature.tingshu.TingshuViewModel
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
 
+data class AudiobookNavigation(val title: String, val onBack: () -> Unit)
+
 @Composable
 fun AudiobookTabContent(
     viewModel: AudiobookViewModel = hiltViewModel(),
     onPlayChapter: (Uri, Uri?, Long, List<Uri>, Int) -> Unit = { _, _, _, _, _ -> },
     onShowingDetailChanged: (Boolean) -> Unit = {},
+    onNavigationChanged: (AudiobookNavigation?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val sourceViewModel: TingshuViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
@@ -118,7 +121,34 @@ fun AudiobookTabContent(
         showingDetail = it
         onShowingDetailChanged(it)
     }
-    androidx.activity.compose.BackHandler(destination != null && !showingDetail) { destination = null }
+    val navigateBack: () -> Unit = {
+        if (destination == "local") {
+            destination = null
+        } else {
+            sourceViewModel.back()
+            if (sourceViewModel.state.value.source == null) destination = null
+        }
+    }
+    androidx.activity.compose.BackHandler(destination != null && !showingDetail, onBack = navigateBack)
+    DisposableEffect(Unit) {
+        onDispose { onNavigationChanged(null) }
+    }
+    LaunchedEffect(destination, sourceState.title, sourceState.canGoBack, showingDetail, sources) {
+        onNavigationChanged(
+            if (destination == null || showingDetail) {
+                null
+            } else {
+                AudiobookNavigation(
+                    title = if (destination == "local") {
+                        "本地书库"
+                    } else {
+                        sourceState.title.ifBlank { sources.firstOrNull { it.id == destination }?.name ?: "最近听过" }
+                    },
+                    onBack = navigateBack,
+                )
+            },
+        )
+    }
     LaunchedEffect(destination) { if (destination == null) detailChanged(false) }
     if (destination == null) {
         com.fluxplayer.app.feature.tingshu.ListeningLibraryHome(
@@ -148,14 +178,6 @@ fun AudiobookTabContent(
         )
     } else {
         Column(modifier.fillMaxSize()) {
-            if (!showingDetail) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.IconButton(onClick = { destination = null }) {
-                        Icon(NextIcons.ArrowBack, "返回书库", tint = FluxTheme.colorScheme.onSurface)
-                    }
-                    Text(if (destination == "local") "本地书库" else sources.firstOrNull { it.id == destination }?.name.orEmpty(), style = FluxTheme.typography.titleMedium)
-                }
-            }
             if (destination == "local") {
                 LocalAudiobookTabContent(
                     viewModel,
@@ -222,7 +244,7 @@ private fun LocalAudiobookTabContent(
                         modifier = modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        CircularProgressIndicator()
+                        AudiobookLoadingIndicator("正在扫描本地书库…")
                     }
                 } else {
                     // 已扫到部分书：立即展示书架，顶部提示扫描进度
@@ -233,16 +255,7 @@ private fun LocalAudiobookTabContent(
                                 .padding(horizontal = 20.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(14.dp),
-                                strokeWidth = 2.dp,
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "扫描中… 已发现 ${partialBooks.size} 本",
-                                style = FluxTheme.typography.bodySmall,
-                                color = FluxTheme.colorScheme.onSurfaceVariant,
-                            )
+                            AudiobookLoadingIndicator("扫描中… 已发现 ${partialBooks.size} 本")
                         }
                         BookshelfList(
                             books = partialBooks,

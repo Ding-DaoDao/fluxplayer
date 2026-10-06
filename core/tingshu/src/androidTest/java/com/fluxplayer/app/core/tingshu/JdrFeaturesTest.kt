@@ -298,6 +298,10 @@ class JdrFeaturesTest {
             assertFalse(stored.contains("private-secret"))
             assertFalse(stored.contains("private-token"))
             assertFalse(repository.jdrLogin(id, "logout").authenticated!!)
+            val loggedOut = repository.jdrConfiguration(id).values
+            assertEquals("", loggedOut["username"])
+            assertEquals("", loggedOut["password"])
+            assertEquals("books", loggedOut["root"])
             repository.setEnabled(entry, false)
             repository.setEnabled(entry, true)
             assertFalse(repository.jdrLogin(id, "status").authenticated!!)

@@ -25,12 +25,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -43,6 +45,14 @@ import com.github.eprendre.tingshu.utils.ConfigItem
 @Composable
 fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val webLoginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { viewModel.refreshLoginState() }
+    LaunchedEffect(state.pendingLogin) {
+        state.pendingLogin?.let { login ->
+            viewModel.consumePendingLogin()
+            webLoginLauncher.launch(SourceLoginActivity.intent(context, login.sourceName, login.url, login.userAgent))
+        }
+    }
     val sources by viewModel.repository.sources.collectAsStateWithLifecycle()
     val packages by viewModel.repository.packages.collectAsStateWithLifecycle()
     var configuringJdr by remember { mutableStateOf<com.fluxplayer.app.core.tingshu.ListeningSource?>(null) }
@@ -135,6 +145,8 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
             viewModel::configAction, state.configRevision, state.error, state.loginState,
             message = state.configMessage,
             onRetry = viewModel::retry,
+            onWebLogin = { state.source?.let(viewModel::startWebLogin) },
+            canWebLogin = state.webLoginAvailable,
         )
     }
 }
@@ -153,6 +165,8 @@ private fun SourceConfigDialog(
     loginState: Boolean?,
     message: String?,
     onRetry: () -> Unit,
+    onWebLogin: () -> Unit,
+    canWebLogin: Boolean,
 ) {
     var values by remember(sourceId, items, revision) {
         mutableStateOf(
@@ -178,7 +192,10 @@ private fun SourceConfigDialog(
             SourceStatusCard(if (loginState) "已登录" else "尚未登录")
         }
         if (items.isEmpty()) Text("该书源没有配置项", color = FluxTheme.colorScheme.onSurfaceVariant)
-        items.filterNot { it is ConfigItem.Button && isSourceLoginAction(it.label) }.forEach { item ->
+        if (canWebLogin) {
+            OutlinedButton(onClick = onWebLogin, enabled = !busy, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("打开网页登录") }
+        }
+        items.forEach { item ->
             val value = values[item.key].orEmpty()
             when (item) {
                 is ConfigItem.Text -> SourceConfigField(

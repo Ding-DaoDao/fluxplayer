@@ -340,7 +340,7 @@ class Pan123ApiClient(
             }.ifBlank { null }
 
             Pan123FileItem(
-                fileId = item.getString("FileId"),
+                fileId = parsePan123FileId(item.get("FileId")),
                 fileName = item.getString("FileName"),
                 type = item.getInt("Type"),
                 size = item.optLong("Size", 0),

@@ -128,6 +128,7 @@ import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
 import com.fluxplayer.app.feature.videopicker.composables.TextIconToggleButton
 import com.fluxplayer.app.feature.videopicker.composables.VideoInfoDialog
 import com.fluxplayer.app.feature.videopicker.screens.audiobook.AudiobookTabContent
+import com.fluxplayer.app.feature.videopicker.screens.audiobook.AudiobookNavigation
 import com.fluxplayer.app.feature.videopicker.screens.history.HistoryTabContent
 import com.fluxplayer.app.feature.videopicker.state.SelectedFolder
 import com.fluxplayer.app.feature.videopicker.state.SelectedVideo
@@ -264,6 +265,7 @@ internal fun MediaPickerScreen(
     var navigateToDirParam by rememberSaveable { mutableStateOf<Pair<String, String>?>(null) }
     // 听书详情页是否正在展示（用于隐藏外层顶栏）
     var audiobookInDetail by remember { mutableStateOf(false) }
+    var audiobookNavigation by remember { mutableStateOf<AudiobookNavigation?>(null) }
 
     val selectedItemsSize = selectionManager.selectedFolders.size + selectionManager.selectedVideos.size
     val totalItemsSize = (uiState.mediaDataState as? DataState.Success)?.value?.run { folderList.size + mediaList.size } ?: 0
@@ -290,10 +292,21 @@ internal fun MediaPickerScreen(
                             title = when (selectedTab) {
                                 1 -> stringResource(R.string.browse)
                                 2 -> stringResource(R.string.history)
-                                else -> stringResource(R.string.audiobook)
+                                else -> audiobookNavigation?.title ?: stringResource(R.string.audiobook)
                             },
                             fontWeight = FontWeight.Bold,
-                            navigationIcon = {},
+                            navigationIcon = {
+                                if (selectedTab == 3) {
+                                    audiobookNavigation?.let { navigation ->
+                                        IconButton(onClick = navigation.onBack) {
+                                            Icon(
+                                                imageVector = NextIcons.ArrowBack,
+                                                contentDescription = stringResource(R.string.navigate_up),
+                                            )
+                                        }
+                                    }
+                                }
+                            },
                             actions = {
                                 IconButton(onClick = onSettingsClick) {
                                     Icon(
@@ -678,6 +691,7 @@ internal fun MediaPickerScreen(
                                 AudiobookTabContent(
                                     onPlayChapter = onPlayAudioChapter,
                                     onShowingDetailChanged = { audiobookInDetail = it },
+                                    onNavigationChanged = { audiobookNavigation = it },
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .padding(contentPadding),

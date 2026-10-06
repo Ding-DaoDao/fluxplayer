@@ -31,7 +31,10 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
     api(libs.fuel.core)
-    api(libs.fuel.json)
+    api(libs.fuel.json) {
+        // Android 已提供 org.json，排除桌面实现，避免混淆改变外置书源的方法签名。
+        exclude(group = "org.json", module = "json")
+    }
     api(libs.jsoup)
     api(libs.gson)
     api(libs.rxjava)

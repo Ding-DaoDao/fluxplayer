@@ -80,6 +80,13 @@ internal class JdrSourcePreferences(context: Context, namespace: String, private
         check(editor.commit())
     }
 
+    /** 同时清理会话与配置凭证，保留听书目录及普通偏好。 */
+    fun clearLogin() = synchronized(writeLock) {
+        val retained = settingsAfterLogout(fields, values())
+        clear()
+        write("settings", JsonObject(retained.mapValues { JsonPrimitive(it.value) }).toString())
+    }
+
     private fun stateKey(key: String): String = (if (key.startsWith("cache:")) "cache." else "state.") + digest(key)
 
     private fun read(key: String): String? {

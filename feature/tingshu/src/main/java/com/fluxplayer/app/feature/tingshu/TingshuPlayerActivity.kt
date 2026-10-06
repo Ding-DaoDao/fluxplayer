@@ -3,6 +3,7 @@ package com.fluxplayer.app.feature.tingshu
 import android.content.ComponentName
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Column
@@ -32,7 +33,10 @@ class TingshuPlayerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         requestedBook = savedInstanceState?.getString("book") ?: intent.getStringExtra("book")
         requestedIndex = savedInstanceState?.getInt("index") ?: intent.getIntExtra("index", 0)
         requestedPosition = savedInstanceState?.getLong("position") ?: intent.getLongExtra("position", 0)
@@ -85,51 +89,48 @@ class TingshuPlayerActivity : ComponentActivity() {
                 } else {
                     val repository = com.fluxplayer.app.core.tingshu.TingshuRepository.get(this@TingshuPlayerActivity)
                     val progresses by repository.progresses.collectAsStateWithLifecycle()
-                    Column(Modifier.fillMaxSize()) {
-                        ListeningCacheControls(book, state.index)
-                        com.fluxplayer.app.feature.player.AudioPlaybackScreen(
-                            player = connected,
-                            onBackClick = { finish() },
-                            bookPath = book.key,
-                            bookName = book.title,
-                            chapterNames = book.episodes.map { it.title },
-                            chapterProgress = remember(book, progresses) { repository.chapterProgress(book) },
-                            currentChapterIndex = state.index,
-                            introSkipSeconds = state.introSkipSeconds,
-                            outroSkipSeconds = state.outroSkipSeconds,
-                            onSkipSettingsChanged = { intro, outro ->
-                                connected.sendCustomCommand(
-                                    SessionCommand(ListeningPlayback.SKIP, Bundle.EMPTY),
-                                    Bundle().apply {
-                                        putInt("intro", intro)
-                                        putInt("outro", outro)
-                                    },
-                                )
-                            },
-                            onSelectChapter = { index -> select(connected, book.key, index, 0) },
-                            sleepState = com.fluxplayer.app.feature.player.service.AudioSleepTimer.State(
-                                remainingSeconds = state.sleepSeconds.toInt(),
-                                remainingEpisodes = state.sleepEpisodes,
-                            ),
-                            onSleepChange = { seconds, episodes ->
-                                connected.sendCustomCommand(
-                                    SessionCommand(ListeningPlayback.SLEEP, Bundle.EMPTY),
-                                    Bundle().apply {
-                                        putInt("seconds", seconds)
-                                        putInt("episodes", episodes)
-                                    },
-                                )
-                            },
-                            coverModel = rememberSourceCover(book.sourceId, book.coverUrl, repository),
-                            loading = state.loading,
-                            playbackError = state.error,
-                            playbackErrorContent = state.error?.let { error ->
-                                { SourceErrorNotice(error, onRetry = { select(connected, book.key, state.index, state.position) }) }
-                            },
-                            onRetry = { select(connected, book.key, state.index, state.position) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+                    com.fluxplayer.app.feature.player.AudioPlaybackScreen(
+                        player = connected,
+                        onBackClick = { finish() },
+                        bookPath = book.key,
+                        bookName = book.title,
+                        chapterNames = book.episodes.map { it.title },
+                        chapterProgress = remember(book, progresses) { repository.chapterProgress(book) },
+                        currentChapterIndex = state.index,
+                        introSkipSeconds = state.introSkipSeconds,
+                        outroSkipSeconds = state.outroSkipSeconds,
+                        onSkipSettingsChanged = { intro, outro ->
+                            connected.sendCustomCommand(
+                                SessionCommand(ListeningPlayback.SKIP, Bundle.EMPTY),
+                                Bundle().apply {
+                                    putInt("intro", intro)
+                                    putInt("outro", outro)
+                                },
+                            )
+                        },
+                        onSelectChapter = { index -> select(connected, book.key, index, 0) },
+                        sleepState = com.fluxplayer.app.feature.player.service.AudioSleepTimer.State(
+                            remainingSeconds = state.sleepSeconds.toInt(),
+                            remainingEpisodes = state.sleepEpisodes,
+                        ),
+                        onSleepChange = { seconds, episodes ->
+                            connected.sendCustomCommand(
+                                SessionCommand(ListeningPlayback.SLEEP, Bundle.EMPTY),
+                                Bundle().apply {
+                                    putInt("seconds", seconds)
+                                    putInt("episodes", episodes)
+                                },
+                            )
+                        },
+                        coverModel = rememberSourceCover(book.sourceId, book.coverUrl, repository),
+                        loading = state.loading,
+                        playbackError = state.error,
+                        playbackErrorContent = state.error?.let { error ->
+                            { SourceErrorNotice(error, onRetry = { select(connected, book.key, state.index, state.position) }) }
+                        },
+                        onRetry = { select(connected, book.key, state.index, state.position) },
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
             }
         }

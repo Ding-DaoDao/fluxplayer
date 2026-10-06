@@ -3,6 +3,7 @@ package com.fluxplayer.app.feature.tingshu
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,10 +43,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.request.ImageRequest
 import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.tingshu.TingshuRepository
-import com.fluxplayer.app.core.ui.components.FluxLinearProgressIndicator
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.AudiobookBookCard
+import com.fluxplayer.app.feature.player.AudiobookLoadingIndicator
 import com.fluxplayer.app.feature.player.PlayConfirmDialog
 import com.fluxplayer.app.feature.player.model.AudioBook
 import com.github.eprendre.tingshu.utils.Book
@@ -73,12 +73,12 @@ fun TingshuSourceContent(
             coverModel = rememberSourceCover(state.source?.id.orEmpty(), target.coverUrl, viewModel.repository),
             resumeLabel = when {
                 state.error != null -> null
-                resolved == null -> "正在解析目录…"
+                resolved == null -> null
                 progress != null && progress.position > 0L -> "继续收听"
                 else -> null
             },
-            loading = state.loading,
-            playEnabled = resolved != null && !state.loading && state.error == null,
+            loading = state.resolvingBook,
+            playEnabled = resolved != null && !state.resolvingBook && state.error == null,
             errorContent = state.error?.let { message ->
                 { SourceErrorNotice(message, onRetry = { viewModel.resolvePending(target) }) }
             },
@@ -104,22 +104,7 @@ fun TingshuSourceContent(
         viewModel.back()
         if (state.source == null) onExit()
     }
-    var showJdrSettings by remember { mutableStateOf(false) }
-    if (showJdrSettings) {
-        state.source?.let { source ->
-            JdrSourceDialog(source, viewModel.repository) {
-                showJdrSettings = false
-                viewModel.refresh()
-            }
-        }
-    }
     Column(modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (state.source?.id?.startsWith("jdr:") == true) {
-            TextButton(onClick = { showJdrSettings = true }, enabled = !state.loading) { Text("书源设置") }
-        }
-        if (state.loading) {
-            FluxLinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(3.dp))
-        }
         if (pendingBook == null) {
             state.error?.let { message ->
                 SourceErrorNotice(message, Modifier.padding(horizontal = 16.dp), onRetry = viewModel::retry, onDismiss = viewModel::dismissError)
@@ -135,8 +120,8 @@ fun TingshuSourceContent(
                 }
         }
         PullToRefreshBox(
-            isRefreshing = state.refreshing,
-            onRefresh = viewModel::refresh,
+            isRefreshing = state.refreshing && pendingBook == null,
+            onRefresh = { if (pendingBook == null && !state.loading) viewModel.refresh() },
             modifier = Modifier.weight(1f),
         ) {
             LazyColumn(
@@ -153,7 +138,7 @@ fun TingshuSourceContent(
                             Text(if (state.canGoBack) state.title else "全部书籍", style = FluxTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = FluxTheme.colorScheme.onSurface)
                             if (state.books.isNotEmpty()) {
                                 Text(
-                                    if (state.loadingMore) "正在加载更多…" else "已加载 ${state.books.size} 本",
+                                    "已加载 ${state.books.size} 本",
                                     style = FluxTheme.typography.bodySmall,
                                     color = FluxTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -181,7 +166,7 @@ fun TingshuSourceContent(
                 }
                 items(state.folders, key = { "folder-${it.id}" }) { folder ->
                     TextButton(onClick = { viewModel.browseDirectory(folder.id, folder.name) }, enabled = !state.loading, modifier = Modifier.fillMaxWidth()) {
-                        Text("目录 · ${folder.name}")
+                        Text("目录 · ${folder.name}", modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE), maxLines = 1)
                     }
                 }
                 items(state.books) { book ->
@@ -226,7 +211,7 @@ fun TingshuSourceContent(
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                if (state.source?.isCloudLibrary == true) "请在设置 → 听书配置中检查登录状态和书库目录" else "换个关键词试试，或到听书配置中导入更多书源",
+                                if (state.source?.isCloudLibrary == true) "请在设置 → 听书配置中检查登录状态和书库目录" else "请到听书配置中检查书源，或导入更多书源",
                                 style = FluxTheme.typography.bodySmall,
                                 color = FluxTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
@@ -240,13 +225,14 @@ fun TingshuSourceContent(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                strokeWidth = 2.dp,
-                                color = FluxTheme.colorScheme.primary,
-                            )
+                            AudiobookLoadingIndicator("正在加载更多…")
                         }
                     }
+                }
+            }
+            if (state.loading && !state.refreshing && !state.loadingMore && pendingBook == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    AudiobookLoadingIndicator("正在加载书库…")
                 }
             }
         }

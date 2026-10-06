@@ -73,9 +73,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.media3.common.Player
-import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import coil3.compose.AsyncImage
 import com.fluxplayer.app.core.ui.R as coreUiR
+import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import com.fluxplayer.app.core.ui.components.ChapterDragScrollbar
 import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
 import com.fluxplayer.app.core.ui.components.FluxNotificationState
@@ -1039,11 +1039,13 @@ fun AudioPlaybackScreen(
             Box(modifier = Modifier.align(Alignment.BottomCenter).padding(20.dp)) {
                 if (playbackErrorContent != null) {
                     playbackErrorContent()
-                } else Surface(shape = RoundedCornerShape(16.dp), color = playerSurfaceContainer()) {
-                Column(Modifier.padding(16.dp)) {
-                    Text(playbackError, color = FluxTheme.colorScheme.error)
-                    androidx.compose.material3.TextButton(onClick = onRetry) { Text("重试本章") }
-                }
+                } else {
+                    Surface(shape = RoundedCornerShape(16.dp), color = playerSurfaceContainer()) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text(playbackError, color = FluxTheme.colorScheme.error)
+                            androidx.compose.material3.TextButton(onClick = onRetry) { Text("重试本章") }
+                        }
+                    }
                 }
             }
         }
@@ -1358,7 +1360,7 @@ private fun AlbumCover(artworkUri: Any?, modifier: Modifier = Modifier) {
     ) {
         if (artworkUri != null) {
             AsyncImage(
-                    imageLoader = rememberBookCoverImageLoader(),
+                imageLoader = rememberBookCoverImageLoader(),
                 model = artworkUri,
                 contentDescription = stringResource(R.string.audio_album_cover),
                 contentScale = ContentScale.Crop,
@@ -1732,7 +1734,7 @@ fun AudioLoadingScreen(coverArtworkUri: Uri? = null, title: String? = null) {
                         .background(FluxTheme.colorScheme.surface),
                 ) {
                     AsyncImage(
-                    imageLoader = rememberBookCoverImageLoader(),
+                        imageLoader = rememberBookCoverImageLoader(),
                         model = coverArtworkUri,
                         contentDescription = stringResource(R.string.audio_album_cover),
                         contentScale = ContentScale.Crop,

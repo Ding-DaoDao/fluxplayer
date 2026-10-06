@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -93,16 +92,18 @@ fun PlayConfirmDialog(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(8.dp))
-                if (!loading && errorContent == null) Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = colors.primaryContainer,
-                ) {
-                    Text(
-                        text = "$chapterCount 集",
-                        style = FluxTheme.typography.labelMedium,
-                        color = colors.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
+                if (!loading && errorContent == null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = colors.primaryContainer,
+                    ) {
+                        Text(
+                            text = "$chapterCount 集",
+                            style = FluxTheme.typography.labelMedium,
+                            color = colors.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
+                    }
                 }
                 if (!resumeLabel.isNullOrEmpty()) {
                     Spacer(Modifier.height(10.dp))
@@ -116,7 +117,7 @@ fun PlayConfirmDialog(
                 }
                 if (loading) {
                     Spacer(Modifier.height(12.dp))
-                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                    AudiobookLoadingIndicator("正在加载章节…")
                 }
                 errorContent?.let {
                     Spacer(Modifier.height(12.dp))

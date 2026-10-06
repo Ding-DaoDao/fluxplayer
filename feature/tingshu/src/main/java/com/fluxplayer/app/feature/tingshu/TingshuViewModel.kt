@@ -39,6 +39,7 @@ data class SourceBrowseState(
     /** 当前分类的请求地址，下拉刷新时用它重新拉取 */
     val currentCategoryUrl: String = "",
     val loading: Boolean = false,
+    val resolvingBook: Boolean = false,
     /** 下拉刷新中（列表保持显示，不闪空） */
     val refreshing: Boolean = false,
     /** 触底自动加载下一页中 */
@@ -48,6 +49,7 @@ data class SourceBrowseState(
     val configRevision: Int = 0,
     /** 配置对话框里展示的登录态；null = 该源不在已知网盘之列，状态未知 */
     val loginState: Boolean? = null,
+    val webLoginAvailable: Boolean = false,
     val canGoBack: Boolean = false,
     /** 待启动的书源 WebView 登录页，UI 侧消费后调SourceLoginActivity 并清空 */
     val pendingLogin: PendingLogin? = null,
@@ -247,12 +249,12 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
     fun resolvePending(book: Book) {
         val source = state.value.source ?: return
         mutableState.update { it.copy(pendingDetail = null, pendingBookUrl = book.bookUrl) }
-        operation { mutableState.update { it.copy(pendingDetail = repository.detail(source.id, book)) } }
+        operation(resolvingBook = true) { mutableState.update { it.copy(pendingDetail = repository.detail(source.id, book)) } }
     }
 
     fun consumePendingDetail() {
         if (state.value.pendingBookUrl != null) loadJob?.cancel()
-        mutableState.update { it.copy(pendingDetail = null, pendingBookUrl = null, loading = false, error = null) }
+        mutableState.update { it.copy(pendingDetail = null, pendingBookUrl = null, resolvingBook = false, error = null) }
     }
 
     fun openSavedBook(key: String) = operation {
@@ -282,7 +284,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         val source = state.value.source ?: return
         operation {
             val items = repository.config(source.id)
-            mutableState.update { it.copy(configItems = items, loginState = repository.isLoggedIn(source.id)) }
+            mutableState.update { it.copy(configItems = items, loginState = repository.isLoggedIn(source.id), webLoginAvailable = repository.loginInfo(source.id) != null) }
         }
     }
 
@@ -308,7 +310,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
     /** 登录页返回后重新探测登录态 */
     fun refreshLoginState() = operation {
         val source = state.value.source ?: return@operation
-        mutableState.update { it.copy(loginState = repository.isLoggedIn(source.id)) }
+        mutableState.update { it.copy(configItems = repository.config(source.id), configRevision = it.configRevision + 1, loginState = repository.isLoggedIn(source.id)) }
     }
 
     fun dismissConfig() = mutableState.update { it.copy(configItems = null, loginState = null, configMessage = null) }
@@ -339,7 +341,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
     fun dismissError() = mutableState.update { it.copy(error = null) }
 
     fun retry() {
-        retryAction?.let { operation(it) }
+        retryAction?.let { operation(resolvingBook = state.value.pendingBookUrl != null, action = it) }
     }
 
     fun back() {
@@ -351,19 +353,20 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun operation(action: suspend () -> Unit) {
+    private fun operation(resolvingBook: Boolean = false, action: suspend () -> Unit) {
         loadJob?.cancel()
         retryAction = action
         loadJob = viewModelScope.launch {
-            mutableState.update { it.copy(loading = true, error = null) }
+            mutableState.update { it.copy(loading = !resolvingBook, resolvingBook = resolvingBook, error = null) }
             try {
                 action()
-                mutableState.update { it.copy(loading = false, loadingMore = false, refreshing = false) }
+                mutableState.update { it.copy(loading = false, resolvingBook = false, loadingMore = false, refreshing = false) }
             } catch (error: Throwable) {
                 if (error is CancellationException && error !is TimeoutCancellationException) throw error
                 mutableState.update {
                     it.copy(
                         loading = false,
+                        resolvingBook = false,
                         loadingMore = false,
                         refreshing = false,
                         error = ListeningErrors.describe(error, if (it.pendingBookUrl != null) "章节加载失败" else "书源操作失败"),

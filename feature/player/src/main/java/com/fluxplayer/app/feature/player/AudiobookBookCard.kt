@@ -1,6 +1,7 @@
 package com.fluxplayer.app.feature.player
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,9 +29,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import coil3.compose.AsyncImage
+import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.model.AudioBook
@@ -62,15 +62,15 @@ fun AudiobookBookCard(
             // ── 封面缩略图 ──
             Box(
                 modifier = Modifier
-                    .size(width = 60.dp, height = 80.dp)
+                    .size(width = 90.dp, height = 120.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(colors.surfaceContainerHighest),
                 contentAlignment = Alignment.Center,
             ) {
                 if (coverModel != null) {
-                    // 显式限定解码尺寸（2x 显示尺寸），避免大封面全尺寸解码拖慢列表
+                    // 按显示尺寸解码，避免大封面全尺寸解码拖慢列表
                     AsyncImage(
-                    imageLoader = rememberBookCoverImageLoader(),
+                        imageLoader = rememberBookCoverImageLoader(),
                         model = coverModel,
                         contentDescription = book.title,
                         contentScale = ContentScale.Crop,
@@ -94,17 +94,17 @@ fun AudiobookBookCard(
             ) {
                 Text(
                     text = book.title,
-                    style = FluxTheme.typography.titleSmall,
+                    style = FluxTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = colors.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 19.sp,
+                    modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE),
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     // 章节数标签
                     Surface(
@@ -115,7 +115,9 @@ fun AudiobookBookCard(
                             text = subtitle ?: "${book.chapterCount} 章节",
                             color = colors.onPrimaryContainer,
                             style = FluxTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp).basicMarquee(iterations = Int.MAX_VALUE),
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
                         )
                     }
                     // 上次听到第 N 集

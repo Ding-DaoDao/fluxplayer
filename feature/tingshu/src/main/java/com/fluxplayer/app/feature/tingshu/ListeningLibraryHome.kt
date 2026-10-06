@@ -3,8 +3,10 @@ package com.fluxplayer.app.feature.tingshu
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,9 +27,11 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +59,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import coil3.compose.AsyncImage
 import com.fluxplayer.app.core.tingshu.ListeningBook
+import com.fluxplayer.app.core.tingshu.ListeningHistoryVisibility
 import com.fluxplayer.app.core.tingshu.ListeningProgress
 import com.fluxplayer.app.core.tingshu.ListeningSource
 import com.fluxplayer.app.core.tingshu.TingshuRepository
@@ -96,6 +102,52 @@ fun ListeningLibraryHome(
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("listening_home", android.content.Context.MODE_PRIVATE) }
     var grid by rememberSaveable { mutableStateOf(preferences.getBoolean("grid", true)) }
+    var historyVisibility by remember {
+        mutableStateOf(
+            ListeningHistoryVisibility(
+                removedAt = preferences.all.mapNotNull { (key, value) ->
+                    if (key.startsWith("removed.") && value is Long) key.removePrefix("removed.") to value else null
+                }.toMap(),
+                clearedAt = preferences.getLong("historyClearedAt", -1L),
+            ),
+        )
+    }
+    var removingBook by remember { mutableStateOf<ListeningBook?>(null) }
+    var clearingHistory by remember { mutableStateOf(false) }
+    if (removingBook != null || clearingHistory) {
+        AlertDialog(
+            onDismissRequest = {
+                removingBook = null
+                clearingHistory = false
+            },
+            title = { Text(if (clearingHistory) "清空最近听过？" else "删除收听记录？") },
+            text = { Text(if (clearingHistory) "所有最近收听记录将被清空，书籍和收听进度会保留。" else "从最近听过中移除“${removingBook?.title}”，书籍和收听进度会保留。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val now = System.currentTimeMillis()
+                    if (clearingHistory) {
+                        historyVisibility = historyVisibility.clear(now)
+                        val editor = preferences.edit().putLong("historyClearedAt", now)
+                        preferences.all.keys.filter { it.startsWith("removed.") }.forEach(editor::remove)
+                        editor.apply()
+                    } else {
+                        removingBook?.key?.let { key ->
+                            historyVisibility = historyVisibility.remove(key, now)
+                            preferences.edit().putLong("removed.$key", now).apply()
+                        }
+                    }
+                    removingBook = null
+                    clearingHistory = false
+                }) { Text(if (clearingHistory) "清空" else "删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    removingBook = null
+                    clearingHistory = false
+                }) { Text("取消") }
+            },
+        )
+    }
     val repository = remember { TingshuRepository.get(context) }
     val recentBooks by repository.recentBooks.collectAsStateWithLifecycle()
     val progresses by repository.progresses.collectAsStateWithLifecycle()
@@ -127,6 +179,7 @@ fun ListeningLibraryHome(
         }
     }
     val entries = (localEntries + recentBooks.map { HomeRecentBook(it, progresses[it.key], repository.lastPlayedAt(it.key)) })
+        .filter { historyVisibility.contains(it.book.key, it.playedAt) }
         .sortedByDescending { it.playedAt }.take(20)
     val colors = FluxTheme.colorScheme
 
@@ -150,11 +203,6 @@ fun ListeningLibraryHome(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item(key = "heading", span = { GridItemSpan(maxLineSpan) }) {
-            Column(Modifier.padding(bottom = 4.dp)) {
-                Text("留一点时间，听一本好书", style = FluxTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = colors.onSurface)
-            }
-        }
         if (bannerMode != null) {
             item(key = "now-playing", span = { GridItemSpan(maxLineSpan) }) {
                 val entry = lastEntry
@@ -258,6 +306,7 @@ fun ListeningLibraryHome(
         }
         item(key = "recent-heading", span = { GridItemSpan(maxLineSpan) }) {
             SectionTitle("最近听过") {
+                TextButton(onClick = { clearingHistory = true }, enabled = entries.isNotEmpty()) { Text("清空") }
                 androidx.compose.material3.IconButton(onClick = {
                     grid = !grid
                     preferences.edit().putBoolean("grid", grid).apply()
@@ -279,9 +328,9 @@ fun ListeningLibraryHome(
                 onBookPick(entry.localBook, book)
             }
             if (grid) {
-                RecentBookGridCard(book, entry.progress, cover, open)
+                RecentBookGridCard(book, entry.progress, cover, open, onLongClick = { removingBook = book })
             } else {
-                RecentBookRow(book, entry.progress, cover, open)
+                RecentBookRow(book, entry.progress, cover, open, onLongClick = { removingBook = book })
             }
         }
     }
@@ -290,25 +339,11 @@ fun ListeningLibraryHome(
 @Composable
 private fun CloudLibraryCard(source: ListeningSource, onClick: () -> Unit) {
     val colors = FluxTheme.colorScheme
-    val mark = when (source.packageEntry) {
-        "sources_by_pan123" -> "123"
-        "sources_by_quark" -> "夸"
-        "sources_by_cloud189" -> "天翼"
-        "sources_by_yun139" -> "移动"
-        else -> source.name.take(2)
-    }
-    Surface(onClick = onClick, shape = HomeShapeMedium, color = colors.surfaceContainerLowest) {
-        Column(Modifier.padding(14.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Box(Modifier.size(36.dp).background(colors.primaryContainer, HomeShapeSmall), contentAlignment = Alignment.Center) {
-                    Text(mark, style = FluxTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = colors.onPrimaryContainer)
-                }
-                Text("↗", style = FluxTheme.typography.titleMedium, color = colors.onSurfaceVariant)
-            }
-            Spacer(Modifier.height(12.dp))
-            Text(source.name, style = FluxTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(5.dp))
-            Text(if (source.isCloudLibrary) "打开云端藏书" else "发现更多有声书", style = FluxTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+    Surface(onClick = onClick, shape = HomeShapeMedium, color = colors.surfaceContainerLow, border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.35f))) {
+        Column(Modifier.fillMaxWidth().padding(20.dp).heightIn(min = 64.dp), verticalArrangement = Arrangement.Center) {
+            Text(source.name, style = FluxTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(8.dp))
+            Text(if (source.isCloudLibrary) "云端藏书" else "在线有声书", style = FluxTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
     }
 }
@@ -519,6 +554,7 @@ private fun RecentBookGridCard(
     progress: ListeningProgress?,
     coverModel: Any?,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = FluxTheme.colorScheme
@@ -527,7 +563,7 @@ private fun RecentBookGridCard(
     Column(
         modifier = modifier
             .clip(HomeShapeMedium)
-            .clickable(onClick = onClick),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "删除收听记录"),
     ) {
         Box {
             CoverBox(
@@ -556,8 +592,9 @@ private fun RecentBookGridCard(
             text = book.title,
             style = FluxTheme.typography.titleSmall,
             color = colors.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE),
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
             lineHeight = 17.sp,
         )
         Spacer(Modifier.height(3.dp))
@@ -565,8 +602,9 @@ private fun RecentBookGridCard(
             text = progressSubtitle(book, progress),
             style = FluxTheme.typography.bodySmall,
             color = colors.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE),
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            overflow = TextOverflow.Clip,
         )
         if (percent > 0f) {
             Spacer(Modifier.height(6.dp))
@@ -591,15 +629,15 @@ private fun RecentBookRow(
     progress: ListeningProgress?,
     coverModel: Any?,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
 ) {
     val colors = FluxTheme.colorScheme
     val percent = progressPercent(book, progress)
 
     Surface(
-        onClick = onClick,
         shape = HomeShapeMedium,
         color = colors.surfaceContainer,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clip(HomeShapeMedium).combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "删除收听记录"),
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -608,7 +646,7 @@ private fun RecentBookRow(
             CoverBox(
                 coverModel = coverModel,
                 fallbackIcon = NextIcons.Headset,
-                size = 56.dp,
+                size = 80.dp,
                 shape = HomeShapeSmall,
             )
             Spacer(Modifier.width(12.dp))
@@ -618,16 +656,18 @@ private fun RecentBookRow(
                     style = FluxTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = colors.onSurface,
+                    modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE),
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    overflow = TextOverflow.Clip,
                 )
                 Spacer(Modifier.height(3.dp))
                 Text(
                     text = progressSubtitle(book, progress),
                     style = FluxTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE),
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    overflow = TextOverflow.Clip,
                 )
                 if (percent > 0f) {
                     Spacer(Modifier.height(7.dp))

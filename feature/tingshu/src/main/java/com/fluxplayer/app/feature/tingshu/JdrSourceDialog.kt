@@ -1,5 +1,7 @@
 package com.fluxplayer.app.feature.tingshu
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,11 +22,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.tingshu.JdrConfiguration
 import com.fluxplayer.app.core.tingshu.JdrFolder
 import com.fluxplayer.app.core.tingshu.ListeningErrors
 import com.fluxplayer.app.core.tingshu.ListeningSource
+import com.fluxplayer.app.core.tingshu.SourceHost
 import com.fluxplayer.app.core.tingshu.TingshuRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -41,6 +45,8 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
     var message by remember { mutableStateOf<String?>(null) }
     var directoryKey by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var webLogin by remember { mutableStateOf<SourceLogin?>(null) }
     suspend fun runAction(block: suspend () -> Unit) {
         busy = true
         error = null
@@ -51,6 +57,26 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
             error = ListeningErrors.describe(e, "书源操作失败")
         } finally {
             busy = false
+        }
+    }
+    val loginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val started = webLogin
+        webLogin = null
+        if (started != null) {
+            scope.launch {
+                runAction {
+                    val cookies = SourceHost.cookie(started.cookieUrl.ifBlank { started.webUrl }).orEmpty()
+                    if (cookies.isNotBlank()) {
+                        login = repository.jdrLogin(source.id, "webComplete", started.state, cookies)
+                        message = login.message
+                    } else {
+                        login = repository.jdrLogin(source.id, "status")
+                        message = "未获取到登录凭证，请先在网页中完成登录"
+                    }
+                    configuration = repository.jdrConfiguration(source.id)
+                    values = configuration!!.values
+                }
+            }
         }
     }
     LaunchedEffect(source.id) {
@@ -88,7 +114,7 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
                 message ?: login.message,
             )
             configuration?.let { config ->
-                config.fields.filterNot { it.type == "button" && isSourceLoginAction(it.label) }.forEach { field ->
+                config.fields.forEach { field ->
                     val value = values[field.key].orEmpty()
                     when (field.type) {
                         "button" -> OutlinedButton(onClick = {
@@ -138,7 +164,18 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
                         }
                     }
                 }, enabled = !busy) { Text("清除书源临时缓存") }
-                if (login.authenticated == true) {
+                if (login.webUrl.isNotBlank()) {
+                    OutlinedButton(onClick = {
+                        scope.launch {
+                            runAction {
+                                repository.saveJdrConfiguration(source.id, values)
+                                webLogin = login
+                                loginLauncher.launch(SourceLoginActivity.intent(context, source.name, login.webUrl, if (login.desktopUserAgent) SourceHost.DESKTOP_UA else SourceHost.MOBILE_UA))
+                            }
+                        }
+                    }, enabled = !busy, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("打开网页登录") }
+                }
+                if (config.canLogin) {
                     TextButton(onClick = {
                         scope.launch {
                             runAction {

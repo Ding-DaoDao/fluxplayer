@@ -1,15 +1,21 @@
 package com.fluxplayer.app.feature.tingshu
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -59,24 +65,43 @@ internal fun SourceSettingsSheet(
     canSave: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = FluxTheme.colorScheme.surface,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp).imePadding().widthIn(max = 600.dp).fillMaxWidth().fillMaxHeight(0.9f),
-        ) {
-            Column {
-                Column(Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("书源设置", style = FluxTheme.typography.labelMedium, color = FluxTheme.colorScheme.primary)
-                    Text(title, style = FluxTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                    Text("管理账号、目录与书源偏好", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
-                }
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(18.dp), content = content)
-                HorizontalDivider(color = FluxTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.weight(1f)) { Text("关闭") }
-                    Button(onClick = onSave, enabled = !busy && canSave, modifier = Modifier.weight(2f), shape = RoundedCornerShape(14.dp)) { Text("保存配置") }
+    Dialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        // 固定全屏窗口，仅由外层布局处理系统栏和键盘，避免窗口缩放与键盘留白互相触发。
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.matchParentSize().clickable(
+                    enabled = !busy,
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss,
+                ),
+            )
+            Box(
+                Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 16.dp, vertical = 24.dp),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    color = FluxTheme.colorScheme.surface,
+                    modifier = Modifier.widthIn(max = 600.dp).fillMaxWidth().fillMaxHeight(0.9f),
+                ) {
+                    Column {
+                        Column(Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("书源设置", style = FluxTheme.typography.labelMedium, color = FluxTheme.colorScheme.primary)
+                            Text(title, style = FluxTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                            Text("管理账号、目录与书源偏好", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(18.dp), content = content)
+                        HorizontalDivider(color = FluxTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.weight(1f)) { Text("关闭") }
+                            Button(onClick = onSave, enabled = !busy && canSave, modifier = Modifier.weight(2f), shape = RoundedCornerShape(14.dp)) { Text("保存配置") }
+                        }
+                    }
                 }
             }
         }
@@ -140,8 +165,3 @@ internal fun SourceStatusCard(title: String, message: String = "", error: Boolea
         }
     }
 }
-
-// 书源自带的登录操作也隐藏，退出登录仍可用于清除已有凭证。
-internal fun isSourceLoginAction(label: String): Boolean =
-    (label.contains("登录") && !label.contains("退出登录")) ||
-        label.trim().lowercase() in setOf("login", "log in", "sign in", "signin", "relogin")
