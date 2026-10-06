@@ -83,10 +83,18 @@ public class OkHttpSandboxHttp(baseClient: OkHttpClient) : SandboxHttp {
         builder.method(method.uppercase(), body)
         return withContext(Dispatchers.IO) {
             client.newCall(builder.build()).execute().use { response ->
-                val source = checkNotNull(response.body) { "HTTP 响应为空" }.source()
-                source.request(MAX_RESPONSE_BYTES + 1)
-                check(source.buffer.size <= MAX_RESPONSE_BYTES) { "响应超过 ${MAX_RESPONSE_BYTES / 1024 / 1024}MB 上限: $url" }
-                val text = source.readUtf8()
+                val probe = options["responseMode"]?.jsonPrimitive?.content == "probe"
+                val type = response.header("Content-Type").orEmpty().lowercase()
+                // 直链探测只读取 JSON 跳转信息，音频流留给播放器处理。
+                val readBody = !probe || response.code == 210 || type.contains("json") || type.startsWith("text/")
+                val text = if (readBody) {
+                    val source = checkNotNull(response.body) { "HTTP 响应为空" }.source()
+                    source.request(MAX_RESPONSE_BYTES + 1)
+                    check(source.buffer.size <= MAX_RESPONSE_BYTES) { "响应超过 ${MAX_RESPONSE_BYTES / 1024 / 1024}MB 上限" }
+                    source.readUtf8()
+                } else {
+                    ""
+                }
                 val headers = buildJsonObject {
                     // duplicate header names (set-cookie!) are joined, not overwritten
                     val merged = LinkedHashMap<String, String>()
@@ -94,10 +102,15 @@ public class OkHttpSandboxHttp(baseClient: OkHttpClient) : SandboxHttp {
                         val key = name.lowercase()
                         merged[key] = merged[key]?.let { "$it, $value" } ?: value
                     }
+                    // 123 的 210 跳转响应偶尔漏写 JSON 类型，验证正文后补齐供源识别。
+                    if (probe && response.code == 210 && runCatching { Json.parseToJsonElement(text) }.isSuccess) {
+                        merged["content-type"] = "application/json"
+                    }
                     merged.forEach { (name, value) -> put(name, value) }
                 }
                 buildJsonObject {
                     put("status", response.code)
+                    put("url", response.request.url.toString())
                     put("headers", headers)
                     put("body", text)
                 }.toString()

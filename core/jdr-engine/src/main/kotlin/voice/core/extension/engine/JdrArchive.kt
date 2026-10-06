@@ -16,8 +16,18 @@ public data class ExtensionSourceMeta(
     /** Subset of `search`, `chapters`, `audio`. */
     public val capabilities: List<String> = listOf(CAP_SEARCH, CAP_CHAPTERS, CAP_AUDIO),
     public val settings: List<SourceSetting> = emptyList(),
+    /**
+     * 别名：Timbre 的 manifest 把配置项写在 `config` 下，本App 读 `settings`。
+     * 两者合并后作为最终配置项——因为解析器开了 ignoreUnknownKeys，
+     * 写错字段名不会报错、只会静默变成空配置项列表，再触发通用兜底
+     * （凭空冒出「账号/密码/Token」三项），很难排查。
+     */
+    public val config: List<SourceSetting> = emptyList(),
     public val initialDirectory: String = "0",
 ) {
+    /** manifest 声明的配置项，两个字段名取并集。 */
+    public fun declaredSettings(): List<SourceSetting> = (settings + config).associateBy { it.key }.values.toList()
+
     public companion object {
         public const val CAP_SEARCH: String = "search"
         public const val CAP_CHAPTERS: String = "chapters"
@@ -68,7 +78,7 @@ public class JdrArchive private constructor(
         private val MANIFEST_ID_REGEX = Regex("^[a-z0-9][a-z0-9._-]{1,63}$")
         private val SOURCE_ID_REGEX = Regex("^[a-z0-9][a-z0-9_-]{0,63}$")
         private val KNOWN_CAPABILITIES =
-            setOf(ExtensionSourceMeta.CAP_SEARCH, ExtensionSourceMeta.CAP_CHAPTERS, ExtensionSourceMeta.CAP_AUDIO, "login", "browse", "config")
+            setOf(ExtensionSourceMeta.CAP_SEARCH, ExtensionSourceMeta.CAP_CHAPTERS, ExtensionSourceMeta.CAP_AUDIO, "login", "browse", "config", "cover")
 
         private val json = Json { ignoreUnknownKeys = true }
 
@@ -160,7 +170,7 @@ public class JdrArchive private constructor(
                 }
                 if (source.name.isBlank()) throw JdrFormatException("源 ${source.id} 的 name 不能为空")
                 if (source.script.isBlank()) throw JdrFormatException("源 ${source.id} 的 script 不能为空")
-                SourceFeatures.validateSettings(source.settings, "browse" in source.capabilities)
+                SourceFeatures.validateSettings(source.declaredSettings(), "browse" in source.capabilities)
                 val unknown = source.capabilities - KNOWN_CAPABILITIES
                 if (unknown.isNotEmpty()) {
                     throw JdrFormatException("源 ${source.id} 含未知能力: $unknown")

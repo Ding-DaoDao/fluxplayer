@@ -7,6 +7,43 @@ import kotlinx.coroutines.test.runTest
 
 class ConfigParityTest {
     @Test
+    fun manifestButtonsCanUseConfigActionAndCoverIsDiscovered() = runTest {
+        val script = """
+            registerSource({id:'hooks',
+              configAction(p){return {message:p.action};},
+              cover(p){return {url:'https://example.com/'+p.bookId+'.jpg',headers:{Referer:'https://example.com/'}};}
+            });
+        """.trimIndent()
+        val engine = JsSourceEngine.create("hooks", script, "hooks.js", SandboxHttp { _, _, _ -> error("不应请求网络") })
+        try {
+            assertTrue("config" in engine.features())
+            assertTrue("cover" in engine.features())
+            assertEquals(emptyList(), SourceFeatures.parseSettings(engine.invoke("config", """{"action":"get"}""", 1000), false))
+            assertEquals("""{"message":"btn_help"}""", engine.invoke("config", """{"action":"btn_help"}""", 1000))
+            val cover = SourceContract.parseAudio(engine.invoke("cover", """{"bookId":"D_42"}""", 1000))
+            assertEquals("https://example.com/D_42.jpg", cover.url)
+            assertEquals("https://example.com/", cover.headers["Referer"])
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun settingsArrayButtonsKeepTheirCallback() = runTest {
+        val engine = JsSourceEngine.create(
+            "settingsbutton",
+            """registerSource({id:'settingsbutton',settings:[{type:'Button',key:'help',label:'说明',click(){return '说明内容';}}]});""",
+            "settings.js",
+            SandboxHttp { _, _, _ -> error("不应请求网络") },
+        )
+        try {
+            assertEquals("\"说明内容\"", engine.invoke("config", """{"action":"help"}""", 1000))
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
     fun jarStyleConfigurationButtonsAndCredentialsWorkWithoutManifestSettings() = runTest {
         val host = MemorySourceHost()
         val source = """

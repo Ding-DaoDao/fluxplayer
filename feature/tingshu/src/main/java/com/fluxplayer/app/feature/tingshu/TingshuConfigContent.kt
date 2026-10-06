@@ -2,38 +2,41 @@ package com.fluxplayer.app.feature.tingshu
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.fluxplayer.app.core.tingshu.SourceHost
+import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.github.eprendre.tingshu.utils.ConfigItem
 
@@ -48,53 +51,51 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.importSource(uri)
     }
-    val context = LocalContext.current
-    // 书源声明 ILogin 后，登录页地址由源提供；此处只负责启动并消费一次性事件
-    LaunchedEffect(state.pendingLogin) {
-        state.pendingLogin?.let { pending ->
-            SourceLoginActivity.start(context, pending.sourceName, pending.url, pending.userAgent)
-            viewModel.consumePendingLogin()
-        }
-    }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("听书书源", style = FluxTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
-            TextButton(onClick = { showImportInfo = true }, enabled = !state.loading) { Text("导入书源") }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("我的书源", style = FluxTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text("${sources.size} 个可用书源", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
+            }
+            FilledTonalButton(onClick = { showImportInfo = true }, enabled = !state.loading, shape = RoundedCornerShape(14.dp)) { Text("导入书源") }
         }
         if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        state.error?.let { Text(it, color = FluxTheme.colorScheme.error) }
-        if (packages.isEmpty()) Text("暂无书源。导入后将在听书首页显示。", style = FluxTheme.typography.bodyMedium)
+        if (state.configItems == null) state.error?.let { SourceErrorNotice(it, onRetry = viewModel::retry, onDismiss = viewModel::dismissError) }
+        if (packages.isEmpty()) {
+            ListeningSettingsCard("添加第一个书源", "导入书源后，就能在听书首页浏览和收听。") {
+                Text("支持 JDR 和 JAR 书源文件", style = FluxTheme.typography.bodyMedium)
+            }
+        }
         packages.forEach { pkg ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(pkg.entry, style = FluxTheme.typography.titleSmall)
-                            Text(if (pkg.enabled) "已启用" else "已停用", style = FluxTheme.typography.bodySmall)
-                        }
-                        Switch(pkg.enabled, { viewModel.enable(pkg.entry, it) }, enabled = !state.loading)
+            val entries = sources.filter { it.packageEntry == pkg.entry }
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = FluxTheme.colorScheme.surfaceContainerLow)) {
+                Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Surface(shape = RoundedCornerShape(14.dp), color = FluxTheme.colorScheme.primaryContainer) {
+                        Icon(NextIcons.Headset, null, Modifier.padding(12.dp).size(24.dp), tint = FluxTheme.colorScheme.onPrimaryContainer)
                     }
-                    pkg.error?.let { Text(it, color = FluxTheme.colorScheme.error) }
-                    sources.filter { it.packageEntry == pkg.entry }.forEach { source ->
-                        if (source.id.startsWith("jdr:")) {
-                            TextButton(onClick = { configuringJdr = source }, enabled = !state.loading) { Text("${source.name} · 配置") }
-                        } else {
-                            Row(Modifier.fillMaxWidth()) {
-                                TextButton(
-                                    onClick = { viewModel.configure(source) },
-                                    enabled = !state.loading,
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text("${source.name} · 配置")
-                                }
-                                // 天翼/夸克/移动等网盘源：登录页由源提供，Cookie 落到系统 CookieManager
-                                TextButton(onClick = { viewModel.startWebLogin(source) }, enabled = !state.loading) {
-                                    Text("登录")
-                                }
-                            }
-                        }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(if (entries.size == 1) entries.single().name else if (pkg.entry.startsWith("jdr:")) "网盘书源" else "听书源包", style = FluxTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(if (pkg.enabled) "已启用 · ${entries.size} 个书源" else "已停用", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
                     }
-                    TextButton(onClick = { deleting = pkg.entry }, enabled = !state.loading) { Text("删除书源包") }
+                    Switch(pkg.enabled, { viewModel.enable(pkg.entry, it) }, enabled = !state.loading)
+                }
+                pkg.error?.let { Text(it, color = FluxTheme.colorScheme.error, style = FluxTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
+                entries.forEach { source ->
+                    HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = FluxTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    ListItem(
+                        headlineContent = { Text(source.name, style = FluxTheme.typography.bodyLarge) },
+                        supportingContent = { Text("账号、目录与偏好", style = FluxTheme.typography.bodySmall) },
+                        trailingContent = { Icon(NextIcons.Settings, "配置", tint = FluxTheme.colorScheme.onSurfaceVariant) },
+                        colors = ListItemDefaults.colors(containerColor = FluxTheme.colorScheme.surfaceContainerLow),
+                        modifier = Modifier.clickable(enabled = !state.loading) {
+                            if (source.id.startsWith("jdr:")) configuringJdr = source else viewModel.configure(source)
+                        }.padding(horizontal = 4.dp),
+                    )
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { deleting = pkg.entry }, enabled = !state.loading) {
+                        Text("移除源包", color = FluxTheme.colorScheme.onSurfaceVariant, style = FluxTheme.typography.labelMedium)
+                    }
                 }
             }
         }
@@ -129,13 +130,19 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
     }
     configuringJdr?.let { source -> JdrSourceDialog(source, viewModel.repository) { configuringJdr = null } }
     state.configItems?.let { items ->
-        SourceConfigDialog(state.source!!.id, items, state.loading, viewModel::dismissConfig, viewModel::saveConfig, viewModel::configAction, state.configRevision, state.error)
+        SourceConfigDialog(
+            state.source!!.id, state.source!!.name, items, state.loading, viewModel::dismissConfig, viewModel::saveConfig,
+            viewModel::configAction, state.configRevision, state.error, state.loginState,
+            message = state.configMessage,
+            onRetry = viewModel::retry,
+        )
     }
 }
 
 @Composable
 private fun SourceConfigDialog(
     sourceId: String,
+    sourceName: String,
     items: List<ConfigItem>,
     busy: Boolean,
     onDismiss: () -> Unit,
@@ -143,6 +150,9 @@ private fun SourceConfigDialog(
     onAction: (() -> Unit, Map<String, String>) -> Unit,
     revision: Int,
     error: String?,
+    loginState: Boolean?,
+    message: String?,
+    onRetry: () -> Unit,
 ) {
     var values by remember(sourceId, items, revision) {
         mutableStateOf(
@@ -161,64 +171,32 @@ private fun SourceConfigDialog(
     fun update(key: String, value: String) {
         values = values + (key to value)
     }
-    AlertDialog(
-        onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text("书源配置") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (items.isEmpty()) Text("该书源没有配置项")
-                error?.let { Text(it, color = FluxTheme.colorScheme.error) }
-                items.forEach { item ->
-                    val value = values[item.key].orEmpty()
-                    when (item) {
-                        is ConfigItem.Text -> OutlinedTextField(
-                            value = value,
-                            onValueChange = { update(item.key, it) },
-                            label = { Text(item.label) },
-                            enabled = !busy,
-                            modifier = Modifier.fillMaxWidth(),
-                            visualTransformation = if (item.key.contains("password", true) || item.key.contains("token", true) || item.key.contains("cookie", true)) {
-                                PasswordVisualTransformation()
-                            } else {
-                                VisualTransformation.None
-                            },
-                        )
-                        is ConfigItem.Switch -> Row {
-                            Switch(checked = value == "true", onCheckedChange = { update(item.key, it.toString()) }, enabled = !busy)
-                            Text(item.label, modifier = Modifier.padding(12.dp))
-                        }
-                        is ConfigItem.Select -> {
-                            Text(item.label)
-                            item.options.forEach { option ->
-                                TextButton(onClick = { update(item.key, option) }, enabled = !busy) {
-                                    Text(if (value == option) "✓ $option" else option)
-                                }
-                            }
-                        }
-                        is ConfigItem.MultiSelect -> {
-                            Text(item.label)
-                            item.options.forEach { option ->
-                                Row {
-                                    Checkbox(
-                                        checked = option in value.split(','),
-                                        enabled = !busy,
-                                        onCheckedChange = { checked ->
-                                            val selected = value.split(',').filter { it.isNotBlank() }.toMutableSet()
-                                            if (checked) selected.add(option) else selected.remove(option)
-                                            update(item.key, selected.joinToString(","))
-                                        },
-                                    )
-                                    Text(option, Modifier.padding(top = 12.dp))
-                                }
-                            }
-                        }
-                        is ConfigItem.Button -> TextButton(onClick = { onAction(item.click, values) }, enabled = !busy) { Text(item.label) }
-                    }
+    SourceSettingsSheet(title = sourceName, busy = busy, onDismiss = onDismiss, onSave = { onSave(values) }) {
+        error?.let { SourceErrorNotice(it, onRetry = onRetry.takeUnless { busy }) }
+        message?.let { SourceStatusCard("书源提示", it) }
+        if (loginState != null) {
+            SourceStatusCard(if (loginState) "已登录" else "尚未登录")
+        }
+        if (items.isEmpty()) Text("该书源没有配置项", color = FluxTheme.colorScheme.onSurfaceVariant)
+        items.filterNot { it is ConfigItem.Button && isSourceLoginAction(it.label) }.forEach { item ->
+            val value = values[item.key].orEmpty()
+            when (item) {
+                is ConfigItem.Text -> SourceConfigField(
+                    label = item.label,
+                    value = value,
+                    onValueChange = { update(item.key, it) },
+                    enabled = !busy,
+                    secret = listOf("password", "token", "cookie", "authorization").any { item.key.contains(it, true) },
+                )
+                is ConfigItem.Switch -> SourceConfigSwitch(item.label, value == "true", !busy) { update(item.key, it.toString()) }
+                is ConfigItem.Select -> SourceConfigOptions(item.label, item.options, setOf(value), !busy) { update(item.key, it) }
+                is ConfigItem.MultiSelect -> SourceConfigOptions(item.label, item.options, value.split(',').toSet(), !busy) { option ->
+                    val selected = value.split(',').filter { it.isNotBlank() }.toMutableSet()
+                    if (!selected.remove(option)) selected.add(option)
+                    update(item.key, selected.joinToString(","))
                 }
-                if (busy) CircularProgressIndicator()
+                is ConfigItem.Button -> OutlinedButton(onClick = { onAction(item.click, values) }, enabled = !busy, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text(item.label) }
             }
-        },
-        confirmButton = { TextButton(onClick = { onSave(values) }, enabled = !busy) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") } },
-    )
+        }
+    }
 }

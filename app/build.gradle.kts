@@ -156,6 +156,8 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.test.ext)
     androidTestImplementation(project(":feature:tingshu"))
+    androidTestImplementation(project(":core:tingshu"))
+    androidTestImplementation(libs.androidx.media3.exoplayer)
     androidTestImplementation(libs.androidx.media3.session)
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.androidx.compose.ui.test)

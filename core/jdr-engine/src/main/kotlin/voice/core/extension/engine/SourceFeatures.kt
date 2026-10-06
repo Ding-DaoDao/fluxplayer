@@ -19,6 +19,7 @@ public data class SourceSetting(
     val default: String = "",
     val options: List<String> = emptyList(),
     val action: String = "",
+    val hint: String = "",
 )
 
 /** Host implementations scope every call to the package and source. */
@@ -58,6 +59,11 @@ public data class SourceLogin(
     val webUrl: String = "",
     val cookieUrl: String = "",
     val qrImage: String = "",
+    /**
+     * 登录页是否需要桌面 UA。部分网盘（夸克、天翼）的移动版登录页功能残缺，
+     * 必须用桌面 UA 才能正常出登录表单。对应 JAR 源的 `ILogin.isLoginDesktop()`。
+     */
+    val desktopUserAgent: Boolean = false,
     val state: JsonObject = JsonObject(emptyMap()),
 )
 
@@ -96,6 +102,7 @@ public object SourceFeatures {
                 default = default,
                 options = (obj["options"] as? JsonArray)?.map { (it as? JsonPrimitive)?.contentOrNull ?: error("选项必须是字符串") }.orEmpty(),
                 action = obj.text("action").ifBlank { obj.text("key").ifBlank { "action$index" } },
+                hint = obj.text("hint"),
             )
         }
         validateSettings(fields, canBrowse)
@@ -117,7 +124,16 @@ public object SourceFeatures {
         require(qr.length <= 350_000) { "二维码图片过大" }
         val auth = obj["authenticated"]
         require(auth == null || (auth is JsonPrimitive && auth.booleanOrNull != null)) { "authenticated 必须是布尔值" }
-        return SourceLogin((auth as? JsonPrimitive)?.booleanOrNull, obj.text("message"), web, cookie, qr, obj["state"] as? JsonObject ?: JsonObject(emptyMap()))
+        val desktop = (obj["desktopUserAgent"] as? JsonPrimitive)?.booleanOrNull ?: false
+        return SourceLogin(
+            (auth as? JsonPrimitive)?.booleanOrNull,
+            obj.text("message"),
+            web,
+            cookie,
+            qr,
+            desktop,
+            obj["state"] as? JsonObject ?: JsonObject(emptyMap()),
+        )
     }
 
     public fun parseDirectory(raw: String, currentPage: Int): DirectoryPage {

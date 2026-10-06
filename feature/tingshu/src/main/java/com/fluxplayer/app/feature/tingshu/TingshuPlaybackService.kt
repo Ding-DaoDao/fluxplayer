@@ -18,6 +18,7 @@ import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.fluxplayer.app.core.tingshu.ListeningBook
+import com.fluxplayer.app.core.tingshu.ListeningErrors
 import com.fluxplayer.app.core.tingshu.ListeningProgress
 import com.fluxplayer.app.core.tingshu.TingshuRepository
 import com.google.common.util.concurrent.Futures
@@ -27,6 +28,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -119,9 +121,12 @@ class TingshuPlaybackService : MediaSessionService() {
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    val status = generateSequence<Throwable>(error) { it.cause }.take(12)
+                        .filterIsInstance<androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
                     ListeningPlayback.mutableState.value = ListeningPlayback.state.value.copy(
                         loading = false,
-                        error = "音频播放失败，可以重新选择本章重试",
+                        playing = false,
+                        error = ListeningErrors.describe(error, "音频播放失败", status),
                     )
                 }
             })
@@ -228,12 +233,12 @@ class TingshuPlaybackService : MediaSessionService() {
         player.pause()
         player.clearMediaItems()
         activeBook = null
-        ListeningPlayback.mutableState.value = ListeningPlayback.state.value.copy(loading = true, playing = false, error = null)
+        ListeningPlayback.mutableState.value = ListeningPlaybackState(index = index, position = position, loading = true)
         resolveJob = scope.launch {
             try {
                 val book = repository.book(key)
                 require(index in book.episodes.indices) { "章节不存在" }
-                ListeningPlayback.mutableState.value = ListeningPlaybackState(book = book, index = index, loading = true, lastPlayedAt = System.currentTimeMillis())
+                ListeningPlayback.mutableState.value = ListeningPlaybackState(book = book, index = index, position = position, loading = true, lastPlayedAt = System.currentTimeMillis())
                 val audioCache = ListeningAudioCache.get(this@TingshuPlaybackService)
                 val offline = audioCache.offlineResource(book, index)
                 val resource = offline ?: repository.resolve(book, index)
@@ -254,11 +259,10 @@ class TingshuPlaybackService : MediaSessionService() {
                 player.prepare()
                 player.play()
                 updateState()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
             } catch (error: Throwable) {
+                if (error is CancellationException && error !is TimeoutCancellationException) throw error
                 ListeningPlayback.mutableState.value = ListeningPlayback.state.value.copy(
-                    loading = false, playing = false, error = error.message ?: "书源解析失败",
+                    loading = false, playing = false, error = ListeningErrors.describe(error, "播放地址解析失败"),
                 )
             }
         }

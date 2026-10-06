@@ -18,12 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -44,8 +40,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil3.network.NetworkHeaders
-import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.tingshu.TingshuRepository
@@ -66,7 +60,6 @@ fun TingshuSourceContent(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var keyword by remember(state.source?.id) { mutableStateOf("") }
     // 待确认播放的书源书籍：点击书籍先弹确认窗；弹窗打开时后台预解析详情以显示集数
     var pendingBook by remember(state.source?.id) { mutableStateOf<Book?>(null) }
     val pendingDetail = state.pendingDetail
@@ -79,9 +72,15 @@ fun TingshuSourceContent(
             chapterCount = resolved?.episodes?.size ?: 0,
             coverModel = rememberSourceCover(state.source?.id.orEmpty(), target.coverUrl, viewModel.repository),
             resumeLabel = when {
+                state.error != null -> null
                 resolved == null -> "正在解析目录…"
                 progress != null && progress.position > 0L -> "继续收听"
                 else -> null
+            },
+            loading = state.loading,
+            playEnabled = resolved != null && !state.loading && state.error == null,
+            errorContent = state.error?.let { message ->
+                { SourceErrorNotice(message, onRetry = { viewModel.resolvePending(target) }) }
             },
             onDismiss = {
                 pendingBook = null
@@ -116,63 +115,14 @@ fun TingshuSourceContent(
     }
     Column(modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (state.source?.id?.startsWith("jdr:") == true) {
-            TextButton(onClick = { showJdrSettings = true }, enabled = !state.loading) { Text("登录与书源设置") }
-        }
-        if (state.source?.let { if (it.id.startsWith("jdr:")) "search" in it.capabilities else !it.isCloudLibrary } == true) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = keyword,
-                    onValueChange = { keyword = it },
-                    placeholder = { Text("搜索书籍", style = FluxTheme.typography.bodyMedium) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    leadingIcon = {
-                        Icon(
-                            imageVector = NextIcons.Search,
-                            contentDescription = null,
-                            tint = FluxTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = FluxTheme.colorScheme.primary,
-                        unfocusedBorderColor = FluxTheme.colorScheme.outlineVariant,
-                    ),
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    onClick = { viewModel.search(keyword) },
-                    enabled = !state.loading && keyword.isNotBlank(),
-                ) { Text("搜索") }
-            }
+            TextButton(onClick = { showJdrSettings = true }, enabled = !state.loading) { Text("书源设置") }
         }
         if (state.loading) {
             FluxLinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(3.dp))
         }
-        state.error?.let { message ->
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = FluxTheme.colorScheme.errorContainer,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            ) {
-                Row(
-                    Modifier.padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        message,
-                        style = FluxTheme.typography.bodySmall,
-                        color = FluxTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = viewModel::dismissError) { Text("关闭") }
-                }
+        if (pendingBook == null) {
+            state.error?.let { message ->
+                SourceErrorNotice(message, Modifier.padding(horizontal = 16.dp), onRetry = viewModel::retry, onDismiss = viewModel::dismissError)
             }
         }
         val listState = rememberLazyListState()
@@ -322,19 +272,10 @@ private fun playBook(context: android.content.Context, repository: TingshuReposi
 @Composable
 internal fun rememberSourceCover(sourceId: String, url: String, repository: TingshuRepository): ImageRequest? {
     val context = LocalContext.current
-    var request by remember(sourceId, url) { mutableStateOf<ImageRequest?>(null) }
-    LaunchedEffect(sourceId, url) {
-        if (url.isBlank()) return@LaunchedEffect
-        val headers = try {
-            repository.coverHeaders(sourceId, url)
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            emptyMap()
-        }
-        request = ImageRequest.Builder(context).data(url).diskCacheKey("$sourceId:$url").memoryCacheKey("$sourceId:$url").httpHeaders(
-            NetworkHeaders.Builder().apply { headers.forEach { (key, value) -> set(key, value) } }.build(),
-        ).build()
+    return remember(context, sourceId, url, repository) {
+        if (url.isBlank()) return@remember null
+        ImageRequest.Builder(context).data(SourceCover(url))
+            .diskCacheKey("$sourceId:$url").memoryCacheKey("$sourceId:$url")
+            .fetcherFactory(SourceCoverFetcher { repository.resolveCover(sourceId, url) }).build()
     }
-    return request
 }

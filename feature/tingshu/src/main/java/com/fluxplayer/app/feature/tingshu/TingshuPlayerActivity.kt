@@ -8,7 +8,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.DisposableEffect
@@ -79,7 +78,7 @@ class TingshuPlayerActivity : ComponentActivity() {
                     )
                     (connectionError ?: state.error)?.let { error ->
                         Column(Modifier.padding(24.dp)) {
-                            Text(error, color = MaterialTheme.colorScheme.error)
+                            SourceErrorNotice(error)
                             TextButton(onClick = { finish() }) { Text("返回书库") }
                         }
                     }
@@ -124,6 +123,9 @@ class TingshuPlayerActivity : ComponentActivity() {
                             coverModel = rememberSourceCover(book.sourceId, book.coverUrl, repository),
                             loading = state.loading,
                             playbackError = state.error,
+                            playbackErrorContent = state.error?.let { error ->
+                                { SourceErrorNotice(error, onRetry = { select(connected, book.key, state.index, state.position) }) }
+                            },
                             onRetry = { select(connected, book.key, state.index, state.position) },
                             modifier = Modifier.weight(1f),
                         )

@@ -42,6 +42,7 @@ dependencies {
     testImplementation(libs.junit4)
     androidTestImplementation(libs.androidx.test.ext)
     androidTestImplementation(libs.androidx.test.espresso.core)
+    androidTestImplementation(libs.okhttp.mockwebserver)
 }
 
 // AGP 内置 Kotlin 未被旧版格式插件识别，显式纳入听书源码与测试源码。

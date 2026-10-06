@@ -1,11 +1,14 @@
 package com.fluxplayer.app.feature.tingshu
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.Switch
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -20,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.tingshu.ListeningBook
+import com.fluxplayer.app.core.tingshu.ListeningErrors
 import com.fluxplayer.app.core.ui.cache.BookCoverCache
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import kotlinx.coroutines.CancellationException
@@ -51,46 +55,37 @@ fun AppListeningCacheSettings() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = e.message
+                error = ListeningErrors.describe(e, "缓存操作失败")
             } finally {
                 busy = false
             }
         }
     }
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Text("App 缓存管理", style = FluxTheme.typography.titleSmall)
-        Row {
-            Text("自动缓存音频", Modifier.weight(1f).padding(top = 12.dp))
-            Switch(state.automatic, cache::setAutomatic, enabled = !busy)
-        }
-        Text("音频已使用 ${state.usedBytes / (1024 * 1024)} MB / ${state.limitMb} MB")
-        Text("所有 JAR、JDR 书源共用音频缓存，播放时自动缓存，达到上限清理最早使用的内容。", style = FluxTheme.typography.bodySmall)
-        Row {
-            listOf(128, 256, 512).forEach { mb ->
-                TextButton(onClick = { operation { cache.setLimit(mb) } }, enabled = !busy) { Text(if (state.limitMb == mb) "✓ $mb MB" else "$mb MB") }
-            }
-        }
-        TextButton(onClick = { operation { cache.setLimit(1024) } }, enabled = !busy) { Text(if (state.limitMb == 1024) "✓ 1 GB" else "1 GB") }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SourceConfigSwitch("自动缓存音频\n播放时保存音频，空间不足时自动清理较早的缓存。", state.automatic, !busy, cache::setAutomatic)
+        Text("${state.usedBytes / (1024 * 1024)} MB / ${state.limitMb} MB", style = FluxTheme.typography.titleMedium)
+        LinearProgressIndicator(progress = { (state.usedBytes.toFloat() / (state.limitMb * 1024L * 1024)).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+        val limits = linkedMapOf("128 MB" to 128, "256 MB" to 256, "512 MB" to 512, "1 GB" to 1024)
+        SourceConfigOptions("音频缓存上限", limits.keys.toList(), limits.filterValues { it == state.limitMb }.keys, !busy) { label -> operation { cache.setLimit(limits.getValue(label)) } }
         state.download?.let {
             Text("正在缓存：$it")
             LinearProgressIndicator(Modifier.fillMaxWidth())
             TextButton(onClick = cache::cancelDownload) { Text("取消缓存任务") }
         }
         state.message?.let { Text(it) }
-        error?.let { Text(it, color = FluxTheme.colorScheme.error) }
-        TextButton(onClick = { operation { cache.clear() } }, enabled = !busy) { Text("清除音频缓存") }
-        Row {
-            Text("自动缓存封面", Modifier.weight(1f).padding(top = 12.dp))
-            Switch(coverEnabled, { BookCoverCache.setEnabled(context, it) }, enabled = !busy)
-        }
-        Text("封面已使用 ${coverBytes / (1024 * 1024)} MB / ${BookCoverCache.LIMIT_BYTES / (1024 * 1024)} MB")
-        Text("书库、详情和播放页共用封面缓存；清理缓存会保留账号、凭证、书库和进度。", style = FluxTheme.typography.bodySmall)
-        TextButton(onClick = {
+        error?.let { SourceErrorNotice(it, onDismiss = { error = null }) }
+        OutlinedButton(onClick = { operation { cache.clear() } }, enabled = !busy, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("清除音频缓存") }
+        HorizontalDivider(color = FluxTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        SourceConfigSwitch("自动缓存封面\n已缓存的封面可直接显示，减少网盘请求。", coverEnabled, !busy) { BookCoverCache.setEnabled(context, it) }
+        Text("${coverBytes / (1024 * 1024)} MB / ${BookCoverCache.LIMIT_BYTES / (1024 * 1024)} MB", style = FluxTheme.typography.titleMedium)
+        LinearProgressIndicator(progress = { (coverBytes.toFloat() / BookCoverCache.LIMIT_BYTES).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+        OutlinedButton(onClick = {
             operation {
                 BookCoverCache.clear(context)
                 coverBytes = 0
             }
-        }, enabled = !busy) { Text("清除封面缓存") }
+        }, enabled = !busy, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("清除封面缓存") }
+        Text("清理缓存会保留账号、书库和收听进度。", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
     }
 }
 

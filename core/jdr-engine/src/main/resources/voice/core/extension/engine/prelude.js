@@ -5,6 +5,9 @@
 (() => {
   let registered = null;
 
+  // 分页和限速等待交给宿主协程，支持超时及取消。
+  globalThis.sleep = (milliseconds) => globalThis.__sleep(Number(milliseconds));
+
   globalThis.registerSource = (source) => {
     if (!source || typeof source !== 'object' || Array.isArray(source)) {
       throw new Error('registerSource(源对象) 需要一个对象参数');
@@ -203,6 +206,8 @@
     remove(key) { host('__storageRemove')(String(key)); },
     clear() { host('__storageClear')(); },
   });
+  // 旧网盘源通过全局 storage 保存 JSON 字符串，与 host.storage 共用加密状态。
+  globalThis.storage = storage;
   globalThis.host = Object.freeze({
     version: 1,
     settings: Object.freeze({
@@ -259,7 +264,7 @@
           return 'null';
         }
         if (typeof registered.configAction === 'function') return JSON.stringify(await registered.configAction(p));
-        const items = typeof registered.getCustomConfigItems === 'function' ? await registered.getCustomConfigItems() : registered.configItems || [];
+        const items = typeof registered.getCustomConfigItems === 'function' ? await registered.getCustomConfigItems() : registered.settings || registered.configItems || [];
         const item = items.find((it, index) => (it.action || it.key || 'action' + index) === p.action);
         if (!item || typeof item.click !== 'function') throw Error('配置操作未实现');
         return JSON.stringify((await item.click()) ?? null);
@@ -279,9 +284,10 @@
       search: typeof registered.search === 'function',
       chapters: typeof registered.chapters === 'function',
       audio: typeof registered.audio === 'function',
+      cover: typeof registered.cover === 'function',
       login: typeof registered.login === 'function',
       browse: typeof registered.browse === 'function',
-      config: typeof registered.config === 'function' || typeof registered.getCustomConfigItems === 'function' || Array.isArray(registered.settings) || Array.isArray(registered.configItems),
+      config: typeof registered.config === 'function' || typeof registered.configAction === 'function' || typeof registered.getCustomConfigItems === 'function' || Array.isArray(registered.settings) || Array.isArray(registered.configItems),
     });
   };
 })();

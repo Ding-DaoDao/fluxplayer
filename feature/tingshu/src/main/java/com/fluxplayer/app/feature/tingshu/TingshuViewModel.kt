@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fluxplayer.app.core.tingshu.JdrFolder
 import com.fluxplayer.app.core.tingshu.ListeningBook
+import com.fluxplayer.app.core.tingshu.ListeningErrors
 import com.fluxplayer.app.core.tingshu.ListeningSource
 import com.fluxplayer.app.core.tingshu.TingshuRepository
 import com.github.eprendre.tingshu.utils.Book
@@ -13,6 +14,7 @@ import com.github.eprendre.tingshu.utils.CategoryMenu
 import com.github.eprendre.tingshu.utils.ConfigItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -28,8 +30,9 @@ data class SourceBrowseState(
     val detail: ListeningBook? = null,
     /** 播放确认弹窗预解析出的详情，就绪后可一键起播 */
     val pendingDetail: ListeningBook? = null,
+    val pendingBookUrl: String? = null,
+    val configMessage: String? = null,
     val title: String = "",
-    val query: String = "",
     val page: Int = 0,
     val totalPages: Int = 0,
     val nextUrl: String = "",
@@ -43,6 +46,8 @@ data class SourceBrowseState(
     val error: String? = null,
     val configItems: List<ConfigItem>? = null,
     val configRevision: Int = 0,
+    /** 配置对话框里展示的登录态；null = 该源不在已知网盘之列，状态未知 */
+    val loginState: Boolean? = null,
     val canGoBack: Boolean = false,
     /** 待启动的书源 WebView 登录页，UI 侧消费后调SourceLoginActivity 并清空 */
     val pendingLogin: PendingLogin? = null,
@@ -65,6 +70,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
     val state = mutableState.asStateFlow()
     private val history = mutableListOf<SourceBrowseState>()
     private var loadJob: Job? = null
+    private var retryAction: (suspend () -> Unit)? = null
 
     fun importSource(uri: Uri) = operation { repository.importSource(uri) }
 
@@ -112,8 +118,12 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
                 it.copy(
                     books = if (append) (it.books + page.books).distinctBy { book -> book.bookUrl } else page.books,
                     folders = if (append) (it.folders + page.folders).distinctBy { folder -> folder.id } else page.folders,
-                    directoryId = page.directoryId, browseNextPage = page.nextPage, page = pageNumber,
-                    menus = emptyList(), title = name, query = "", canGoBack = history.isNotEmpty(),
+                    directoryId = page.directoryId,
+                    browseNextPage = page.nextPage,
+                    page = pageNumber,
+                    menus = emptyList(),
+                    title = name,
+                    canGoBack = history.isNotEmpty(),
                 )
             }
         }
@@ -130,7 +140,6 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
                     books = if (append) it.books + category.list else category.list,
                     menus = emptyList(),
                     title = title,
-                    query = "",
                     page = category.currentPage,
                     totalPages = category.totalPage,
                     nextUrl = category.nextUrl,
@@ -141,60 +150,32 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun search(query: String, append: Boolean = false) {
-        val source = state.value.source ?: return
-        if (query.isBlank()) return
-        val previous = state.value
-        val page = if (append) state.value.page + 1 else 1
-        operation {
-            val (books, total) = repository.search(source.id, query.trim(), page)
-            if (!append) history.add(previous.copy(loading = false, error = null))
-            mutableState.update {
-                it.copy(
-                    books = if (append) it.books + books else books,
-                    menus = emptyList(),
-                    title = "搜索：${query.trim()}",
-                    query = query.trim(),
-                    folders = emptyList(),
-                    directoryId = null,
-                    browseNextPage = null,
-                    page = page,
-                    totalPages = total,
-                    nextUrl = "",
-                    canGoBack = history.isNotEmpty(),
-                )
-            }
-        }
-    }
-
     fun nextPage() {
         val state = state.value
         if (state.loading || state.loadingMore) return
         if (!hasMore(state)) return
-        if (state.query.isNotBlank()) {
-            search(state.query, true)
-        } else if (state.directoryId != null && state.browseNextPage != null) {
+        if (state.directoryId != null && state.browseNextPage != null) {
             browseDirectory(state.directoryId, state.title, true)
         } else if (state.nextUrl.isNotBlank()) {
             category(state.nextUrl, state.title, true)
         }
     }
 
-    /** 是否还有下一页：搜索看 totalPages，分类看 nextUrl。 */
+    /** 是否还有下一页：网盘看 browseNextPage，分类看 nextUrl。 */
     private fun hasMore(state: SourceBrowseState): Boolean =
-        if (state.query.isNotBlank()) state.page < state.totalPages else state.browseNextPage != null || state.nextUrl.isNotBlank()
+        state.browseNextPage != null || state.nextUrl.isNotBlank()
 
     /** 供列表触底回调：返回是否真的发起了加载（已到末页或正在加载时为 false）。 */
     fun loadMoreIfNeeded(): Boolean {
         val state = state.value
-        if (state.loading || state.loadingMore || !hasMore(state)) return false
+        if (state.loading || state.loadingMore || state.error != null || state.pendingBookUrl != null || !hasMore(state)) return false
         nextPage()
         return true
     }
 
     /**
      * 下拉刷新：重载当前视图。
-     * 书库首页 → 重新加载书源入口；分类/搜索子页 → 重新拉当前页（列表保持显示，不闪空）。
+     * 书库首页 → 重新加载书源入口；分类子页 → 重新拉当前页（列表保持显示，不闪空）。
      */
     fun refresh() {
         val state = state.value
@@ -203,14 +184,12 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         if (state.refreshing) return
         mutableState.update { it.copy(refreshing = true, error = null) }
         operation {
-            if (state.query.isBlank() && "browse" in source.capabilities) {
+            if ("browse" in source.capabilities) {
                 val page = repository.browseJdr(source.id, if (state.canGoBack) state.directoryId else null)
                 mutableState.update { it.copy(books = page.books, folders = page.folders, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
                 return@operation
             }
             val refreshed = when {
-                state.canGoBack && state.query.isNotBlank() ->
-                    repository.search(source.id, state.query, 1)
                 state.canGoBack -> repository.category(source.id, state.currentCategoryUrl).let { it.list to it.totalPage }
                 else -> {
                     val menus = repository.menus(source.id)
@@ -267,10 +246,14 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
      */
     fun resolvePending(book: Book) {
         val source = state.value.source ?: return
+        mutableState.update { it.copy(pendingDetail = null, pendingBookUrl = book.bookUrl) }
         operation { mutableState.update { it.copy(pendingDetail = repository.detail(source.id, book)) } }
     }
 
-    fun consumePendingDetail() = mutableState.update { it.copy(pendingDetail = null) }
+    fun consumePendingDetail() {
+        if (state.value.pendingBookUrl != null) loadJob?.cancel()
+        mutableState.update { it.copy(pendingDetail = null, pendingBookUrl = null, loading = false, error = null) }
+    }
 
     fun openSavedBook(key: String) = operation {
         history.clear()
@@ -299,7 +282,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         val source = state.value.source ?: return
         operation {
             val items = repository.config(source.id)
-            mutableState.update { it.copy(configItems = items) }
+            mutableState.update { it.copy(configItems = items, loginState = repository.isLoggedIn(source.id)) }
         }
     }
 
@@ -307,19 +290,28 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         val source = state.value.source ?: return
         operation {
             repository.saveConfig(source.id, values)
-            mutableState.update { it.copy(configItems = null) }
+            mutableState.update { it.copy(configItems = null, loginState = null) }
         }
     }
 
     fun configAction(action: () -> Unit, values: Map<String, String>) = operation {
         val source = state.value.source ?: return@operation
         repository.saveConfig(source.id, values)
-        repository.configAction(action)
+        val message = repository.configAction(action)
         val items = repository.config(source.id)
-        mutableState.update { it.copy(configItems = items, configRevision = it.configRevision + 1) }
+        // 「清除登录痕迹」等动作会改动登录态，一并刷新状态显示
+        mutableState.update {
+            it.copy(configItems = items, configRevision = it.configRevision + 1, loginState = repository.isLoggedIn(source.id), configMessage = message)
+        }
     }
 
-    fun dismissConfig() = mutableState.update { it.copy(configItems = null) }
+    /** 登录页返回后重新探测登录态 */
+    fun refreshLoginState() = operation {
+        val source = state.value.source ?: return@operation
+        mutableState.update { it.copy(loginState = repository.isLoggedIn(source.id)) }
+    }
+
+    fun dismissConfig() = mutableState.update { it.copy(configItems = null, loginState = null, configMessage = null) }
 
     /**
      * 打开书源 WebView 登录页。
@@ -346,6 +338,10 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
 
     fun dismissError() = mutableState.update { it.copy(error = null) }
 
+    fun retry() {
+        retryAction?.let { operation(it) }
+    }
+
     fun back() {
         loadJob?.cancel()
         when {
@@ -357,20 +353,20 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
 
     private fun operation(action: suspend () -> Unit) {
         loadJob?.cancel()
+        retryAction = action
         loadJob = viewModelScope.launch {
             mutableState.update { it.copy(loading = true, error = null) }
             try {
                 action()
                 mutableState.update { it.copy(loading = false, loadingMore = false, refreshing = false) }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
             } catch (error: Throwable) {
+                if (error is CancellationException && error !is TimeoutCancellationException) throw error
                 mutableState.update {
                     it.copy(
                         loading = false,
                         loadingMore = false,
                         refreshing = false,
-                        error = error.cause?.message ?: error.message ?: "书源操作失败",
+                        error = ListeningErrors.describe(error, if (it.pendingBookUrl != null) "章节加载失败" else "书源操作失败"),
                     )
                 }
             }

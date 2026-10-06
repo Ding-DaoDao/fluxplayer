@@ -26,6 +26,7 @@ import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
+import com.fluxplayer.app.feature.tingshu.ListeningSettingsCard
 import com.fluxplayer.app.feature.tingshu.TingshuConfigContent
 
 @Composable
@@ -45,21 +46,24 @@ fun AudiobookSettingsScreen(onNavigateUp: () -> Unit, viewModel: AudiobookSettin
         }
     }
     FluxSettingsScaffold(title = "听书配置", onNavigateUp = onNavigateUp) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("本地书库", style = FluxTheme.typography.titleMedium)
-            ClickablePreferenceItem(
-                title = "书库路径",
-                description = preferences.audiobookRootUri.takeIf { it.isNotBlank() }?.let { Uri.decode(it.substringAfterLast('/')) } ?: "尚未选择，点击设置",
-                icon = NextIcons.Folder,
-                onClick = { picker.launch(preferences.audiobookRootUri.takeIf { it.isNotBlank() }?.let(Uri::parse)) },
-                isFirstItem = true,
-                isLastItem = true,
-            )
-            Text("每本书放在独立的子文件夹中，章节和封面会自动整理。修改路径后，返回本地书库即可查看。", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
-            if (preferences.audiobookRootUri.isNotBlank()) TextButton(onClick = { viewModel.setRootUri("") }) { Text("清除书库路径") }
-            error?.let { Text(it, color = FluxTheme.colorScheme.error) }
-            com.fluxplayer.app.feature.tingshu.AppListeningCacheSettings()
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            ListeningSettingsCard("本地书库", "选择存放有声书的文件夹，自动整理章节与封面。") {
+                ClickablePreferenceItem(
+                    title = "书库路径",
+                    description = preferences.audiobookRootUri.takeIf { it.isNotBlank() }?.let { Uri.decode(it.substringAfterLast('/')) } ?: "尚未选择，点击设置",
+                    icon = NextIcons.Folder,
+                    onClick = { picker.launch(preferences.audiobookRootUri.takeIf { it.isNotBlank() }?.let(Uri::parse)) },
+                    isFirstItem = true,
+                    isLastItem = true,
+                )
+                Text("每本书放在独立的子文件夹中。", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
+                if (preferences.audiobookRootUri.isNotBlank()) TextButton(onClick = { viewModel.setRootUri("") }) { Text("清除书库路径") }
+                error?.let { Text(it, color = FluxTheme.colorScheme.error) }
+            }
             TingshuConfigContent()
+            ListeningSettingsCard("缓存与空间", "管理音频和封面缓存，减少重复加载。") {
+                com.fluxplayer.app.feature.tingshu.AppListeningCacheSettings()
+            }
         }
     }
 }

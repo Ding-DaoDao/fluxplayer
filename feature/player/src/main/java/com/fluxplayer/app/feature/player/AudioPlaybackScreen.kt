@@ -155,6 +155,7 @@ fun AudioPlaybackScreen(
     coverModel: Any? = null,
     loading: Boolean = false,
     playbackError: String? = null,
+    playbackErrorContent: (@Composable () -> Unit)? = null,
     onRetry: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -1035,10 +1036,14 @@ fun AudioPlaybackScreen(
         }
 
         if (playbackError != null) {
-            Surface(modifier = Modifier.align(Alignment.BottomCenter).padding(20.dp), shape = RoundedCornerShape(16.dp), color = playerSurfaceContainer()) {
+            Box(modifier = Modifier.align(Alignment.BottomCenter).padding(20.dp)) {
+                if (playbackErrorContent != null) {
+                    playbackErrorContent()
+                } else Surface(shape = RoundedCornerShape(16.dp), color = playerSurfaceContainer()) {
                 Column(Modifier.padding(16.dp)) {
                     Text(playbackError, color = FluxTheme.colorScheme.error)
                     androidx.compose.material3.TextButton(onClick = onRetry) { Text("重试本章") }
+                }
                 }
             }
         }

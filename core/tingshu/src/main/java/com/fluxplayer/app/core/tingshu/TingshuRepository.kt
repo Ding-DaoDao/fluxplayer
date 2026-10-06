@@ -151,11 +151,19 @@ class TingshuRepository private constructor(private val context: Context) {
     }
 
     suspend fun menus(sourceId: String): List<CategoryMenu> = withContext(dispatcher) {
-        if (jdr.handles(sourceId)) emptyList() else source(sourceId).getCategoryMenus()
+        if (jdr.handles(sourceId)) {
+            emptyList()
+        } else {
+            SourceHost.captureMessages { messages ->
+                source(sourceId).getCategoryMenus().also { if (it.isEmpty() && messages.isNotEmpty()) error(messages.last()) }
+            }
+        }
     }
 
     suspend fun category(sourceId: String, url: String): Category = withContext(dispatcher) {
-        source(sourceId).getCategoryList(url)
+        SourceHost.captureMessages { messages ->
+            source(sourceId).getCategoryList(url).also { if (it.list.isEmpty() && messages.isNotEmpty()) error(messages.last()) }
+        }
     }
 
     suspend fun search(sourceId: String, keywords: String, page: Int): Pair<List<Book>, Int> = withContext(dispatcher) {
@@ -168,13 +176,18 @@ class TingshuRepository private constructor(private val context: Context) {
     suspend fun detail(sourceId: String, book: Book): ListeningBook = withContext(dispatcher) {
         if (jdr.handles(sourceId)) {
             val snapshot = jdr.detail(sourceId, book, digest("$sourceId\u0000${book.bookUrl}"))
+            require(snapshot.episodes.isNotEmpty()) { "书源没有返回可播放章节" }
             writeBook(snapshot)
             return@withContext snapshot
         }
         val selected = source(sourceId)
         SourceHost.currentBook.set(book)
         try {
-            val detail: BookDetail = selected.getBookDetailInfo(book.bookUrl, true, true)
+            val detail: BookDetail = SourceHost.captureMessages { messages ->
+                selected.getBookDetailInfo(book.bookUrl, true, true).also {
+                    require(it.playList.isNotEmpty()) { messages.lastOrNull() ?: "书源没有返回可播放章节" }
+                }
+            }
             val snapshot = ListeningBook(
                 key = digest("$sourceId\u0000${book.bookUrl}"),
                 sourceId = sourceId,
@@ -227,8 +240,10 @@ class TingshuRepository private constructor(private val context: Context) {
         )
         SourceHost.extractedUrl.remove()
         try {
-            selected.getAudioUrlExtractor().extract(episode.url, true, false, false)
-            val url = checkNotNull(SourceHost.extractedUrl.get()) { "该书源的解析方式暂不支持" }
+            val url = SourceHost.captureMessages { messages ->
+                selected.getAudioUrlExtractor().extract(episode.url, true, false, false)
+                checkNotNull(SourceHost.extractedUrl.get()) { messages.lastOrNull() ?: "书源没有返回播放地址，请重试或检查书源配置" }
+            }
             require(Uri.parse(url).scheme in setOf("http", "https")) { "书源返回的地址不是 HTTP 音频地址" }
             ListeningResource(url, (selected as? AudioUrlExtraHeaders)?.headers(url).orEmpty())
         } finally {
@@ -242,6 +257,10 @@ class TingshuRepository private constructor(private val context: Context) {
         val result = mutableMapOf<String, String>()
         (source(sourceId) as? CoverUrlExtraHeaders)?.coverHeaders(url, result)
         result
+    }
+
+    suspend fun resolveCover(sourceId: String, url: String): ListeningResource? = withContext(dispatcher) {
+        if (jdr.handles(sourceId)) jdr.resolveCover(sourceId, url) else ListeningResource(url, coverHeaders(sourceId, url))
     }
 
     suspend fun playbackHeaders(sourceId: String, url: String): Map<String, String> = withContext(dispatcher) {
@@ -277,13 +296,20 @@ class TingshuRepository private constructor(private val context: Context) {
     suspend fun browseJdr(id: String, directory: String?, page: Int = 1) = withContext(dispatcher) { jdr.browse(id, directory, page) }
 
     /**
-     * 取书源的 WebView 登录页信息（URL + UA）。
+     * 取书源的 WebView 登录页信息（URL + UA + 登录态探测规则）。
      * 天翼/夸克/移动等网盘源实现了 ILogin，仅 JAR 书源走这条路径；
      * JDR 源有各自的登录实现，不在此列。书源未给出可用地址时返回 null，由调用方降级提示。
      */
     suspend fun loginInfo(sourceId: String): SourceHost.LoginInfo? = withContext(dispatcher) {
         if (jdr.handles(sourceId)) return@withContext null
         runCatching { SourceHost.loginInfo(source(sourceId)) }.getOrNull()
+    }
+
+    /** 探测书源登录态；返回 null 表示该源不在已知网盘之列、状态未知。 */
+    suspend fun isLoggedIn(sourceId: String): Boolean? = withContext(dispatcher) {
+        if (jdr.handles(sourceId)) return@withContext null
+        val info = runCatching { SourceHost.loginInfo(source(sourceId)) }.getOrNull() ?: return@withContext null
+        runCatching { SourceHost.isLoggedIn(info) }.getOrNull()
     }
 
     suspend fun config(sourceId: String): List<ConfigItem> = withContext(dispatcher) {
@@ -305,7 +331,12 @@ class TingshuRepository private constructor(private val context: Context) {
         }
     }
 
-    suspend fun configAction(action: () -> Unit) = withContext(dispatcher) { action() }
+    suspend fun configAction(action: () -> Unit): String? = withContext(dispatcher) {
+        SourceHost.captureMessages { messages ->
+            action()
+            messages.lastOrNull()
+        }
+    }
 
     suspend fun saveConfig(sourceId: String, values: Map<String, String>) = withContext(dispatcher) {
         if (jdr.handles(sourceId)) {

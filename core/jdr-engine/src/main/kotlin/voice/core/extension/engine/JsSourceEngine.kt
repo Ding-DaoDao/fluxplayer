@@ -9,6 +9,7 @@ import java.util.concurrent.Executors
 import kotlin.io.encoding.Base64
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -180,6 +181,12 @@ public class JsSourceEngine private constructor(
             quickJs.function("__log") { args -> log(args.string(0)) }
             quickJs.asyncFunction("__httpRequest") { args ->
                 http.request(args.string(0), args.string(1), args.string(2))
+            }
+            quickJs.asyncFunction("__sleep") { args ->
+                val milliseconds = args.int(0)
+                require(milliseconds in 0..60_000) { "等待时长必须在 0 到 60000 毫秒之间" }
+                delay(milliseconds.toLong())
+                null
             }
         }
 

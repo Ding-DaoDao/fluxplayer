@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +44,9 @@ fun PlayConfirmDialog(
     onDismiss: () -> Unit,
     onPlay: () -> Unit,
     modifier: Modifier = Modifier,
+    loading: Boolean = false,
+    playEnabled: Boolean = true,
+    errorContent: (@Composable () -> Unit)? = null,
 ) {
     val colors = FluxTheme.colorScheme
     androidx.compose.material3.AlertDialog(
@@ -89,7 +93,7 @@ fun PlayConfirmDialog(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(8.dp))
-                Surface(
+                if (!loading && errorContent == null) Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = colors.primaryContainer,
                 ) {
@@ -109,6 +113,14 @@ fun PlayConfirmDialog(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+                if (loading) {
+                    Spacer(Modifier.height(12.dp))
+                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                }
+                errorContent?.let {
+                    Spacer(Modifier.height(12.dp))
+                    it()
                 }
             }
         },
@@ -136,8 +148,9 @@ fun PlayConfirmDialog(
                 }
                 Surface(
                     onClick = onPlay,
+                    enabled = playEnabled,
                     shape = RoundedCornerShape(14.dp),
-                    color = colors.primary,
+                    color = if (playEnabled) colors.primary else colors.surfaceContainerHighest,
                     modifier = Modifier.weight(1.4f),
                 ) {
                     Row(

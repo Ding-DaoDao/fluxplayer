@@ -13,11 +13,13 @@ import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Column
@@ -25,6 +27,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -63,14 +66,12 @@ class SourceLoginActivity : ComponentActivity() {
         private const val EXTRA_UA = "ua"
         private const val EXTRA_SOURCE_NAME = "name"
 
-        fun start(context: Context, sourceName: String, url: String, userAgent: String) {
+        fun intent(context: Context, sourceName: String, url: String, userAgent: String): Intent {
             Log.i(LOG_TAG, "启动登录页 source=$sourceName url=$url desktopUA=${userAgent == SourceHost.DESKTOP_UA}")
-            context.startActivity(
-                Intent(context, SourceLoginActivity::class.java)
-                    .putExtra(EXTRA_URL, url)
-                    .putExtra(EXTRA_UA, userAgent)
-                    .putExtra(EXTRA_SOURCE_NAME, sourceName),
-            )
+            return Intent(context, SourceLoginActivity::class.java)
+                .putExtra(EXTRA_URL, url)
+                .putExtra(EXTRA_UA, userAgent)
+                .putExtra(EXTRA_SOURCE_NAME, sourceName)
         }
     }
 
@@ -89,6 +90,15 @@ class SourceLoginActivity : ComponentActivity() {
 
         // Cookie 必须落盘，否则进程被杀后登录态丢失，用户每次都要重新登录
         CookieManager.getInstance().setAcceptCookie(true)
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    val web = webView
+                    if (web != null && web.canGoBack()) web.goBack() else finish()
+                }
+            },
+        )
 
         setContent {
             MaterialTheme {
@@ -97,7 +107,11 @@ class SourceLoginActivity : ComponentActivity() {
                         sourceName = sourceName,
                         url = url,
                         userAgent = userAgent,
-                        onClose = { finish() },
+                        onClose = {
+                            CookieManager.getInstance().flush()
+                            setResult(RESULT_OK)
+                            finish()
+                        },
                         onWebViewReady = { webView = it },
                     )
                 }
@@ -114,8 +128,10 @@ class SourceLoginActivity : ComponentActivity() {
         onWebViewReady: (WebView) -> Unit,
     ) {
         var loading by remember { mutableStateOf(true) }
+        var pageError by remember { mutableStateOf<String?>(null) }
+        var desktop by remember { mutableStateOf(userAgent == SourceHost.DESKTOP_UA) }
 
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -129,6 +145,21 @@ class SourceLoginActivity : ComponentActivity() {
                 )
                 TextButton(onClick = onClose) { Text("完成") }
             }
+            Row {
+                TextButton(onClick = {
+                    pageError = null
+                    webView?.reload()
+                }) { Text("重新加载") }
+                TextButton(onClick = {
+                    desktop = !desktop
+                    pageError = null
+                    webView?.apply {
+                        settings.userAgentString = if (desktop) SourceHost.DESKTOP_UA else WebSettings.getDefaultUserAgent(context)
+                        loadUrl(url)
+                    }
+                }) { Text(if (desktop) "切换手机版" else "切换电脑版") }
+            }
+            pageError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
 
             if (loading) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -139,6 +170,7 @@ class SourceLoginActivity : ComponentActivity() {
                 userAgent = userAgent,
                 onWebViewReady = onWebViewReady,
                 onLoadingChange = { loading = it },
+                onError = { pageError = it },
             )
         }
     }
@@ -150,6 +182,7 @@ class SourceLoginActivity : ComponentActivity() {
         userAgent: String,
         onWebViewReady: (WebView) -> Unit,
         onLoadingChange: (Boolean) -> Unit,
+        onError: (String?) -> Unit,
     ) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -160,6 +193,7 @@ class SourceLoginActivity : ComponentActivity() {
                         FrameLayout.LayoutParams.MATCH_PARENT,
                     )
                     settings.javaScriptEnabled = true
+                    settings.javaScriptCanOpenWindowsAutomatically = true
                     settings.domStorageEnabled = true
                     settings.useWideViewPort = true
                     settings.loadWithOverviewMode = true
@@ -186,6 +220,7 @@ class SourceLoginActivity : ComponentActivity() {
                         override fun onPageStarted(view: WebView?, u: String?, favicon: Bitmap?) {
                             Log.i(LOG_TAG, "pageStarted $u")
                             onLoadingChange(true)
+                            onError(null)
                         }
 
                         override fun onPageFinished(view: WebView?, u: String?) {
@@ -201,6 +236,17 @@ class SourceLoginActivity : ComponentActivity() {
                             error: WebResourceError?,
                         ) {
                             Log.w(LOG_TAG, "加载失败 ${request?.url} code=${error?.errorCode} ${error?.description}")
+                            if (request?.isForMainFrame == true) {
+                                onLoadingChange(false)
+                                onError("网页加载失败：${error?.description ?: "网络不可用"}，可重新加载或切换网页版本")
+                            }
+                        }
+
+                        override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, response: WebResourceResponse?) {
+                            if (request?.isForMainFrame == true) {
+                                onLoadingChange(false)
+                                onError("登录网站返回 HTTP ${response?.statusCode}，请稍后重新加载")
+                            }
                         }
 
                         override fun shouldOverrideUrlLoading(
@@ -239,19 +285,8 @@ class SourceLoginActivity : ComponentActivity() {
         )
     }
 
-    @Deprecated("使用 OnBackPressedDispatcher")
-    override fun onBackPressed() {
-        // 页内返回优先用于网页导航，避免登录流程中途被直接退出
-        val web = webView
-        if (web != null && web.canGoBack()) {
-            web.goBack()
-            return
-        }
-        @Suppress("DEPRECATION")
-        super.onBackPressed()
-    }
-
     override fun onDestroy() {
+        CookieManager.getInstance().flush()
         webView?.let { web ->
             web.stopLoading()
             (web.parent as? ViewGroup)?.removeView(web)
