@@ -45,6 +45,13 @@ android {
             isDebuggable = true
         }
 
+        create("coexist") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".test"
+            resValue("string", "test_app_name", "Flux Player 测试版")
+            matchingFallbacks.add("release")
+        }
+
         create("release-with-debug-signing") {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")
