@@ -10,7 +10,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -21,9 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -232,13 +229,7 @@ fun ListeningLibraryHome(
         else -> null
     }
 
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(150.dp),
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
+    ListeningHomeGrid(grid = grid, modifier = modifier) { layoutIsGrid ->
         (backgroundPlayer.error ?: playback.error?.takeUnless { showLocal })?.let { message ->
             item(key = "resume-error", span = { GridItemSpan(maxLineSpan) }) {
                 SourceErrorNotice(message, onDismiss = if (backgroundPlayer.error != null) backgroundPlayer::dismissError else null)
@@ -390,7 +381,7 @@ fun ListeningLibraryHome(
                     grid = !grid
                     preferences.edit().putBoolean("grid", grid).apply()
                 }) {
-                    Icon(if (grid) NextIcons.ViewAgenda else NextIcons.DashBoard, if (grid) "切换为列表" else "切换为网格", tint = colors.onSurfaceVariant)
+                    Icon(if (layoutIsGrid) NextIcons.ViewAgenda else NextIcons.DashBoard, if (layoutIsGrid) "切换为列表" else "切换为网格", tint = colors.onSurfaceVariant)
                 }
             }
         }
@@ -399,14 +390,14 @@ fun ListeningLibraryHome(
                 Text("从书库挑一本开始，收听记录会留在这里。", style = FluxTheme.typography.bodyMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(vertical = 12.dp))
             }
         }
-        items(entries, key = { "recent-${it.book.key}" }, span = { GridItemSpan(if (grid) 1 else maxLineSpan) }) { entry ->
+        items(entries, key = { "recent-${it.book.key}" }, contentType = { if (layoutIsGrid) "recent-grid" else "recent-row" }, span = { GridItemSpan(if (layoutIsGrid) 1 else maxLineSpan) }) { entry ->
             val book = entry.book
             val cover = if (entry.localBook != null) entry.localBook.coverUri else rememberSourceCover(book.sourceId, book.coverUrl, repository)
             // 最近收听记录已有完整书籍数据，点击直接从保存进度续播。
             val open = {
                 resumeBook(entry.localBook, book)
             }
-            if (grid) {
+            if (layoutIsGrid) {
                 RecentBookGridCard(book, entry.progress, cover, open, onLongClick = { removingBook = book })
             } else {
                 RecentBookRow(book, entry.progress, cover, open, onLongClick = { removingBook = book })

@@ -52,6 +52,8 @@ dependencies {
     implementation(libs.androidx.media3.session)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    androidTestImplementation(libs.androidx.compose.ui.test)
+    debugImplementation(libs.androidx.compose.ui.testManifest)
     androidTestImplementation(libs.androidx.test.ext)
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.okhttp.mockwebserver)
