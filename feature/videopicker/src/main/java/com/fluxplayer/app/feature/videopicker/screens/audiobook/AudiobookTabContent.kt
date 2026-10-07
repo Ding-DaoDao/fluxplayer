@@ -38,14 +38,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.AudiobookBookCard
 import com.fluxplayer.app.feature.player.AudiobookLoadingIndicator
 import com.fluxplayer.app.feature.player.PlayConfirmDialog
-import com.fluxplayer.app.feature.tingshu.TingshuPlayerActivity
 import com.fluxplayer.app.feature.tingshu.TingshuSourceContent
 import com.fluxplayer.app.feature.tingshu.TingshuViewModel
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
@@ -66,57 +64,8 @@ fun AudiobookTabContent(
     val context = LocalContext.current
     var destination by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     var showingDetail by remember { mutableStateOf(false) }
-    // 首页点书后的播放确认窗：本地书直接可播，书源书籍需等预解析
-    var pendingLocal by remember { mutableStateOf<AudioBook?>(null) }
-    var pendingSource by remember { mutableStateOf<ListeningBook?>(null) }
     val sourceState by sourceViewModel.state.collectAsStateWithLifecycle()
 
-    // 播放确认窗：本地书与书源书籍共用一套交互
-    pendingLocal?.let { book ->
-        val entry = localState.resumeStates[book.folderPath].orEmpty()
-        val resumeIndex = entry.substringBefore('|').toIntOrNull()?.takeIf { it >= 0 }
-        val uris = remember(book) { book.chapters.map { it.uri } }
-        PlayConfirmDialog(
-            title = book.title,
-            chapterCount = book.chapters.size,
-            coverModel = book.coverUri,
-            resumeLabel = resumeIndex?.let { "继续收听第 ${it + 1} 集" },
-            onDismiss = { pendingLocal = null },
-            onPlay = {
-                pendingLocal = null
-                val startIndex = resumeIndex?.coerceIn(0, (uris.lastIndex).coerceAtLeast(0)) ?: 0
-                val startMs = entry.substringAfter('|').toLongOrNull() ?: 0L
-                uris.getOrNull(startIndex)?.let { uri ->
-                    onPlayChapter(uri, book.coverUri, startMs, uris, startIndex)
-                }
-            },
-        )
-    }
-    pendingSource?.let { book ->
-        val progress = sourceViewModel.repository.progress(book.key)
-        val index = book.episodes.indexOfFirst { it.url == progress.episodeUrl }
-        PlayConfirmDialog(
-            title = book.title,
-            chapterCount = book.episodes.size,
-            coverModel = book.coverUrl.takeIf { it.isNotBlank() }?.let(Uri::parse),
-            resumeLabel = if (index >= 0) "继续收听第 ${index + 1} 集" else null,
-            onDismiss = {
-                pendingSource = null
-                sourceViewModel.consumePendingDetail()
-            },
-            onPlay = {
-                pendingSource = null
-                sourceViewModel.consumePendingDetail()
-                val startIndex = index.coerceAtLeast(0)
-                context.startActivity(
-                    android.content.Intent(context, TingshuPlayerActivity::class.java)
-                        .putExtra("book", book.key)
-                        .putExtra("index", startIndex)
-                        .putExtra("position", progress.position),
-                )
-            },
-        )
-    }
     val detailChanged: (Boolean) -> Unit = {
         showingDetail = it
         onShowingDetailChanged(it)
@@ -165,14 +114,6 @@ fun AudiobookTabContent(
             onSourceClick = { source ->
                 sourceViewModel.open(source)
                 destination = source.id
-            },
-            onRecentClick = { key ->
-                sourceViewModel.openSavedBook(key)
-                destination = "recent"
-            },
-            // 首页点书：统一弹播放确认窗（本地书与书源书籍都已有完整数据，无需再解析）
-            onBookPick = { localBook, sourceBook ->
-                if (localBook != null) pendingLocal = localBook else pendingSource = sourceBook
             },
             modifier = modifier,
         )

@@ -61,8 +61,10 @@ import coil3.compose.AsyncImage
 import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.tingshu.ListeningHistoryVisibility
 import com.fluxplayer.app.core.tingshu.ListeningProgress
+import com.fluxplayer.app.core.tingshu.ListeningResumeAction
 import com.fluxplayer.app.core.tingshu.ListeningSource
 import com.fluxplayer.app.core.tingshu.TingshuRepository
+import com.fluxplayer.app.core.tingshu.listeningResumeAction
 import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import com.fluxplayer.app.core.ui.components.FluxLinearProgressIndicator
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
@@ -90,16 +92,18 @@ fun ListeningLibraryHome(
     hasLocalPath: Boolean,
     onLocalClick: () -> Unit,
     onSourceClick: (ListeningSource) -> Unit,
-    onRecentClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     localBooks: List<AudioBook> = emptyList(),
     localResume: Map<String, String> = emptyMap(),
     localChapterProgress: Map<String, String> = emptyMap(),
     localLastPlayedAt: Map<String, Long> = emptyMap(),
-    /** 点击书籍：先弹播放确认窗（书名/封面/集数/播放按钮）。 */
-    onBookPick: (AudioBook?, ListeningBook?) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
+    val activity = remember(context) {
+        generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<androidx.activity.ComponentActivity>().first()
+    }
+    val backgroundPlayer: ListeningBackgroundPlayer = androidx.lifecycle.viewmodel.compose.viewModel(viewModelStoreOwner = activity)
     val preferences = remember { context.getSharedPreferences("listening_home", android.content.Context.MODE_PRIVATE) }
     var grid by rememberSaveable { mutableStateOf(preferences.getBoolean("grid", true)) }
     var historyVisibility by remember {
@@ -149,6 +153,38 @@ fun ListeningLibraryHome(
         )
     }
     val repository = remember { TingshuRepository.get(context) }
+    val resumeBook: (AudioBook?, ListeningBook) -> Unit = { local, source ->
+        if (local != null) {
+            val saved = localResume[local.folderPath].orEmpty()
+            val index = (saved.substringBefore('|').toIntOrNull() ?: 0).coerceIn(0, local.chapters.lastIndex.coerceAtLeast(0))
+            local.chapters.getOrNull(index)?.let { chapter ->
+                backgroundPlayer.start(
+                    context,
+                    ComponentName(context, PlayerService::class.java),
+                    com.fluxplayer.app.feature.player.service.CustomCommands.START_AUDIOBOOK.sessionCommand,
+                    android.os.Bundle().apply {
+                        putString("chapter_uri", chapter.uri.toString())
+                        putString("cover_uri", local.coverUri?.toString())
+                        putString("book_title", local.title)
+                        putLong("position", (saved.substringAfter('|').toLongOrNull() ?: 0L).coerceAtLeast(0L))
+                    },
+                )
+            }
+        } else {
+            val saved = repository.progress(source.key)
+            val index = source.episodes.indexOfFirst { it.url == saved.episodeUrl }.coerceAtLeast(0)
+            backgroundPlayer.start(
+                context,
+                ComponentName(context, TingshuPlaybackService::class.java),
+                androidx.media3.session.SessionCommand(ListeningPlayback.SELECT, android.os.Bundle.EMPTY),
+                android.os.Bundle().apply {
+                    putString("book", source.key)
+                    putInt("index", index)
+                    putLong("position", saved.position.coerceAtLeast(0L))
+                },
+            )
+        }
+    }
     val recentBooks by repository.recentBooks.collectAsStateWithLifecycle()
     val progresses by repository.progresses.collectAsStateWithLifecycle()
     val playback by ListeningPlayback.state.collectAsStateWithLifecycle()
@@ -203,6 +239,11 @@ fun ListeningLibraryHome(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        (backgroundPlayer.error ?: playback.error?.takeUnless { showLocal })?.let { message ->
+            item(key = "resume-error", span = { GridItemSpan(maxLineSpan) }) {
+                SourceErrorNotice(message, onDismiss = if (backgroundPlayer.error != null) backgroundPlayer::dismissError else null)
+            }
+        }
         if (bannerMode != null) {
             item(key = "now-playing", span = { GridItemSpan(maxLineSpan) }) {
                 val entry = lastEntry
@@ -233,47 +274,85 @@ fun ListeningLibraryHome(
                     HomeBannerMode.Source -> playback.book?.let { rememberSourceCover(it.sourceId, it.coverUrl, repository) }
                     HomeBannerMode.Resume -> entry?.let { resumeCover(it, repository) }
                 }
+                val openPlayer = {
+                    when (bannerMode) {
+                        HomeBannerMode.Local -> context.startActivity(
+                            Intent(context, PlayerActivity::class.java).apply {
+                                data = Uri.parse(localPlayback.chapterUri)
+                                putExtra("audio_only", true)
+                                putExtra("cover_uri", localPlayback.coverUri)
+                                putExtra("reopen_audiobook", true)
+                            },
+                        )
+                        HomeBannerMode.Source -> context.startActivity(
+                            Intent(context, TingshuPlayerActivity::class.java).putExtra("reopen", true),
+                        )
+                        HomeBannerMode.Resume -> entry?.let { saved ->
+                            val progress = saved.progress
+                            val index = saved.book.episodes.indexOfFirst { it.url == progress?.episodeUrl }.coerceAtLeast(0)
+                            if (saved.localBook != null) {
+                                saved.localBook.chapters.getOrNull(index)?.let { chapter ->
+                                    context.startActivity(
+                                        Intent(context, PlayerActivity::class.java).apply {
+                                            action = Intent.ACTION_VIEW
+                                            data = chapter.uri
+                                            putExtra("audio_only", true)
+                                            putExtra("cover_uri", saved.localBook.coverUri?.toString())
+                                            putExtra("start_position_ms", progress?.position ?: 0L)
+                                        },
+                                    )
+                                }
+                            } else {
+                                context.startActivity(
+                                    Intent(context, TingshuPlayerActivity::class.java)
+                                        .putExtra("book", saved.book.key).putExtra("index", index)
+                                        .putExtra("position", progress?.position ?: 0L),
+                                )
+                            }
+                        }
+                    }
+                }
                 NowPlayingBanner(
                     title = title,
                     episodeTitle = episodeTitle,
                     playing = !isResume && (if (showLocal) localPlayback.playing else playback.playing),
                     playWhenReady = !isResume && (if (showLocal) localPlayback.playWhenReady else playback.playWhenReady),
-                    loading = !isResume && (if (showLocal) localPlayback.loading else playback.loading),
+                    loading = backgroundPlayer.starting || (!isResume && (if (showLocal) localPlayback.loading else playback.loading)),
                     position = position,
                     duration = duration,
                     coverModel = coverModel,
-                    controlsEnabled = !isResume && controller != null,
+                    controlsEnabled = !backgroundPlayer.starting && (if (isResume) entry != null else controller != null),
                     onTogglePlayback = {
-                        controller?.let {
-                            if (it.playbackState == Player.STATE_ENDED) {
+                        val connected = controller
+                        val action = listeningResumeAction(
+                            hasSession = !isResume && connected != null,
+                            hasMedia = connected?.mediaItemCount?.let { it > 0 } == true,
+                            ended = connected?.playbackState == Player.STATE_ENDED,
+                            idle = connected?.playbackState == Player.STATE_IDLE,
+                            playWhenReady = connected?.playWhenReady == true,
+                        )
+                        when (action) {
+                            ListeningResumeAction.Restore -> {
+                                val book = when (bannerMode) {
+                                    HomeBannerMode.Local -> localEntries.firstOrNull { it.localBook?.folderPath == localPlayback.bookPath }
+                                    HomeBannerMode.Source -> playback.book?.let { HomeRecentBook(it, progresses[it.key], repository.lastPlayedAt(it.key)) }
+                                    HomeBannerMode.Resume -> entry
+                                }
+                                book?.let { resumeBook(it.localBook, it.book) }
+                            }
+                            ListeningResumeAction.Replay -> connected?.let {
                                 it.seekToDefaultPosition()
                                 it.play()
-                            } else if (it.playWhenReady) {
-                                it.pause()
-                            } else {
+                            }
+                            ListeningResumeAction.Pause -> connected?.pause()
+                            ListeningResumeAction.PrepareAndPlay -> connected?.let {
+                                it.prepare()
                                 it.play()
                             }
+                            ListeningResumeAction.Play -> connected?.play()
                         }
                     },
-                    onClick = {
-                        when (bannerMode) {
-                            HomeBannerMode.Local -> context.startActivity(
-                                Intent(context, PlayerActivity::class.java).apply {
-                                    data = Uri.parse(localPlayback.chapterUri)
-                                    putExtra("audio_only", true)
-                                    putExtra("cover_uri", localPlayback.coverUri)
-                                    putExtra("reopen_audiobook", true)
-                                },
-                            )
-                            HomeBannerMode.Source -> context.startActivity(
-                                Intent(context, TingshuPlayerActivity::class.java).putExtra("reopen", true),
-                            )
-                            // 恢复态：直接续播该书（解析→定位章节→播放）
-                            HomeBannerMode.Resume -> entry?.let { resume ->
-                                onBookPick(resume.localBook, resume.book)
-                            }
-                        }
-                    },
+                    onClick = { openPlayer() },
                 )
             }
         }
@@ -323,9 +402,9 @@ fun ListeningLibraryHome(
         items(entries, key = { "recent-${it.book.key}" }, span = { GridItemSpan(if (grid) 1 else maxLineSpan) }) { entry ->
             val book = entry.book
             val cover = if (entry.localBook != null) entry.localBook.coverUri else rememberSourceCover(book.sourceId, book.coverUrl, repository)
-            // 点击书籍直达播放页（跳过书籍详情页）；本地书库无解析成本，直接播续播章节
+            // 最近收听记录已有完整书籍数据，点击直接从保存进度续播。
             val open = {
-                onBookPick(entry.localBook, book)
+                resumeBook(entry.localBook, book)
             }
             if (grid) {
                 RecentBookGridCard(book, entry.progress, cover, open, onLongClick = { removingBook = book })

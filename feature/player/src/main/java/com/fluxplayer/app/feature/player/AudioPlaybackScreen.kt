@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -59,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -841,7 +843,9 @@ fun AudioPlaybackScreen(
                                         color = if (isActive) playerPrimary() else playerOnSurfaceVariant(),
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.width(28.dp),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(end = 10.dp),
                                     )
                                     Text(
                                         text = name,
@@ -910,6 +914,8 @@ fun AudioPlaybackScreen(
     val playbackArtwork = coverModel ?: artworkUri
     val displayBookTitle = bookName?.takeIf { it.isNotBlank() } ?: title
     var artworkTint by remember(playbackArtwork) { mutableStateOf(Color.Transparent) }
+    var artworkBackdrop by remember(playbackArtwork) { mutableStateOf<ImageBitmap?>(null) }
+    val artworkBreath = rememberArtworkBreath(mediaState.isPlaying)
 
     // ── UI ──
     Box(
@@ -917,7 +923,7 @@ fun AudioPlaybackScreen(
             .fillMaxSize()
             .background(playerBg()),
     ) {
-        PlaybackArtworkBackground(artworkTint, Modifier.matchParentSize())
+        PlaybackArtworkBackground(artworkTint, artworkBackdrop, artworkBreath, Modifier.matchParentSize())
         // 当前章节索引
         val currentIndex = selectedIndex
         val chapterTitle = chapterNames.getOrElse(currentIndex) { title }
@@ -934,21 +940,21 @@ fun AudioPlaybackScreen(
         ) {
             TopBar(onBackClick = onBackClick)
 
-            Spacer(modifier = Modifier.weight(0.2f))
-
-            // ── 封面（缩如 + 加强阴影，形成悬浮感如 ──
+            // 封面占用剩余空间，文字随字号撑开，避免遮住集数。
             PlaybackAlbumCover(
                 artwork = playbackArtwork,
                 title = displayBookTitle,
                 onColor = { artworkTint = it },
-                modifier = Modifier.align(Alignment.CenterHorizontally),
+                onBackdrop = { artworkBackdrop = it },
+                breath = artworkBreath,
+                modifier = Modifier.fillMaxWidth().weight(1f),
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 书名、章节和集数使用固定区域，切换章节时保持控件位置稳定。
+            // 保留最小高度，同时允许三行文字按系统字号自然扩展。
             Column(
-                Modifier.fillMaxWidth().height(72.dp),
+                Modifier.fillMaxWidth().heightIn(min = 88.dp).padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -981,7 +987,7 @@ fun AudioPlaybackScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.weight(0.2f))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // ── 功能按钮行（对齐小梨：进度条上方，marginTop 32） ──
             BottomFunctionRow(

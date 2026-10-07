@@ -11,6 +11,7 @@ import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -64,6 +65,7 @@ import com.fluxplayer.app.feature.player.extensions.subtitleSpeed
 import com.fluxplayer.app.feature.player.extensions.subtitleTrackIndex
 import com.fluxplayer.app.feature.player.extensions.switchTrack
 import com.fluxplayer.app.feature.player.extensions.uriToSubtitleConfiguration
+import com.fluxplayer.app.feature.player.scanAudioFiles
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
@@ -81,6 +83,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
@@ -593,6 +596,36 @@ class PlayerService : MediaSessionService() {
                 ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
 
             when (command) {
+                CustomCommands.START_AUDIOBOOK -> {
+                    if (controller.packageName != packageName) return@future SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED)
+                    val chapterUri = args.getString("chapter_uri")?.let(Uri::parse)
+                        ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
+                    val chapterPath = chapterUri.path ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
+                    val cover = args.getString("cover_uri")?.let(Uri::parse)
+                    val bookTitle = args.getString("book_title").orEmpty()
+                    // 只传当前章节地址，在服务内扫描，避免大量章节超过系统消息大小限制。
+                    val items = withContext(Dispatchers.IO) {
+                        scanAudioFiles(File(chapterPath).parentFile).map { file ->
+                            MediaItem.Builder().setUri(Uri.fromFile(file)).setMediaId(file.absolutePath)
+                                .setMediaMetadata(
+                                    MediaMetadata.Builder().setTitle(file.nameWithoutExtension)
+                                        .setAlbumTitle(bookTitle).setArtist(bookTitle).setArtworkUri(cover).build(),
+                                ).build()
+                        }
+                    }
+                    val index = items.indexOfFirst { it.mediaId == chapterPath }
+                    if (index < 0) return@future SessionResult(SessionError.ERROR_BAD_VALUE)
+                    val player = mediaSession?.player ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
+                    saveLocalAudiobookProgress()
+                    isAudioSession = true
+                    sessionPlaybackSpeed = preferencesRepository.applicationPreferences.value.audiobookPlaybackSpeed
+                    player.setPlaybackSpeed(sessionPlaybackSpeed)
+                    player.setMediaItems(items, index, args.getLong("position").coerceAtLeast(0))
+                    player.prepare()
+                    player.play()
+                    return@future SessionResult(SessionResult.RESULT_SUCCESS)
+                }
+
                 CustomCommands.ADD_SUBTITLE_TRACK -> {
                     val subtitleUri = args.getString(CustomCommands.SUBTITLE_TRACK_URI_KEY)?.toUri()
                         ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)

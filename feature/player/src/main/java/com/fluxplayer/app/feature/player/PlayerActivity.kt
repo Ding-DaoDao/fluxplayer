@@ -41,7 +41,6 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.fluxplayer.app.core.common.extensions.getMediaContentUri
-import com.fluxplayer.app.core.common.sortedByNaturalName
 import com.fluxplayer.app.core.data.extractor.ThumbnailExtractor
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.AccentPreset
@@ -811,17 +810,5 @@ class PlayerActivity : ComponentActivity() {
         Log.d("PlayerActivity", "resolveChapterIndex: mediaId=$currentMediaId, pathIndex=$pathIndex, paths=${audioBookChapterPaths.take(3)}, fallback=$providedIndex")
         if (pathIndex >= 0) return pathIndex
         return providedIndex.coerceAtLeast(0)
-    }
-
-    companion object {
-        private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", "wma", "opus")
-
-        private fun scanAudioFiles(dir: File?): List<File> {
-            if (dir == null || !dir.isDirectory) return emptyList()
-            return dir.listFiles()
-                ?.filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
-                ?.let { it.sortedByNaturalName() }
-                ?: emptyList()
-        }
     }
 }
