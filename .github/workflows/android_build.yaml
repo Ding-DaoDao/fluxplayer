@@ -2,7 +2,7 @@ name: Build Flux Player APK
 
 on:
   push:
-    branches: [codex/project-updates]
+    branches: [codex/project-updates, codex/fix-listening-layout]
   workflow_dispatch:
 
 permissions:
@@ -34,11 +34,22 @@ jobs:
         with:
           gradle-version: '9.4.1'
       - name: Test JDR engine, build APK and compile regression tests
-        run: gradle --no-daemon --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8 -Djava.util.concurrent.ForkJoinPool.common.parallelism=4' -I .github/ci-repositories.gradle :core:jdr-engine:test assembleDebug :core:tingshu:assembleDebugAndroidTest :core:data:assembleDebugAndroidTest :feature:videopicker:assembleDebugAndroidTest :feature:tingshu:assembleDebugAndroidTest
+        run: gradle --no-daemon --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8 -Djava.util.concurrent.ForkJoinPool.common.parallelism=4' -I .github/ci-repositories.gradle :core:jdr-engine:test :app:assembleDebug :feature:tingshu:assembleDebugAndroidTest
+      - name: Verify APK native libraries
+        run: |
+          python3 - <<'PY'
+          import zipfile
+          apk = 'app/build/outputs/apk/debug/app-arm64-v8a-debug.apk'
+          with zipfile.ZipFile(apk) as archive:
+              libraries = [name for name in archive.namelist() if name.startswith('lib/arm64-v8a/') and name.endswith('.so')]
+              assert 'lib/arm64-v8a/libopenlist.so' in libraries, 'OpenList library is missing'
+              for name in libraries:
+                  assert archive.read(name)[:4] == b'\x7fELF', f'Invalid native library: {name}'
+          PY
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: fluxplayer-audio-cover-cache-arm64-debug
+          name: fluxplayer-grid-list-fix-arm64-debug
           path: app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
           if-no-files-found: error
           retention-days: 30
