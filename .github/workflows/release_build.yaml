@@ -74,7 +74,7 @@ jobs:
           if missing:
               raise SystemExit('Missing release signing secrets: ' + ', '.join(missing))
           key = pathlib.Path(os.environ['RUNNER_TEMP']) / 'fluxplayer-release.keystore'
-          key.write_bytes(base64.b64decode(os.environ['ANDROID_KEYSTORE_BASE64'], validate=True))
+          key.write_bytes(base64.b64decode(''.join(os.environ['ANDROID_KEYSTORE_BASE64'].split()), validate=True))
           key.chmod(0o600)
           PY
             KEYSTORE="$RUNNER_TEMP/fluxplayer-release.keystore"
