@@ -10,10 +10,10 @@ permissions:
 
 concurrency:
   group: fluxplayer-release-grid-list-fix
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
-  RELEASE_SIGNING: production
+  RELEASE_SIGNING: test
   RELEASE_TAG: v0.16.5-grid-list-fix
 
 jobs:
@@ -132,4 +132,8 @@ jobs:
           else
             printf '\n签名：使用 GitHub Secrets 配置的正式发布证书。\n' >> "$RUNNER_TEMP/release-notes.md"
           fi
-          gh release create "$RELEASE_TAG" release/*.apk release/*-mapping.zip release/SHA256SUMS.txt --target "$GITHUB_SHA" --title 'Flux Player 0.16.5 — 网格/列表切换修复（Release）' --notes-file "$RUNNER_TEMP/release-notes.md" --prerelease
+          TITLE='Flux Player 0.16.5 — 网格/列表切换修复（Release）'
+          if [ "$RELEASE_SIGNING" = test ]; then
+            TITLE='Flux Player 0.16.5 — 网格/列表切换修复（Release 优化测试版）'
+          fi
+          gh release create "$RELEASE_TAG" release/*.apk release/*-mapping.zip release/SHA256SUMS.txt --target "$GITHUB_SHA" --title "$TITLE" --notes-file "$RUNNER_TEMP/release-notes.md" --prerelease
