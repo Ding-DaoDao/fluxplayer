@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  RELEASE_SIGNING: test
-  RELEASE_TAG: v0.16.5-grid-list-fix
+  RELEASE_SIGNING: production
+  RELEASE_TAG: v0.16.5
 
 jobs:
   release:
@@ -136,4 +136,10 @@ jobs:
           if [ "$RELEASE_SIGNING" = test ]; then
             TITLE='Flux Player 0.16.5 — 网格/列表切换修复（Release 优化测试版）'
           fi
-          gh release create "$RELEASE_TAG" release/*.apk release/*-mapping.zip release/SHA256SUMS.txt --target "$GITHUB_SHA" --title "$TITLE" --notes-file "$RUNNER_TEMP/release-notes.md" --prerelease
+          RELEASE_FLAGS=()
+          if [ "$RELEASE_SIGNING" = test ]; then
+            RELEASE_FLAGS+=(--prerelease)
+          else
+            RELEASE_FLAGS+=(--latest)
+          fi
+          gh release create "$RELEASE_TAG" release/*.apk release/*-mapping.zip release/SHA256SUMS.txt --target "$GITHUB_SHA" --title "$TITLE" --notes-file "$RUNNER_TEMP/release-notes.md" "${RELEASE_FLAGS[@]}"
