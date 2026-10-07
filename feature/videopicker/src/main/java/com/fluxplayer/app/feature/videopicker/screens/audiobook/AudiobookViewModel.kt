@@ -5,12 +5,17 @@ import android.net.Uri
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
+import com.fluxplayer.app.core.common.sortedByNaturalName
+import com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
 import com.fluxplayer.app.feature.videopicker.model.AudioChapter
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
+import java.security.MessageDigest
+import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -22,10 +27,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.fluxplayer.app.core.common.sortedByNaturalName
-import java.io.File
-import java.security.MessageDigest
-import javax.inject.Inject
 
 /** 封面图备选文件名（无扩展名，大小写敏感） */
 private val COVER_NAMES = setOf("cover", "Cover")
@@ -39,6 +40,7 @@ private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", 
 @HiltViewModel
 class AudiobookViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
+    private val audiobookProgressRepository: AudiobookProgressRepository,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -52,10 +54,14 @@ class AudiobookViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         rootUri = prefs.audiobookRootUri.takeIf { it.isNotBlank() },
-                        resumeStates = prefs.audiobookResumeState,
-                        chapterProgress = prefs.audiobookChapterProgress,
-                        lastPlayedAt = prefs.audiobookLastPlayedAt,
                     )
+                }
+            }
+        }
+        viewModelScope.launch {
+            audiobookProgressRepository.progress.collect { progress ->
+                _uiState.update {
+                    it.copy(resumeStates = progress.resumeStates, chapterProgress = progress.chapterProgress, lastPlayedAt = progress.lastPlayedAt)
                 }
             }
         }
@@ -89,7 +95,6 @@ class AudiobookViewModel @Inject constructor(
                     }
                 }
                 _uiState.update { it.copy(scanState = DataState.Success(books)) }
-                cleanupStaleEntries(books)
             } catch (e: Exception) {
                 _uiState.update { it.copy(scanState = DataState.Error(e)) }
             }
@@ -101,43 +106,7 @@ class AudiobookViewModel @Inject constructor(
         scanBooks(root)
     }
 
-    /**
-     * 清理已删除书籍/越界章节的进度与续播条目。
-     * audiobookChapterProgress / audiobookResumeState 是全量序列化写盘的 map，
-     * 不清理会随使用时间无限增长，放大每次进度保存的写入成本。
-     */
-    private fun cleanupStaleEntries(books: List<AudioBook>) {
-        viewModelScope.launch {
-            preferencesRepository.updateApplicationPreferences { prefs ->
-                val bookPaths = HashSet<String>(books.size * 2)
-                val chapterCounts = HashMap<String, Int>(books.size * 2)
-                books.forEach { book ->
-                    bookPaths.add(book.folderPath)
-                    chapterCounts[book.folderPath] = book.chapters.size
-                }
-                val progress = prefs.audiobookChapterProgress.filterKeys { key ->
-                    val path = key.substringBeforeLast('|')
-                    val idx = key.substringAfterLast('|').toIntOrNull() ?: return@filterKeys false
-                    val count = chapterCounts[path] ?: return@filterKeys false
-                    idx < count
-                }
-                val resumes = prefs.audiobookResumeState.filterKeys { it in bookPaths }
-                val lastPlayed = prefs.audiobookLastPlayedAt.filterKeys { it in bookPaths }
-                if (progress.size == prefs.audiobookChapterProgress.size &&
-                    resumes.size == prefs.audiobookResumeState.size &&
-                    lastPlayed.size == prefs.audiobookLastPlayedAt.size
-                ) {
-                    prefs // 无变化，避免无效写盘
-                } else {
-                    prefs.copy(
-                        audiobookChapterProgress = progress,
-                        audiobookResumeState = resumes,
-                        audiobookLastPlayedAt = lastPlayed,
-                    )
-                }
-            }
-        }
-    }
+    // 进度独立存储，扫描不到的书籍可能只是暂时离线，不再因目录扫描结果删除续播记录。
 
     /**
      * 下拉刷新：保留当前书架直到新结果到达（旧列表不闪空），
@@ -158,7 +127,6 @@ class AudiobookViewModel @Inject constructor(
                         partialBooks = emptyList(),
                     )
                 }
-                cleanupStaleEntries(books)
             } catch (e: Exception) {
                 _uiState.update { it.copy(isRefreshing = false, scanState = DataState.Error(e)) }
             }

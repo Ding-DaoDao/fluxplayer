@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.stateIn
 class LocalPreferencesRepository @Inject constructor(
     private val appPreferencesDataSource: AppPreferencesDataSource,
     private val playerPreferencesDataSource: PlayerPreferencesDataSource,
+    private val audiobookProgressRepository: AudiobookProgressRepository,
     @ApplicationScope private val applicationScope: CoroutineScope,
 ) : PreferencesRepository {
 
@@ -44,6 +45,7 @@ class LocalPreferencesRepository @Inject constructor(
     }
 
     override suspend fun resetPreferences() {
+        audiobookProgressRepository.clear()
         appPreferencesDataSource.update { ApplicationPreferences() }
         playerPreferencesDataSource.update { PlayerPreferences() }
     }

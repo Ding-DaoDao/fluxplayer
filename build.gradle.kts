@@ -1,5 +1,5 @@
-import org.gradle.api.tasks.testing.logging.TestLogEvent
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+import org.gradle.api.tasks.testing.logging.TestLogEvent
 
 plugins {
     alias(libs.plugins.aboutLibraries) apply false
@@ -45,6 +45,6 @@ allprojects {
             showCauses = true
             showStackTraces = true
         }
-        ignoreFailures = true
+        ignoreFailures = providers.gradleProperty("ignoreTestFailures").map(String::toBoolean).getOrElse(false)
     }
 }

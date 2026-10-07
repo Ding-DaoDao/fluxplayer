@@ -19,6 +19,8 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,14 +67,14 @@ class AudiobookSessionTest {
                 ready
             }
             awaitCondition { LocalAudiobookPlayback.state.value.bookPath == folder.absolutePath }
-            val preferences = EntryPointAccessors.fromApplication(context.applicationContext, AudioThemePreferences::class.java).preferencesRepository()
+            val progress = EntryPointAccessors.fromApplication(context.applicationContext, AudioThemePreferences::class.java).audiobookProgressRepository()
             // 关闭播放页后，服务仍发布播放状态并持久化最近收听记录。
             instrumentation.runOnMainSync {
                 activity?.finish()
                 local.play()
             }
             awaitCondition { LocalAudiobookPlayback.state.value.playing }
-            awaitCondition { preferences.applicationPreferences.value.audiobookLastPlayedAt.containsKey(folder.absolutePath) }
+            awaitCondition { runBlocking { progress.progress.first().lastPlayedAt.containsKey(folder.absolutePath) } }
             instrumentation.runOnMainSync {
                 assertTrue(source.isConnected)
                 assertTrue(local.isConnected)

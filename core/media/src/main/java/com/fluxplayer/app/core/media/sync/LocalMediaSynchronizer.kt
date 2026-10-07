@@ -5,8 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.database.ContentObserver
 import android.provider.MediaStore
+import android.util.Log
 import coil3.ImageLoader
-import dagger.hilt.android.qualifiers.ApplicationContext
 import com.fluxplayer.app.core.common.Dispatcher
 import com.fluxplayer.app.core.common.LOCAL_VIDEO_THUMBNAIL_PREFIX
 import com.fluxplayer.app.core.common.NextDispatchers
@@ -16,34 +16,32 @@ import com.fluxplayer.app.core.common.extensions.getStorageVolumes
 import com.fluxplayer.app.core.common.extensions.prettyName
 import com.fluxplayer.app.core.common.extensions.scanPaths
 import com.fluxplayer.app.core.common.extensions.scanStorage
-import com.fluxplayer.app.core.database.converter.UriListConverter
-import com.fluxplayer.app.core.database.dao.DirectoryDao
-import com.fluxplayer.app.core.database.dao.MediumDao
-import com.fluxplayer.app.core.database.dao.MediumStateDao
 import com.fluxplayer.app.core.database.entities.DirectoryEntity
 import com.fluxplayer.app.core.database.entities.MediumEntity
 import com.fluxplayer.app.core.media.model.MediaVideo
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class LocalMediaSynchronizer @Inject constructor(
-    private val mediumDao: MediumDao,
-    private val mediumStateDao: MediumStateDao,
-    private val directoryDao: DirectoryDao,
+    private val snapshotWriter: MediaSnapshotWriter,
     private val imageLoader: ImageLoader,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @ApplicationContext private val context: Context,
@@ -51,170 +49,105 @@ class LocalMediaSynchronizer @Inject constructor(
 ) : MediaSynchronizer {
 
     private var mediaSyncingJob: Job? = null
+    private val syncMutex = Mutex()
 
     override suspend fun refresh(path: String?): Boolean {
         return path?.let { context.scanPaths(listOf(path)) }
             ?: context.getStorageVolumes().all { context.scanStorage(it.path) }
     }
 
+    @Synchronized
     override fun startSync() {
-        if (mediaSyncingJob != null) return
-        mediaSyncingJob = getMediaVideosFlow().onEach { media ->
-            applicationScope.launch { updateDirectories(media) }
-            applicationScope.launch { updateMedia(media) }
+        if (mediaSyncingJob?.isActive == true) return
+        mediaSyncingJob = mediaChanges().onEach {
+            syncMutex.withLock {
+                try {
+                    withContext(dispatcher) {
+                        // 查询失败时不提交空快照；成功的空列表则清理最后一条媒体。
+                        val media = getMediaVideo(null, null, "${MediaStore.Video.Media.DISPLAY_NAME} ASC")
+                        val directories = buildDirectories(media)
+                        val entities = media.map { video ->
+                            val file = File(video.data)
+                            MediumEntity(
+                                uriString = video.uri.toString(),
+                                path = video.data,
+                                name = file.name,
+                                parentPath = file.parent ?: "/",
+                                modified = video.dateModified,
+                                size = video.size,
+                                width = video.width,
+                                height = video.height,
+                                duration = video.duration,
+                                mediaStoreId = video.id,
+                            )
+                        }
+                        val cleanup = snapshotWriter.write(entities, directories)
+                        cleanup.mediaUris.forEach { uri ->
+                            try {
+                                imageLoader.diskCache?.remove(LOCAL_VIDEO_THUMBNAIL_PREFIX + uri)
+                                imageLoader.diskCache?.remove(uri)
+                            } catch (error: Exception) {
+                                Log.w("MediaSynchronizer", "清理缩略图失败", error)
+                            }
+                        }
+                        cleanup.subtitleUris.forEach { uri ->
+                            try {
+                                context.contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            } catch (error: Exception) {
+                                Log.w("MediaSynchronizer", "释放字幕权限失败", error)
+                            }
+                        }
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.e("MediaSynchronizer", "媒体同步失败，保留原数据并等待下次变更", error)
+                }
+            }
         }.launchIn(applicationScope)
     }
 
+    @Synchronized
     override fun stopSync() {
         mediaSyncingJob?.cancel()
-        // 置 null，使 startSync 可以在停止后再次启动
         mediaSyncingJob = null
     }
 
-    private suspend fun updateDirectories(media: List<MediaVideo>) =
-        withContext(Dispatchers.Default) {
-            val directories = context.getStorageVolumes().flatMap {
-                getDirectoryEntities(currentFolder = it, media = media)
-            }
-            directoryDao.upsertAll(directories)
-
-            val currentDirectoryPaths = directories.map { it.path }
-
-            val unwantedDirectories = directoryDao.getAll().first()
-                .filterNot { it.path in currentDirectoryPaths }
-
-            val unwantedDirectoriesPaths = unwantedDirectories.map { it.path }
-
-            directoryDao.delete(unwantedDirectoriesPaths)
-        }
-
-    private fun getDirectoryEntities(
-        parentFolder: File? = null,
-        currentFolder: File,
-        media: List<MediaVideo>,
-    ): List<DirectoryEntity> {
-        val hasMediaInCurrentFolder = media.any { it.data.startsWith("${currentFolder.path}/") }
-        if (!hasMediaInCurrentFolder) return emptyList()
-
-        val currentDirectoryEntity = DirectoryEntity(
-            path = currentFolder.path,
-            name = currentFolder.prettyName,
-            modified = currentFolder.lastModified(),
-            parentPath = parentFolder?.path ?: "/",
-        )
-
-        val subDirectories = currentFolder.listFiles { file ->
-            file.isDirectory && media.any { it.data.startsWith(file.path) }
-        }?.flatMap { file ->
-            getDirectoryEntities(
-                parentFolder = currentFolder,
-                currentFolder = file,
-                media = media,
-            )
-        } ?: emptyList()
-
-        return listOf(currentDirectoryEntity) + subDirectories
-    }
-
-    private suspend fun updateMedia(media: List<MediaVideo>) = withContext(Dispatchers.Default) {
-        if (media.isEmpty()) return@withContext
-
-        // 批量查询已有实体，避免逐条 SELECT 的 N+1 问题
-        val uris = media.map { it.uri.toString() }
-        val existing = mediumDao.getByUris(uris).associateBy { it.uriString }
-
-        val mediumEntities = media.map {
-            val file = File(it.data)
-            val uriString = it.uri.toString()
-            val mediumEntity = existing[uriString]
-            mediumEntity?.copy(
-                path = file.path,
-                name = file.name,
-                size = it.size,
-                width = it.width,
-                height = it.height,
-                duration = it.duration,
-                mediaStoreId = it.id,
-                modified = it.dateModified,
-                parentPath = file.parent!!,
-            ) ?: MediumEntity(
-                uriString = uriString,
-                path = it.data,
-                name = file.name,
-                parentPath = file.parent!!,
-                modified = it.dateModified,
-                size = it.size,
-                width = it.width,
-                height = it.height,
-                duration = it.duration,
-                mediaStoreId = it.id,
-            )
-        }
-
-        mediumDao.upsertAll(mediumEntities)
-
-        val currentMediaUris = mediumEntities.map { it.uriString }
-
-        val unwantedMedia = mediumDao.getAllWithInfo().first()
-            .filterNot { it.mediumEntity.uriString in currentMediaUris }
-
-        val unwantedMediaUris = unwantedMedia.map { it.mediumEntity.uriString }
-
-        mediumDao.delete(unwantedMediaUris)
-        mediumStateDao.delete(unwantedMediaUris)
-
-        // Delete unwanted thumbnails
-        unwantedMedia.forEach { media ->
-            try {
-                // 必须与 VideoThumbnailDecoder 的写入键规则一致（统一加前缀），
-                // 否则键对不上，磁盘缩略图删不掉、会一直占空间。
-                val cacheKey = LOCAL_VIDEO_THUMBNAIL_PREFIX + media.mediumEntity.uriString
-                imageLoader.diskCache?.remove(cacheKey)
-                // 兼容升级前遗留的无前缀旧键
-                imageLoader.diskCache?.remove(media.mediumEntity.uriString)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
-        // Release external subtitle uri permission if not used by any other media
-        launch {
-            val currentMediaExternalSubs = mediumEntities.flatMap {
-                val mediaState = mediumStateDao.get(it.uriString) ?: return@flatMap emptyList<String>()
-                UriListConverter.fromStringToList(mediaState.externalSubs)
-            }.toSet()
-
-            unwantedMedia.onEach { mediumWithInfo ->
-                val mediumState = mediumWithInfo.mediumStateEntity ?: return@onEach
-                for (sub in UriListConverter.fromStringToList(mediumState.externalSubs)) {
-                    if (sub !in currentMediaExternalSubs) {
-                        try {
-                            context.contentResolver.releasePersistableUriPermission(sub, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }
+    private fun buildDirectories(media: List<MediaVideo>): List<DirectoryEntity> {
+        val roots = context.getStorageVolumes().map { it.path }.toSet()
+        val directories = LinkedHashMap<String, DirectoryEntity>()
+        // 从媒体路径直接收集祖先目录，避免递归扫描无关文件夹和反复遍历媒体列表。
+        media.forEach { video ->
+            var folder = File(video.data).parentFile
+            val root = roots.filter { video.data.startsWith("$it/") }.maxByOrNull { it.length }
+            if (root != null) {
+                while (folder != null && folder.path !in directories) {
+                    directories[folder.path] = DirectoryEntity(
+                        path = folder.path,
+                        name = folder.prettyName,
+                        modified = folder.lastModified(),
+                        parentPath = if (folder.path == root) "/" else folder.parent ?: "/",
+                    )
+                    if (folder.path == root) break
+                    folder = folder.parentFile
                 }
             }
         }
+        return directories.values.toList()
     }
 
-    private fun getMediaVideosFlow(
-        selection: String? = null,
-        selectionArgs: Array<String>? = null,
-        sortOrder: String? = "${MediaStore.Video.Media.DISPLAY_NAME} ASC",
-    ): Flow<List<MediaVideo>> = callbackFlow {
+    @OptIn(FlowPreview::class)
+    private fun mediaChanges(): Flow<Boolean> = callbackFlow {
         val observer = object : ContentObserver(null) {
             override fun onChange(selfChange: Boolean) {
-                trySend(getMediaVideo(selection, selectionArgs, sortOrder))
+                // 回调只发送信号，实际查询与写库在同一个串行收集任务中执行。
+                trySend(false)
             }
         }
         context.contentResolver.registerContentObserver(VIDEO_COLLECTION_URI, true, observer)
-        // initial value
-        trySend(getMediaVideo(selection, selectionArgs, sortOrder))
-        // close
+        trySend(true)
         awaitClose { context.contentResolver.unregisterContentObserver(observer) }
-    }.flowOn(dispatcher).distinctUntilChanged()
+    }.buffer(Channel.CONFLATED).debounce { initial -> if (initial) 0L else 300L }.flowOn(dispatcher)
 
     private fun getMediaVideo(
         selection: String?,
@@ -222,14 +155,14 @@ class LocalMediaSynchronizer @Inject constructor(
         sortOrder: String?,
     ): List<MediaVideo> {
         val mediaVideos = mutableListOf<MediaVideo>()
-        context.contentResolver.query(
+        val cursor = context.contentResolver.query(
             VIDEO_COLLECTION_URI,
             VIDEO_PROJECTION,
             selection,
             selectionArgs,
             sortOrder,
-        )?.use { cursor ->
-
+        ) ?: error("媒体查询未返回有效游标")
+        cursor.use {
             val idColumn = cursor.getColumnIndex(MediaStore.Video.Media._ID)
             val dataColumn = cursor.getColumnIndex(MediaStore.Video.Media.DATA)
             val durationColumn = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)

@@ -13,18 +13,19 @@ import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.WebDavResource
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * 云盘浏览器通用基类 —— 对应原版 BaseCloudBrowserViewModel<TBreadcrumb>
@@ -704,12 +705,15 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
         downloadJob?.cancel()
         downloadJob = viewModelScope.launch {
+            val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
                 val infoResult = doGetDownloadInfo(res)
                 if (infoResult.isFailure) {
                     val e = infoResult.exceptionOrNull()!!
                     Log.e("BaseCloudVM", "获取下载链接失败", e)
+                    downloadContext.ensureActive()
                     _downloadProgress.value = null
+                    downloadContext.ensureActive()
                     notifier.error("获取下载链接失败: ${e.message}")
                     return@launch
                 }
@@ -717,63 +721,46 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                 val info = infoResult.getOrThrow()
                 Log.d("BaseCloudVM", "获取下载链接成功: url=${info.url.take(200)}, fileName=${info.fileName}")
 
+                downloadContext.ensureActive()
                 _downloadProgress.value = DownloadProgressData(
                     fileName = info.fileName,
                     progress = 0f,
                     downloadedBytes = 0L,
-                    totalBytes = 0L
+                    totalBytes = 0L,
                 )
 
-                // 收集下载事件
-                val eventJob = launch {
-                    repo.downloadEvents.collect { event ->
-                        when (event) {
-                            is com.fluxplayer.app.core.data.repository.CloudDownloadRepository.DownloadEvent.Progress -> {
-                                if (event.fileName == info.fileName) {
-                                    _downloadProgress.value = DownloadProgressData(
-                                        fileName = event.fileName,
-                                        progress = event.progress,
-                                        downloadedBytes = event.downloadedBytes,
-                                        totalBytes = event.totalBytes
-                                    )
-                                }
-                            }
-
-                            is com.fluxplayer.app.core.data.repository.CloudDownloadRepository.DownloadEvent.Completed -> {
-                                if (event.fileName == info.fileName) {
-                                    _downloadProgress.value = DownloadProgressData(
-                                        fileName = event.fileName,
-                                        progress = 1f,
-                                        completedFilePath = event.filePath
-                                    )
-                                    notifier.success("下载完成: ${event.fileName}")
-                                }
-                            }
-
-                            is com.fluxplayer.app.core.data.repository.CloudDownloadRepository.DownloadEvent.Failed -> {
-                                if (event.fileName == info.fileName) {
-                                    _downloadProgress.value = null
-                                    if (event.error != "下载已取消") {
-                                        notifier.error("下载失败: ${event.error}")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                repo.download(
+                val completed = repo.download(
                     url = info.url,
                     fileName = info.fileName,
                     headers = info.headers,
-                    provider = providerLabel
+                    provider = providerLabel,
+                    onProgress = { event ->
+                        downloadContext.ensureActive()
+                        _downloadProgress.value = DownloadProgressData(
+                            fileName = event.fileName,
+                            progress = event.progress,
+                            downloadedBytes = event.downloadedBytes,
+                            totalBytes = event.totalBytes,
+                        )
+                    },
                 )
-
-                eventJob.cancel()
-
+                downloadContext.ensureActive()
+                _downloadProgress.value = DownloadProgressData(
+                    fileName = completed.fileName,
+                    progress = 1f,
+                    downloadedBytes = completed.size,
+                    totalBytes = completed.size,
+                    completedFilePath = completed.filePath,
+                )
+                downloadContext.ensureActive()
+                notifier.success("下载完成: ${completed.fileName}")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("BaseCloudVM", "下载异常", e)
+                downloadContext.ensureActive()
                 notifier.error("下载失败: ${e.message}")
+                downloadContext.ensureActive()
                 _downloadProgress.value = null
             }
         }
@@ -788,16 +775,20 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
         downloadJob?.cancel()
         downloadJob = viewModelScope.launch {
+            val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
                 val infoResult = doGetDownloadInfo(res)
                 if (infoResult.isFailure) {
                     val e = infoResult.exceptionOrNull()!!
                     Log.e("BaseCloudVM", "获取下载链接失败", e)
+                    downloadContext.ensureActive()
                     _downloadProgress.value = null
+                    downloadContext.ensureActive()
                     notifier.error("获取下载链接失败: ${e.message}")
                     return@launch
                 }
                 val info = infoResult.getOrThrow()
+                downloadContext.ensureActive()
                 _downloadProgress.value = DownloadProgressData(
                     fileName = info.fileName,
                     progress = 0f,
@@ -815,11 +806,15 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
                     info.headers.forEach { (key, value) -> addRequestHeader(key, value) }
                 }
                 dm.enqueue(request)
+                downloadContext.ensureActive()
                 notifier.info("开始下载: ${info.fileName}")
+                downloadContext.ensureActive()
                 _downloadProgress.value = null
             } catch (e: Exception) {
                 Log.e("BaseCloudVM", "下载异常", e)
+                downloadContext.ensureActive()
                 notifier.error("下载失败: ${e.message}")
+                downloadContext.ensureActive()
                 _downloadProgress.value = null
             }
         }
@@ -827,7 +822,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
 
     fun dismissDownloadProgress() {
         _downloadProgress.value = null
-        cloudDownloadRepository?.cancel()
+        downloadJob?.cancel()
     }
 
     fun openDownloadedFile(filePath: String) {

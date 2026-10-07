@@ -62,7 +62,7 @@ Key dependency flow: `:app` → `:feature:*` → `:core:data` / `:core:domain` �
 - **openlist-binary**: If `openlist-binary/libopenlist.so` exists at the repo root, the `:app` build script copies it into `src/main/jniLibs/{armeabi-v7a,arm64-v8a,x86,x86_64}/` automatically. This file is not checked in.
 - **Legacy names**: The codebase forked from Next Player. Some class/resource names still reference "NextPlayer" (e.g. `NextPlayerApplication`, `@style/Theme.NextPlayer.Splash`). Don't be confused — these are Flux Player code.
 - **ProGuard**: Release builds enable minify + shrinkResources. The custom proguard rule in `app/proguard-rules.pro` preserves all `Log.*` calls (overrides the default Android optimize rules that strip `Log.d`/`Log.v`).
-- **Tests**: `ignoreFailures = true` is set on all test tasks in the root `build.gradle.kts`, so test failures won't block the build.
+- **Tests**: 测试失败默认阻止构建；仅在明确需要时使用 `-PignoreTestFailures=true` 临时忽略失败。
 - **local.properties**: Contains `sdk.dir` pointing to the local Android SDK. Not checked in — each developer has their own.
 
 ## Version Catalog

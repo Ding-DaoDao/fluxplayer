@@ -16,6 +16,16 @@ interface DownloadTaskDao {
     @Update
     suspend fun update(task: DownloadTaskEntity)
 
+    /** 只更新活跃任务的进度，迟到的回调不能覆盖终态。 */
+    @Query("UPDATE download_tasks SET downloadedBytes = :bytes, fileSize = :total WHERE id = :id AND status = 'DOWNLOADING'")
+    suspend fun updateProgress(id: Long, bytes: Long, total: Long)
+
+    @Query("UPDATE download_tasks SET status = 'COMPLETED', downloadedBytes = :size, fileSize = :size, filePath = :path, completedAt = :time WHERE id = :id AND status = 'DOWNLOADING'")
+    suspend fun complete(id: Long, path: String, size: Long, time: Long)
+
+    @Query("UPDATE download_tasks SET status = 'FAILED', completedAt = :time WHERE id = :id AND status IN ('PENDING', 'DOWNLOADING')")
+    suspend fun fail(id: Long, time: Long)
+
     @Query("SELECT * FROM download_tasks ORDER BY createdAt DESC")
     fun getAllAsFlow(): Flow<List<DownloadTaskEntity>>
 

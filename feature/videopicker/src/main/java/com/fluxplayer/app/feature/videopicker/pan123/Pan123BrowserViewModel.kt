@@ -6,15 +6,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
-import com.fluxplayer.app.core.common.FluxNotificationDelegate
-import com.fluxplayer.app.core.model.FluxMessageEvent
-import kotlinx.coroutines.flow.SharedFlow
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.common.CloudPlayHeaders
 import com.fluxplayer.app.core.common.CloudPlaylistCache
 import com.fluxplayer.app.core.common.CloudUriScheme
+import com.fluxplayer.app.core.common.FluxNotificationDelegate
 import com.fluxplayer.app.core.common.PickerUtils
 import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
@@ -25,17 +22,21 @@ import com.fluxplayer.app.core.data.pan123.Pan123ShareFileItem
 import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.feature.videopicker.CloudDirectoryCache
 import com.fluxplayer.app.feature.videopicker.DirectoryStackEntry
+import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.File
+import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
-import javax.inject.Inject
 
 data class Pan123Breadcrumb(val label: String, val fileId: String)
 
@@ -681,6 +682,7 @@ class Pan123BrowserViewModel @Inject constructor(
 
         downloadJob?.cancel()
         downloadJob = viewModelScope.launch {
+            val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
                 val fileItem = cachedFileItems.find { it.fileId == res.path } ?: return@launch
 
@@ -693,45 +695,14 @@ class Pan123BrowserViewModel @Inject constructor(
                     fileItem.downloadUrl.isNotBlank() ->
                         fileItem.downloadUrl
                     else -> {
+                        downloadContext.ensureActive()
                         notifier.error("获取下载链接失败: 下载地址为空")
                         return@launch
                     }
                 }
 
+                downloadContext.ensureActive()
                 _downloadProgress.value = DownloadProgressData(fileName = res.name, progress = 0f)
-
-                val eventJob = launch {
-                    cloudDownloadRepository.downloadEvents.collect { event ->
-                        when (event) {
-                            is CloudDownloadRepository.DownloadEvent.Progress -> {
-                                if (event.fileName == res.name) {
-                                    _downloadProgress.value = DownloadProgressData(
-                                        fileName = event.fileName, progress = event.progress,
-                                        downloadedBytes = event.downloadedBytes, totalBytes = event.totalBytes
-                                    )
-                                }
-                            }
-                            is CloudDownloadRepository.DownloadEvent.Completed -> {
-                                if (event.fileName == res.name) {
-                                    _downloadProgress.value = DownloadProgressData(
-                                        fileName = event.fileName,
-                                        progress = 1f,
-                                        completedFilePath = event.filePath
-                                    )
-                                    notifier.success("下载完成: ${event.fileName}")
-                                }
-                            }
-                            is CloudDownloadRepository.DownloadEvent.Failed -> {
-                                if (event.fileName == res.name) {
-                                    _downloadProgress.value = null
-                                    if (event.error != "下载已取消") {
-                                        notifier.error("下载失败: ${event.error}")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
 
                 // 解析最终CDN下载地址并构建正确的下载Headers
                 // JS流程: HEAD跟随重定向 → 提取ref参数 → AES解密 → 得到Referer
@@ -739,15 +710,33 @@ class Pan123BrowserViewModel @Inject constructor(
                 val downloadHeaders = apiClient.buildDownloadHeaders(finalUrl)
                 Log.d(TAG, "下载: finalUrl=$finalUrl, headers=$downloadHeaders")
 
-                cloudDownloadRepository.download(
+                val completed = cloudDownloadRepository.download(
                     url = finalUrl,
                     fileName = res.name,
                     headers = downloadHeaders,
-                    provider = "pan123"
+                    provider = "pan123",
+                    onProgress = { event ->
+                        downloadContext.ensureActive()
+                        _downloadProgress.value = DownloadProgressData(
+                            fileName = event.fileName, progress = event.progress,
+                            downloadedBytes = event.downloadedBytes, totalBytes = event.totalBytes,
+                        )
+                    },
                 )
-                eventJob.cancel()
+                downloadContext.ensureActive()
+                _downloadProgress.value = DownloadProgressData(
+                    fileName = completed.fileName, progress = 1f,
+                    downloadedBytes = completed.size, totalBytes = completed.size,
+                    completedFilePath = completed.filePath,
+                )
+                downloadContext.ensureActive()
+                notifier.success("下载完成: ${completed.fileName}")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
+                downloadContext.ensureActive()
                 notifier.error("下载失败: ${e.message}")
+                downloadContext.ensureActive()
                 _downloadProgress.value = null
             }
         }
@@ -755,7 +744,7 @@ class Pan123BrowserViewModel @Inject constructor(
 
     fun dismissDownloadProgress() {
         _downloadProgress.value = null
-        cloudDownloadRepository.cancel()
+        downloadJob?.cancel()
     }
 
     fun openDownloadedFile(filePath: String) {

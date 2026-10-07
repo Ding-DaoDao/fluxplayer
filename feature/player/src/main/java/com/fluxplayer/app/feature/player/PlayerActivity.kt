@@ -42,6 +42,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.fluxplayer.app.core.common.extensions.getMediaContentUri
 import com.fluxplayer.app.core.data.extractor.ThumbnailExtractor
+import com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.AccentPreset
 import com.fluxplayer.app.core.model.ThemeConfig
@@ -58,6 +59,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
+import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -80,6 +82,9 @@ class PlayerActivity : ComponentActivity() {
 
     @javax.inject.Inject
     lateinit var preferencesRepository: PreferencesRepository
+
+    @Inject
+    lateinit var audiobookProgressRepository: AudiobookProgressRepository
 
     private val onWindowAttributesChangedListener = CopyOnWriteArrayList<Consumer<WindowManager.LayoutParams?>>()
 
@@ -166,18 +171,7 @@ class PlayerActivity : ComponentActivity() {
                     val chapterPath = intent.data?.path ?: ""
                     val bookPath = chapterPath.substringBeforeLast('/')
                     val prefs by viewModel.audioSkipSettings(bookPath).collectAsStateWithLifecycle(initialValue = 0 to 0)
-                    val chapterProgress by preferencesRepository.applicationPreferences
-                        .map { p ->
-                            p.audiobookChapterProgress
-                                .filterKeys { it.startsWith("$bookPath|") }
-                                .mapKeys { (k, _) -> k.removePrefix("$bookPath|").toIntOrNull() ?: -1 }
-                                .filterKeys { it >= 0 }
-                                .mapValues { (_, v) ->
-                                    val parts = v.split("|")
-                                    (parts.getOrNull(0)?.toLongOrNull() ?: 0L) to (parts.getOrNull(1)?.toLongOrNull() ?: 0L)
-                                }
-                        }
-                        // 心跳保存每 5 秒回流一次，等值时避免下游重组
+                    val chapterProgress by remember(bookPath) { audiobookProgressRepository.chapterProgress(bookPath) }
                         .distinctUntilChanged()
                         .collectAsStateWithLifecycle(initialValue = emptyMap())
 
@@ -226,18 +220,7 @@ class PlayerActivity : ComponentActivity() {
                                             // 使用路径反查章节索引，currentMediaItemIndex 在切集过渡期可能为 -1
                                             val chapterIdx = resolveChapterIndex(providedIndex)
                                             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                                                preferencesRepository.updateApplicationPreferences { p ->
-                                                    var map = p.audiobookResumeState.toMutableMap()
-                                                    map[bkPath] = "$chapterIdx|$pos"
-                                                    var pg = p.audiobookChapterProgress.toMutableMap()
-                                                    pg["$bkPath|$chapterIdx"] = "$pos|$dur"
-                                                    p.copy(
-                                                        audiobookResumeState = map,
-                                                        audiobookChapterProgress = pg,
-                                                        audiobookLastPlayedAt = p.audiobookLastPlayedAt +
-                                                            (bkPath to System.currentTimeMillis()),
-                                                    )
-                                                }
+                                                audiobookProgressRepository.save(bkPath, chapterIdx, pos, dur, System.currentTimeMillis())
                                             }
                                         }
                                     },
@@ -653,7 +636,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * 听书续播：保存当前章节索引与播放位置到 DataStore。
+     * 听书续播：保存当前章节索引与播放位置到数据库。
      * 通过 mediaId 反查章节索引（currentMediaItemIndex 在切集过渡期可能返回 C.INDEX_UNSET）。
      */
     private suspend fun saveAudiobookResumeState() {
@@ -673,16 +656,7 @@ class PlayerActivity : ComponentActivity() {
             Log.d("PlayerActivity", "save resume: mediaId=$mediaId, bookPath=$bookPath, chapterIndex=$chapterIndex, position=$position, duration=$duration")
             if (bookPath.isNotEmpty()) {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                    preferencesRepository.updateApplicationPreferences { p ->
-                        Log.d("PlayerActivity", "DataStore before: resumeState=${p.audiobookResumeState[bookPath]}, chapterProgress=${p.audiobookChapterProgress["$bookPath|$chapterIndex"]}")
-                        val newMap = p.audiobookResumeState.toMutableMap()
-                        newMap[bookPath] = "$chapterIndex|$position"
-                        val pg = p.audiobookChapterProgress.toMutableMap()
-                        pg["$bookPath|$chapterIndex"] = "$position|$duration"
-                        val result = p.copy(audiobookResumeState = newMap, audiobookChapterProgress = pg)
-                        Log.d("PlayerActivity", "DataStore after: resumeState=${result.audiobookResumeState[bookPath]}, key=$bookPath|$chapterIndex=${result.audiobookChapterProgress["$bookPath|$chapterIndex"]}")
-                        result
-                    }
+                    audiobookProgressRepository.save(bookPath, chapterIndex, position, duration)
                 }
             }
         } else {

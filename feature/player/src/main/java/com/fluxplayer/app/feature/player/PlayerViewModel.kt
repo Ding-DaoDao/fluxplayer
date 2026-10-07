@@ -2,10 +2,13 @@ package com.fluxplayer.app.feature.player
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
+import com.fluxplayer.app.core.common.FluxNotificationDelegate
+import com.fluxplayer.app.core.common.sortedByNaturalName
+import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.repository.DanmakuRepository
 import com.fluxplayer.app.core.data.repository.MediaRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
@@ -14,6 +17,7 @@ import com.fluxplayer.app.core.model.AnimeMatch
 import com.fluxplayer.app.core.model.DanmakuDownloadState
 import com.fluxplayer.app.core.model.DanmakuSource
 import com.fluxplayer.app.core.model.EpisodeInfo
+import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.LoopMode
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.model.Video
@@ -23,22 +27,16 @@ import com.fluxplayer.app.feature.player.danmaku.DanmakuParser
 import com.fluxplayer.app.feature.player.danmaku.DanmakuSearchViewMode
 import com.fluxplayer.app.feature.player.state.SubtitleOptionsEvent
 import com.fluxplayer.app.feature.player.state.VideoZoomEvent
-import android.util.Log
-import com.fluxplayer.app.core.common.FluxNotificationDelegate
-import com.fluxplayer.app.core.model.FluxMessageEvent
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.map
+import com.fluxplayer.app.feature.player.ui.QualityOption
+import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import com.fluxplayer.app.core.data.cloud.CloudUriResolver
-import com.fluxplayer.app.core.common.sortedByNaturalName
-import com.fluxplayer.app.feature.player.R
-import com.fluxplayer.app.feature.player.ui.QualityOption
 import kotlinx.coroutines.withContext
 
 private const val TAG = "PlayerViewModel"
@@ -130,6 +128,8 @@ class PlayerViewModel @Inject constructor(
     /** 标记播放器正在退出，抑制所有切集回调 */
     private var isExiting = false
 
+    private val danmakuLoadTask = LatestTask(viewModelScope)
+
     // ── 弹幕搜索弹窗 UI 状态（跨 show/hide 持久化） ──
 
     private val _danmakuSearchViewMode = MutableStateFlow(DanmakuSearchViewMode.SEARCH)
@@ -154,34 +154,30 @@ class PlayerViewModel @Inject constructor(
      * 从 URI 加载弹幕文件并解析。
      */
     fun loadDanmaku(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            val list = withContext(Dispatchers.IO) {
-                DanmakuParser.loadFromUri(context, uri)
-            }
-            if (list != null) {
-                _danmakuList.value = list
-                _danmakuFileUri.value = uri
-                danmakuEnabled.value = true
-                danmakuForCurrentEpisode.value = true
-                notifier.success(context.getString(R.string.danmaku_loaded_toast, list.size))
-                // 保存本地弹幕上下文（用于切集自动加载）；目录列举是文件 IO，在 IO 线程执行
-                val filePath = uri.path?.let { java.io.File(it) }
-                if (filePath != null && filePath.parentFile != null) {
-                    val dir = filePath.parentFile!!
-                    val allDanmakuFiles = withContext(Dispatchers.IO) {
-                        dir.listFiles()
-                            ?.filter { it.extension.lowercase() in listOf("xml", "json", "bilibili") }
-                            ?.sortedByNaturalName()
-                            ?: emptyList()
+        danmakuLoadTask.launch(
+            load = {
+                withContext(Dispatchers.IO) {
+                    val list = DanmakuParser.loadFromUri(context, uri) ?: error("无法解析弹幕文件")
+                    val file = uri.path?.let { java.io.File(it) }
+                    val selection = file?.parentFile?.let { dir ->
+                        DanmakuSelectionContext.LocalFile(
+                            dir = dir,
+                            currentFile = file,
+                            allFiles = dir.listFiles()
+                                ?.filter { it.extension.lowercase() in listOf("xml", "json", "bilibili") }
+                                ?.sortedByNaturalName() ?: emptyList(),
+                        )
                     }
-                    danmakuContext = DanmakuSelectionContext.LocalFile(
-                        dir = dir,
-                        currentFile = filePath,
-                        allFiles = allDanmakuFiles,
-                    )
+                    list to selection
                 }
-            }
-        }
+            },
+            onSuccess = { (list, selection) ->
+                publishDanmaku(uri, list)
+                danmakuContext = selection
+                notifier.success(context.getString(R.string.danmaku_loaded_toast, list.size))
+            },
+            onFailure = { error -> notifier.error(error.message ?: "弹幕加载失败") },
+        )
     }
 
     /**
@@ -280,61 +276,25 @@ class PlayerViewModel @Inject constructor(
         val source = currentSource ?: return
         Log.d(TAG, "selectEpisode: episodeId=${episode.episodeId} title=${episode.title} source=${source.id} url=${episode.url}")
         _danmakuDownloadState.value = DanmakuDownloadState.Downloading(source)
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val uri = danmakuRepository.downloadAndCache(source, episode)
-                Log.d(TAG, "selectEpisode: download result uri=$uri")
-                if (uri != null) {
-                    // 直接用 FileInputStream 读取本地缓存文件
-                    val file = java.io.File(uri.path!!)
-                    Log.d(TAG, "selectEpisode: cache file exists=${file.exists()} size=${file.length()}")
-                    if (file.exists()) {
-                        val list = DanmakuParser.parseBilibiliXml(file.inputStream())
-                        Log.d(TAG, "selectEpisode: parsed ${list.size} danmaku items")
-                        if (list.isNotEmpty()) {
-                            Log.d(TAG, "selectEpisode: first 3 items: " +
-                                list.take(3).joinToString { "${it.timeMs}ms '${it.text.take(20)}'" })
-                            _danmakuList.value = list
-                            _danmakuFileUri.value = uri
-                            danmakuEnabled.value = true
-                            danmakuForCurrentEpisode.value = true
-                            _danmakuDownloadState.value = DanmakuDownloadState.Ready(uri.toString())
-                            _activeDanmakuSourceId.value = null
-                            withContext(Dispatchers.Main) {
-                                notifier.success(context.getString(R.string.danmaku_loaded_toast, list.size))
-                            }
-                            // 保存网络弹幕上下文（用于切集自动加载）
-                            lastAnimeInfo = lastAnimeInfo?.copy(currentEpisode = episode)
-                            danmakuContext = lastAnimeInfo?.let {
-                                DanmakuSelectionContext.Network(
-                                    source = source,
-                                    anime = it.anime,
-                                    currentEpisode = episode,
-                                    episodes = it.episodes,
-                                )
-                            }
-                        } else {
-                            _danmakuDownloadState.value = DanmakuDownloadState.Error(
-                                context.getString(R.string.danmaku_error_parse_failed), source,
-                            )
-                        }
-                    } else {
-                        _danmakuDownloadState.value = DanmakuDownloadState.Error(
-                            context.getString(R.string.danmaku_error_cache_missing), source,
-                        )
-                    }
-                } else {
-                    _danmakuDownloadState.value = DanmakuDownloadState.Error(
-                        context.getString(R.string.danmaku_error_download_failed), source,
-                    )
+        val animeInfo = lastAnimeInfo
+        danmakuLoadTask.launch(
+            load = { downloadDanmaku(context, source, episode) },
+            onSuccess = { (uri, list) ->
+                publishDanmaku(uri, list)
+                _danmakuDownloadState.value = DanmakuDownloadState.Ready(uri.toString())
+                _activeDanmakuSourceId.value = null
+                notifier.success(context.getString(R.string.danmaku_loaded_toast, list.size))
+                lastAnimeInfo = animeInfo?.copy(currentEpisode = episode)
+                danmakuContext = animeInfo?.let {
+                    DanmakuSelectionContext.Network(source, it.anime, episode, it.episodes)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "selectEpisode failed", e)
+            },
+            onFailure = { error ->
                 _danmakuDownloadState.value = DanmakuDownloadState.Error(
-                    e.message ?: context.getString(R.string.danmaku_error_unknown), source,
+                    error.message ?: context.getString(R.string.danmaku_error_unknown), source,
                 )
-            }
-        }
+            },
+        )
     }
 
     /**
@@ -454,6 +414,7 @@ class PlayerViewModel @Inject constructor(
      * 关闭显示，同时把下载状态回退到剧集列表（而非 "弹幕已加载"）。
      */
     fun clearDanmaku() {
+        danmakuLoadTask.cancel()
         Log.d(TAG, "clearDanmaku: hiding danmaku (keeping list)")
         // 标记当前弹幕数据不匹配当前剧集（切集了）
         danmakuForCurrentEpisode.value = false
@@ -467,6 +428,7 @@ class PlayerViewModel @Inject constructor(
 
     /** 退出播放时调用，清除弹幕上下文防止 onMediaItemTransition 误触发弹幕加载 */
     fun onPlayerExit() {
+        danmakuLoadTask.cancel()
         isExiting = true
         danmakuContext = null
     }
@@ -477,6 +439,7 @@ class PlayerViewModel @Inject constructor(
      */
     fun onMediaItemTransition(indexStep: Int, context: Context) {
         if (isExiting) return
+        danmakuLoadTask.cancel()
         // 先清空旧弹幕状态，防止异步加载窗口期旧数据残留到 DanmakuController
         _danmakuList.value = null
         danmakuEnabled.value = false
@@ -527,83 +490,60 @@ class PlayerViewModel @Inject constructor(
      * 不改变搜索 UI 状态，显示 Toast 提示。
      */
     private fun silentLoadLocalDanmaku(context: Context, file: java.io.File) {
-        Log.d(TAG, "silentLoadLocalDanmaku: ${file.name}")
-        viewModelScope.launch {
-            withContext(Dispatchers.Main) {
-                notifier.info(context.getString(R.string.danmaku_loading_toast, file.name))
-            }
-            delay(800) // 给「正在加载」toast 留出展示时间
-            val list = withContext(Dispatchers.IO) {
-                DanmakuParser.loadFromUri(context, Uri.fromFile(file))
-            }
-            if (list != null && list.isNotEmpty()) {
-                _danmakuList.value = list
-                _danmakuFileUri.value = Uri.fromFile(file)
-                danmakuEnabled.value = true
-                danmakuForCurrentEpisode.value = true
-                withContext(Dispatchers.Main) {
-                    notifier.success(context.getString(R.string.danmaku_loaded_count, list.size))
+        notifier.info(context.getString(R.string.danmaku_loading_toast, file.name))
+        danmakuLoadTask.launch(
+            load = {
+                withContext(Dispatchers.IO) {
+                    val uri = Uri.fromFile(file)
+                    val list = DanmakuParser.loadFromUri(context, uri)
+                    require(!list.isNullOrEmpty()) { "弹幕文件为空或无法解析" }
+                    uri to list
                 }
-            } else {
-                Log.d(TAG, "silentLoadLocalDanmaku: failed to load ${file.name}")
-                // 加载失败时重置状态，避免旧弹幕残留
-                danmakuForCurrentEpisode.value = false
-                danmakuEnabled.value = false
-            }
-        }
+            },
+            onSuccess = { (uri, list) ->
+                publishDanmaku(uri, list)
+                notifier.success(context.getString(R.string.danmaku_loaded_count, list.size))
+            },
+            onFailure = { error -> onAutomaticDanmakuFailure(error) },
+        )
     }
 
-    /**
-     * 静默下载并加载网络弹幕（切集自动加载时调用）。
-     * 不改变搜索 UI 状态，显示 Toast 提示。
-     */
+    /** 切集自动加载与手动选择共享任务，旧结果不能覆盖当前剧集。 */
     private fun silentLoadNetworkDanmaku(context: Context, source: DanmakuSource?, episode: EpisodeInfo) {
         if (source == null) return
-        Log.d(TAG, "silentLoadNetworkDanmaku: episode=${episode.title} (${episode.episodeId})")
-        viewModelScope.launch {
-            withContext(Dispatchers.Main) {
-                notifier.info(context.getString(R.string.danmaku_loading_toast, episode.title))
-            }
-            delay(800) // 给「正在加载」toast 留出展示时间
-            try {
-                val uri = withContext(Dispatchers.IO) {
-                    danmakuRepository.downloadAndCache(source, episode)
-                }
-                if (uri != null) {
-                    val file = java.io.File(uri.path!!)
-                    if (file.exists()) {
-                        val list = withContext(Dispatchers.IO) {
-                            DanmakuParser.parseBilibiliXml(file.inputStream())
-                        }
-                        if (list.isNotEmpty()) {
-                            _danmakuList.value = list
-                            _danmakuFileUri.value = uri
-                            danmakuEnabled.value = true
-                            danmakuForCurrentEpisode.value = true
-                            withContext(Dispatchers.Main) {
-                                notifier.success(context.getString(R.string.danmaku_loaded_count, list.size))
-                            }
-                        } else {
-                            Log.d(TAG, "silentLoadNetworkDanmaku: parsed empty list")
-                            danmakuForCurrentEpisode.value = false
-                            danmakuEnabled.value = false
-                        }
-                    } else {
-                        Log.d(TAG, "silentLoadNetworkDanmaku: cache file not found")
-                        danmakuForCurrentEpisode.value = false
-                        danmakuEnabled.value = false
-                    }
-                } else {
-                    Log.d(TAG, "silentLoadNetworkDanmaku: download failed (null uri)")
-                    danmakuForCurrentEpisode.value = false
-                    danmakuEnabled.value = false
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "silentLoadNetworkDanmaku failed", e)
-                danmakuForCurrentEpisode.value = false
-                danmakuEnabled.value = false
-            }
+        notifier.info(context.getString(R.string.danmaku_loading_toast, episode.title))
+        danmakuLoadTask.launch(
+            load = { downloadDanmaku(context, source, episode) },
+            onSuccess = { (uri, list) ->
+                publishDanmaku(uri, list)
+                notifier.success(context.getString(R.string.danmaku_loaded_count, list.size))
+            },
+            onFailure = { error -> onAutomaticDanmakuFailure(error) },
+        )
+    }
+
+    private suspend fun downloadDanmaku(context: Context, source: DanmakuSource, episode: EpisodeInfo): Pair<Uri, List<Danmaku>> =
+        withContext(Dispatchers.IO) {
+            val uri = danmakuRepository.downloadAndCache(source, episode)
+                ?: error(context.getString(R.string.danmaku_error_download_failed))
+            val file = java.io.File(requireNotNull(uri.path))
+            check(file.exists()) { context.getString(R.string.danmaku_error_cache_missing) }
+            val list = file.inputStream().use { DanmakuParser.parseBilibiliXml(it) }
+            check(list.isNotEmpty()) { context.getString(R.string.danmaku_error_parse_failed) }
+            uri to list
         }
+
+    private fun publishDanmaku(uri: Uri, list: List<Danmaku>) {
+        _danmakuList.value = list
+        _danmakuFileUri.value = uri
+        danmakuEnabled.value = true
+        danmakuForCurrentEpisode.value = true
+    }
+
+    private fun onAutomaticDanmakuFailure(error: Exception) {
+        Log.e(TAG, "自动加载弹幕失败", error)
+        danmakuForCurrentEpisode.value = false
+        danmakuEnabled.value = false
     }
 
     /**

@@ -43,16 +43,16 @@ data class ApplicationPreferences(
     // 听书片头片尾跳过设置 (key=书籍文件夹路径, value="introSeconds,outroSeconds")
     val audiobookSkipSettings: Map<String, String> = emptyMap(),
 
-    // 听书续播 (key=书籍文件夹路径, value="chapterIndex|positionMs")
+    // 旧版迁移与备份兼容字段，实时续播进度存入数据库。
     val audiobookResumeState: Map<String, String> = emptyMap(),
 
-    // 听书各章节播放进度 (key="bookPath|chapterIndex", value="positionMs|durationMs")
+    // 旧版章节进度备份格式：key="bookPath|chapterIndex"，value="positionMs|durationMs"。
     val audiobookChapterProgress: Map<String, String> = emptyMap(),
 
     // 听书倍速（独立于视频播放的全局倍速设置）
     val audiobookPlaybackSpeed: Float = 1.0f,
 
-    // 听书最近播放时间 (key=书籍文件夹路径, value=epochMillis)，用于书架排序
+    // 旧版最近播放时间备份格式：key=书籍文件夹路径，value=epochMillis。
     val audiobookLastPlayedAt: Map<String, Long> = emptyMap(),
 
     // 浏览页 provider 排序（空列表表示使用默认顺序）

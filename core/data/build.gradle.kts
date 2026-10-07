@@ -19,6 +19,8 @@ android {
         sourceCompatibility = JavaVersion.toVersion(libs.versions.android.jvm.get().toInt())
         targetCompatibility = JavaVersion.toVersion(libs.versions.android.jvm.get().toInt())
     }
+
+    sourceSets.getByName("androidTest").assets.srcDir("../database/schemas")
 }
 
 kotlin {
@@ -37,6 +39,8 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.datastore.core)
+    implementation(libs.androidx.room.ktx)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp.core)
     implementation(libs.androidx.media3.datasource)

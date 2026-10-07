@@ -19,6 +19,7 @@ import dagger.hilt.components.SingletonComponent
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface AudioThemePreferences {
+    fun audiobookProgressRepository(): com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
     fun preferencesRepository(): PreferencesRepository
 }
 

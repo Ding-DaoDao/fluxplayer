@@ -5,25 +5,28 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
-import com.fluxplayer.app.core.common.FluxNotificationDelegate
-import com.fluxplayer.app.core.model.FluxMessageEvent
-import kotlinx.coroutines.flow.SharedFlow
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import com.fluxplayer.app.core.common.CloudPlaylistCache
+import com.fluxplayer.app.core.common.FluxNotificationDelegate
 import com.fluxplayer.app.core.common.PickerUtils
 import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.data.repository.WebDavRepository
+import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.model.WebDavServer
 import com.fluxplayer.app.feature.videopicker.CommonStateSnapshot
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
+import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -31,8 +34,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
-import javax.inject.Inject
 
 data class WebDavBreadcrumb(val label: String, val path: String)
 
@@ -660,53 +661,41 @@ class WebDavBrowserViewModel @Inject constructor(
 
         downloadJob?.cancel()
         downloadJob = viewModelScope.launch {
+            val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
                 val baseUrl = server.normalizedUrl.trimEnd('/')
                 val fullUrl = if (item.path.startsWith("/")) "$baseUrl${item.path}" else "$baseUrl/${item.path}"
 
+                downloadContext.ensureActive()
                 _downloadProgress.value = DownloadProgressData(fileName = item.name, progress = 0f)
 
-                val eventJob = launch {
-                    cloudDownloadRepository.downloadEvents.collect { event ->
-                        when (event) {
-                            is CloudDownloadRepository.DownloadEvent.Progress -> {
-                                if (event.fileName == item.name) {
-                                    _downloadProgress.value = DownloadProgressData(
-                                        fileName = event.fileName, progress = event.progress,
-                                        downloadedBytes = event.downloadedBytes, totalBytes = event.totalBytes
-                                    )
-                                }
-                            }
-                            is CloudDownloadRepository.DownloadEvent.Completed -> {
-                                if (event.fileName == item.name) {
-                                    _downloadProgress.value = DownloadProgressData(
-                                        fileName = event.fileName, progress = 1f,
-                                        completedFilePath = event.filePath
-                                    )
-                                    notifier.success("下载完成: ${event.fileName}")
-                                }
-                            }
-                            is CloudDownloadRepository.DownloadEvent.Failed -> {
-                                if (event.fileName == item.name) {
-                                    _downloadProgress.value = null
-                                    if (event.error != "下载已取消") {
-                                        notifier.error("下载失败: ${event.error}")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                cloudDownloadRepository.download(
+                val completed = cloudDownloadRepository.download(
                     url = fullUrl,
                     fileName = item.name,
                     headers = mapOf("Authorization" to buildBasicAuth(server.username, server.password)),
-                    provider = "webdav"
+                    provider = "webdav",
+                    onProgress = { event ->
+                        downloadContext.ensureActive()
+                        _downloadProgress.value = DownloadProgressData(
+                            fileName = event.fileName, progress = event.progress,
+                            downloadedBytes = event.downloadedBytes, totalBytes = event.totalBytes,
+                        )
+                    },
                 )
-                eventJob.cancel()
+                downloadContext.ensureActive()
+                _downloadProgress.value = DownloadProgressData(
+                    fileName = completed.fileName, progress = 1f,
+                    downloadedBytes = completed.size, totalBytes = completed.size,
+                    completedFilePath = completed.filePath,
+                )
+                downloadContext.ensureActive()
+                notifier.success("下载完成: ${completed.fileName}")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
+                downloadContext.ensureActive()
                 notifier.error("下载失败: ${e.message}")
+                downloadContext.ensureActive()
                 _downloadProgress.value = null
             }
         }
@@ -714,7 +703,7 @@ class WebDavBrowserViewModel @Inject constructor(
 
     fun dismissDownloadProgress() {
         _downloadProgress.value = null
-        cloudDownloadRepository.cancel()
+        downloadJob?.cancel()
     }
 
     fun openDownloadedFile(filePath: String) {

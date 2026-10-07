@@ -40,6 +40,7 @@ import com.fluxplayer.app.core.common.extensions.deleteFiles
 import com.fluxplayer.app.core.common.extensions.subtitleCacheDir
 import com.fluxplayer.app.core.data.cache.PlaybackCacheManager
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
+import com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
 import com.fluxplayer.app.core.data.repository.MediaRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
@@ -98,6 +99,9 @@ class PlayerService : MediaSessionService() {
 
     @Inject
     lateinit var preferencesRepository: PreferencesRepository
+
+    @Inject
+    lateinit var audiobookProgressRepository: AudiobookProgressRepository
 
     @Inject
     lateinit var cloudUriResolver: CloudUriResolver
@@ -880,13 +884,13 @@ class PlayerService : MediaSessionService() {
         val state = LocalAudiobookPlayback.state.value
         if (state.bookPath.isBlank() || state.duration <= 0) return
         saveScope.launch {
-            preferencesRepository.updateApplicationPreferences { prefs ->
-                prefs.copy(
-                    audiobookResumeState = prefs.audiobookResumeState + (state.bookPath to "${state.index}|${state.position}"),
-                    audiobookChapterProgress = prefs.audiobookChapterProgress + ("${state.bookPath}|${state.index}" to "${state.position}|${state.duration}"),
-                    audiobookLastPlayedAt = prefs.audiobookLastPlayedAt + (state.bookPath to state.lastPlayedAt),
-                )
-            }
+            audiobookProgressRepository.save(
+                state.bookPath,
+                state.index,
+                state.position,
+                state.duration,
+                state.lastPlayedAt,
+            )
         }
     }
 

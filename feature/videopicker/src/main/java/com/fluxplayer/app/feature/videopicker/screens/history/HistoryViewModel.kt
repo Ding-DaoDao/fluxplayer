@@ -3,12 +3,13 @@ package com.fluxplayer.app.feature.videopicker.screens.history
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
+import com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.PlaybackHistory
 import com.fluxplayer.app.feature.videopicker.CloudDirectoryCache
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +25,7 @@ data class HistoryUiState(
 class HistoryViewModel @Inject constructor(
     private val playbackHistoryRepository: PlaybackHistoryRepository,
     private val preferencesRepository: PreferencesRepository,
+    private val audiobookProgressRepository: AudiobookProgressRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -56,12 +58,11 @@ class HistoryViewModel @Inject constructor(
     fun clearAll() {
         viewModelScope.launch {
             playbackHistoryRepository.clearAll()
+            audiobookProgressRepository.clear()
             // 同时清除所有足迹、听书续播状态、听书章节进度
             preferencesRepository.updateApplicationPreferences { prefs ->
                 prefs.copy(
                     latestFootprintPerDir = emptyMap(),
-                    audiobookResumeState = emptyMap(),
-                    audiobookChapterProgress = emptyMap(),
                 )
             }
             // 清除云盘目录缓存

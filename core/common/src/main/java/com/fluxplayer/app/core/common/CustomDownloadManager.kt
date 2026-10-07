@@ -1,19 +1,27 @@
 package com.fluxplayer.app.core.common
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
 
-/**
- * 自定义下载管理器 — 带进度回调的 HTTP 文件下载
- */
+/** 下载任务独立取消，文件完整接收后才发布到目标目录。 */
 @Singleton
 class CustomDownloadManager @Inject constructor() {
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+    private val publishLock = Any()
+
     data class DownloadProgress(
         val fileName: String = "",
         val progress: Float = 0f,
@@ -21,101 +29,98 @@ class CustomDownloadManager @Inject constructor() {
         val totalBytes: Long = 0,
         val isComplete: Boolean = false,
         val filePath: String? = null,
-        val error: String? = null
+        val error: String? = null,
     )
 
-    @Volatile
-    private var cancelled = false
-
-    /**
-     * 下载文件到指定目标目录
-     * @param url 下载 URL
-     * @param fileName 文件名
-     * @param targetDir 目标目录（如 /storage/emulated/0/Download/）
-     * @param headers 请求头
-     * @param onProgress 进度回调
-     * @return 保存的文件绝对路径
-     */
     suspend fun download(
         url: String,
         fileName: String,
         targetDir: File,
         headers: Map<String, String> = emptyMap(),
-        onProgress: ((DownloadProgress) -> Unit)? = null
-    ): Result<String> {
-        cancelled = false
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                // 自动补全协议前缀：处理 //example.com 或无协议的情况
-                val normalizedUrl = when {
-                    url.startsWith("http://") || url.startsWith("https://") -> url
-                    url.startsWith("//") -> "https:$url"
-                    else -> "https://$url"
-                }
-                val connection = URL(normalizedUrl).openConnection() as HttpURLConnection
-                connection.connectTimeout = 15000
-                connection.readTimeout = 30000
-                headers.forEach { (k, v) -> connection.setRequestProperty(k, v) }
-
-                if (cancelled) throw Exception("下载已取消")
-
-                if (connection.responseCode != 200) {
-                    throw Exception("HTTP ${connection.responseCode}")
-                }
-
-                val totalBytes = connection.contentLengthLong
-                targetDir.mkdirs()
-                val file = File(targetDir, sanitizeFileName(fileName))
-                val inputStream = connection.inputStream
-
-                FileOutputStream(file).use { output ->
-                    val buffer = ByteArray(8192)
-                    var downloadedBytes = 0L
-                    var bytesRead: Int
-
-                    while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                        if (cancelled) {
-                            inputStream.close()
-                            connection.disconnect()
-                            file.delete()
-                            throw Exception("下载已取消")
-                        }
-                        output.write(buffer, 0, bytesRead)
-                        downloadedBytes += bytesRead
-                        val prog = if (totalBytes > 0) {
-                            downloadedBytes.toFloat() / totalBytes.toFloat()
-                        } else -1f
-
-                        val dp = DownloadProgress(
-                            fileName = fileName,
-                            progress = prog.coerceIn(0f, 1f),
-                            downloadedBytes = downloadedBytes,
-                            totalBytes = totalBytes
-                        )
-                        onProgress?.invoke(dp)
-                    }
-                }
-                inputStream.close()
-                connection.disconnect()
-
-                val final = DownloadProgress(
-                    fileName = fileName,
-                    progress = 1f,
-                    isComplete = true,
-                    filePath = file.absolutePath,
-                    downloadedBytes = file.length(),
-                    totalBytes = totalBytes
-                )
-                onProgress?.invoke(final)
-                file.absolutePath
-            }
+        onProgress: ((DownloadProgress) -> Unit)? = null,
+    ): Result<String> = suspendCancellableCoroutine { continuation ->
+        val normalizedUrl = when {
+            url.startsWith("http://") || url.startsWith("https://") -> url
+            url.startsWith("//") -> "https:$url"
+            else -> "https://$url"
         }
-    }
+        val request = try {
+            Request.Builder().url(normalizedUrl).apply {
+                headers.forEach { (key, value) -> header(key, value) }
+            }.build()
+        } catch (error: Exception) {
+            continuation.resume(Result.failure(error))
+            return@suspendCancellableCoroutine
+        }
+        val call = client.newCall(request)
+        // 取消当前协程只中断当前请求，不影响其他下载。
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                continuation.resume(Result.failure(e))
+            }
 
-    fun cancel() {
-        cancelled = true
+            override fun onResponse(call: Call, response: Response) {
+                var temporaryFile: File? = null
+                val result = try {
+                    response.use {
+                        check(response.code == 200) { "HTTP ${response.code}" }
+                        val body = response.body ?: throw IOException("下载响应为空")
+                        check(targetDir.isDirectory || targetDir.mkdirs()) { "无法创建下载目录" }
+                        val partial = File.createTempFile("flux-download-", ".part", targetDir)
+                        temporaryFile = partial
+                        val totalBytes = body.contentLength()
+                        var downloadedBytes = 0L
+                        body.byteStream().use { input ->
+                            partial.outputStream().use { output ->
+                                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                                while (true) {
+                                    if (!continuation.isActive) throw IOException("下载已取消")
+                                    val count = input.read(buffer)
+                                    if (count == -1) break
+                                    if (!continuation.isActive) throw IOException("下载已取消")
+                                    output.write(buffer, 0, count)
+                                    downloadedBytes += count
+                                    onProgress?.invoke(
+                                        DownloadProgress(
+                                            fileName = fileName,
+                                            progress = if (totalBytes > 0) (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f) else 0f,
+                                            downloadedBytes = downloadedBytes,
+                                            totalBytes = totalBytes,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                        if (totalBytes >= 0 && downloadedBytes != totalBytes) throw IOException("下载文件不完整")
+                        val destination = synchronized(publishLock) {
+                            if (!continuation.isActive) throw IOException("下载已取消")
+                            val name = sanitizeFileName(fileName)
+                            var candidate = File(targetDir, name)
+                            var suffix = 1
+                            // 同名文件保留，避免失败或重复下载破坏已有内容。
+                            while (candidate.exists()) {
+                                val extension = File(name).extension.let { ext -> if (ext.isEmpty()) "" else ".$ext" }
+                                candidate = File(targetDir, "${File(name).nameWithoutExtension} (${suffix++})$extension")
+                            }
+                            if (!partial.renameTo(candidate)) throw IOException("无法保存下载文件")
+                            candidate
+                        }
+                        Result.success(destination.absolutePath)
+                    }
+                } catch (error: Exception) {
+                    Result.failure(error)
+                } finally {
+                    temporaryFile?.delete()
+                }
+                // 文件已发布但结果尚未送达调用方时取消，回收本任务刚创建的文件。
+                continuation.resume(result) { _, cancelledResult, _ ->
+                    cancelledResult.getOrNull()?.let { File(it).delete() }
+                }
+            }
+        })
     }
 
     private fun sanitizeFileName(name: String): String =
-        name.replace(Regex("[/\\\\:*?\"<>|]"), "_")
+        name.replace(Regex("[/\\\\:*?\"<>|]"), "_").takeUnless { it.isBlank() || it == "." || it == ".." } ?: "download"
 }

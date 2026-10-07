@@ -2,9 +2,9 @@ package com.fluxplayer.app.core.data.backup
 
 import android.content.Context
 import android.net.Uri
-import dagger.hilt.android.qualifiers.ApplicationContext
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
+import com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.data.repository.WebDavRepository
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
@@ -19,6 +19,7 @@ import com.fluxplayer.app.core.model.Pan123BackupConfig
 import com.fluxplayer.app.core.model.QuarkBackupConfig
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.model.Yun139BackupConfig
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
@@ -36,6 +37,7 @@ import kotlinx.serialization.serializer
 @Singleton
 class BackupManager @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
+    private val audiobookProgressRepository: AudiobookProgressRepository,
     private val webDavRepository: WebDavRepository,
     private val webDavServersDataSource: WebDavServersDataSource,
     private val backupWebDavDataSource: BackupWebDavDataSource,
@@ -48,7 +50,7 @@ class BackupManager @Inject constructor(
 
     /** 创建备份数据包 */
     suspend fun createBackup(): BackupData {
-        val appPrefs = preferencesRepository.applicationPreferences.value
+        val appPrefs = audiobookProgressRepository.exportTo(preferencesRepository.applicationPreferences.value)
         val playerPrefs = preferencesRepository.playerPreferences.value
         val webDavServers = webDavServersDataSource.webDavServers.first()
         val openListConfig = readOpenListConfig()
@@ -72,7 +74,8 @@ class BackupManager @Inject constructor(
     suspend fun restoreFromBackup(backup: BackupData, ignoreList: Set<String> = emptySet()) {
         // 1. 恢复设置
         if ("app_preferences" !in ignoreList) {
-            preferencesRepository.updateApplicationPreferences { backup.appPreferences }
+            audiobookProgressRepository.restore(backup.appPreferences)
+            preferencesRepository.updateApplicationPreferences { AudiobookProgressRepository.withoutLegacyProgress(backup.appPreferences) }
         }
         if ("player_preferences" !in ignoreList) {
             preferencesRepository.updatePlayerPreferences { backup.playerPreferences }

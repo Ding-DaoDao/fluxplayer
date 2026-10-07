@@ -4,37 +4,38 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.fluxplayer.app.core.common.FluxNotificationDelegate
-import com.fluxplayer.app.core.model.FluxMessageEvent
-import kotlinx.coroutines.flow.SharedFlow
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.common.CloudPlayHeaders
 import com.fluxplayer.app.core.common.CloudPlaylistCache
 import com.fluxplayer.app.core.common.CloudUriScheme
+import com.fluxplayer.app.core.common.FluxNotificationDelegate
 import com.fluxplayer.app.core.common.PickerUtils
 import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.aliyun.AliyunApiClient
-import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.aliyun.AliyunTokenExpiredException
+import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.WebDavResource
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import com.fluxplayer.app.feature.videopicker.CloudDirectoryCache
 import com.fluxplayer.app.feature.videopicker.DirectoryStackEntry
+import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.File
+import javax.inject.Inject
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
-import java.io.File
-import javax.inject.Inject
 
 data class AliyunBreadcrumb(val label: String, val fileId: String)
 
@@ -788,64 +789,50 @@ class AliyunBrowserViewModel @Inject constructor(
 
         downloadJob?.cancel()
         downloadJob = viewModelScope.launch {
+            val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
                 val urlResult = apiClient.getDownloadUrl(res.path)
                 urlResult.fold(
                     onSuccess = { url ->
+                        downloadContext.ensureActive()
                         _downloadProgress.value = DownloadProgressData(
-                            fileName = res.name, progress = 0f
+                            fileName = res.name, progress = 0f,
                         )
 
-                        val eventJob = launch {
-                            cloudDownloadRepository.downloadEvents.collect { event ->
-                                when (event) {
-                                    is CloudDownloadRepository.DownloadEvent.Progress -> {
-                                        if (event.fileName == res.name) {
-                                            _downloadProgress.value = DownloadProgressData(
-                                                fileName = event.fileName,
-                                                progress = event.progress,
-                                                downloadedBytes = event.downloadedBytes,
-                                                totalBytes = event.totalBytes
-                                            )
-                                        }
-                                    }
-                                    is CloudDownloadRepository.DownloadEvent.Completed -> {
-                                        if (event.fileName == res.name) {
-                                            _downloadProgress.value = DownloadProgressData(
-                                                fileName = event.fileName,
-                                                progress = 1f,
-                                                completedFilePath = event.filePath
-                                            )
-                                            notifier.success("下载完成: ${event.fileName}")
-                                        }
-                                    }
-                                    is CloudDownloadRepository.DownloadEvent.Failed -> {
-                                        if (event.fileName == res.name) {
-                                            _downloadProgress.value = null
-                                            if (event.error != "下载已取消") {
-                                                notifier.error("下载失败: ${event.error}")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        cloudDownloadRepository.download(
+                        val completed = cloudDownloadRepository.download(
                             url = url,
                             fileName = res.name,
                             headers = AliyunAuthProvider.getPlayHeaders(),
-                            provider = "aliyun"
+                            provider = "aliyun",
+                            onProgress = { event ->
+                                downloadContext.ensureActive()
+                                _downloadProgress.value = DownloadProgressData(
+                                    fileName = event.fileName, progress = event.progress,
+                                    downloadedBytes = event.downloadedBytes, totalBytes = event.totalBytes,
+                                )
+                            },
                         )
 
-                        eventJob.cancel()
+                        downloadContext.ensureActive()
+                        _downloadProgress.value = DownloadProgressData(
+                            fileName = completed.fileName, progress = 1f,
+                            downloadedBytes = completed.size, totalBytes = completed.size,
+                            completedFilePath = completed.filePath,
+                        )
+                        downloadContext.ensureActive()
+                        notifier.success("下载完成: ${completed.fileName}")
                     },
                     onFailure = { e ->
+                        downloadContext.ensureActive()
                         notifier.error("获取下载链接失败: ${e.message}")
-                    }
+                    },
                 )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
+                downloadContext.ensureActive()
                 notifier.error("下载失败: ${e.message}")
+                downloadContext.ensureActive()
                 _downloadProgress.value = null
             }
         }
@@ -853,7 +840,7 @@ class AliyunBrowserViewModel @Inject constructor(
 
     fun dismissDownloadProgress() {
         _downloadProgress.value = null
-        cloudDownloadRepository.cancel()
+        downloadJob?.cancel()
     }
 
     fun openDownloadedFile(filePath: String) {

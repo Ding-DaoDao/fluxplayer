@@ -1,25 +1,29 @@
 package com.fluxplayer.app.core.data.repository
 
-import android.util.Log
 import com.fluxplayer.app.core.common.CustomDownloadManager
 import com.fluxplayer.app.core.database.dao.DownloadTaskDao
 import com.fluxplayer.app.core.database.entities.DownloadStatus
 import com.fluxplayer.app.core.database.entities.DownloadTaskEntity
+import java.io.File
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
-import java.util.concurrent.atomic.AtomicLong
-import javax.inject.Inject
-import javax.inject.Singleton
+import kotlinx.coroutines.withContext
 
 /**
  * 统一下载仓库 — 封装 CustomDownloadManager + Room 持久化
@@ -31,18 +35,11 @@ class CloudDownloadRepository @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
 ) {
     companion object {
-        private const val TAG = "CloudDownloadRepo"
         private const val DEFAULT_DOWNLOAD_PATH = "/storage/emulated/0/Download/"
 
         /** 进度写库节流间隔（毫秒），避免进度回调每秒触发数十次 DB 写入 */
         private const val PROGRESS_WRITE_INTERVAL_MS = 500L
     }
-
-    /** 进度写库专用协程作用域（应用级，伴随 Repository 生命周期） */
-    private val progressScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    /** 上次写库时间戳，用于节流 */
-    private val lastProgressWriteMs = AtomicLong(0L)
 
     /** 下载进度事件 */
     private val _downloadEvents = MutableSharedFlow<DownloadEvent>(extraBufferCapacity = 64)
@@ -65,8 +62,10 @@ class CloudDownloadRepository @Inject constructor(
     }
 
     /** 当前是否正在下载 */
-    private val _isDownloading = MutableStateFlow(false)
-    val isDownloading = _isDownloading.asStateFlow()
+    private val activeTasks = MutableStateFlow<Set<Long>>(emptySet())
+    val isDownloading: Flow<Boolean> = activeTasks.map { it.isNotEmpty() }.distinctUntilChanged()
+
+    data class DownloadResult(val taskId: Long, val fileName: String, val filePath: String, val size: Long)
 
     /**
      * 获取当前下载存储路径
@@ -89,120 +88,78 @@ class CloudDownloadRepository @Inject constructor(
      * @param fileName 文件名
      * @param headers 请求头
      * @param provider 云盘提供商标识
-     * @return 任务 ID
+     * @return 已持久化的下载完成信息
      */
     suspend fun download(
         url: String,
         fileName: String,
         headers: Map<String, String> = emptyMap(),
-        provider: String
-    ): Long {
-        // 获取存储路径
-        val downloadPath = getDownloadPath()
-        val targetDir = File(downloadPath)
-
-        // 写入 PENDING 记录
+        provider: String,
+        onProgress: (DownloadEvent.Progress) -> Unit = {},
+    ): DownloadResult {
+        val targetDir = File(getDownloadPath())
         val task = DownloadTaskEntity(
             fileName = fileName,
             url = url,
             fileSize = 0L,
-            status = DownloadStatus.PENDING,
+            status = DownloadStatus.DOWNLOADING,
             provider = provider,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
         )
-        val taskId = downloadTaskDao.insert(task)
-        Log.d(TAG, "创建下载任务: id=$taskId, fileName=$fileName, provider=$provider, path=$downloadPath")
-
+        val taskId = withContext(NonCancellable) { downloadTaskDao.insert(task) }
+        activeTasks.update { it + taskId }
         try {
-            // 更新为 DOWNLOADING
-            downloadTaskDao.update(task.copy(id = taskId, status = DownloadStatus.DOWNLOADING))
-            _isDownloading.value = true
-
-            val result = customDownloadManager.download(
-                url = url,
-                fileName = fileName,
-                targetDir = targetDir,
-                headers = headers,
-                onProgress = { progress ->
-                    // 进度写库做节流，避免阻塞下载线程（进度回调运行在 IO 线程，不能 runBlocking）
-                    val now = System.currentTimeMillis()
-                    if (now - lastProgressWriteMs.get() >= PROGRESS_WRITE_INTERVAL_MS) {
-                        lastProgressWriteMs.set(now)
-                        progressScope.launch {
-                            downloadTaskDao.update(
-                                task.copy(
-                                    id = taskId,
-                                    status = DownloadStatus.DOWNLOADING,
-                                    downloadedBytes = progress.downloadedBytes,
-                                    fileSize = if (progress.totalBytes > 0) progress.totalBytes else 0L
-                                )
-                            )
-                        }
+            currentCoroutineContext().ensureActive()
+            val result = coroutineScope {
+                // 只保留最新进度，写库任务属于本次下载，结束前等待写入完成。
+                val progressUpdates = Channel<CustomDownloadManager.DownloadProgress>(Channel.CONFLATED)
+                val writer = launch {
+                    for (progress in progressUpdates) {
+                        downloadTaskDao.updateProgress(taskId, progress.downloadedBytes, progress.totalBytes.coerceAtLeast(0L))
+                        currentCoroutineContext().ensureActive()
+                        val event = DownloadEvent.Progress(taskId, fileName, progress.progress, progress.downloadedBytes, progress.totalBytes)
+                        onProgress(event)
+                        _downloadEvents.tryEmit(event)
                     }
-                    _downloadEvents.tryEmit(
-                        DownloadEvent.Progress(
-                            taskId = taskId,
-                            fileName = fileName,
-                            progress = progress.progress,
-                            downloadedBytes = progress.downloadedBytes,
-                            totalBytes = progress.totalBytes
-                        )
-                    )
                 }
-            )
-
-            result.fold(
-                onSuccess = { filePath ->
-                    // 更新为 COMPLETED
-                    downloadTaskDao.update(
-                        task.copy(
-                            id = taskId,
-                            status = DownloadStatus.COMPLETED,
-                            filePath = filePath,
-                            completedAt = System.currentTimeMillis()
-                        )
+                var lastProgressWriteNs = 0L
+                try {
+                    customDownloadManager.download(
+                        url = url,
+                        fileName = fileName,
+                        targetDir = targetDir,
+                        headers = headers,
+                        onProgress = { progress ->
+                            val now = System.nanoTime()
+                            if (lastProgressWriteNs == 0L || now - lastProgressWriteNs >= PROGRESS_WRITE_INTERVAL_MS * 1_000_000) {
+                                lastProgressWriteNs = now
+                                progressUpdates.trySend(progress)
+                            }
+                        },
                     )
-                    _downloadEvents.tryEmit(
-                        DownloadEvent.Completed(taskId = taskId, fileName = fileName, filePath = filePath)
-                    )
-                    Log.d(TAG, "下载完成: $fileName -> $filePath")
-                },
-                onFailure = { e ->
-                    if (e is CancellationException) throw e
-                    // 更新为 FAILED
-                    downloadTaskDao.update(
-                        task.copy(
-                            id = taskId,
-                            status = DownloadStatus.FAILED,
-                            completedAt = System.currentTimeMillis()
-                        )
-                    )
-                    _downloadEvents.tryEmit(
-                        DownloadEvent.Failed(taskId = taskId, fileName = fileName, error = e.message ?: "下载失败")
-                    )
-                    Log.e(TAG, "下载失败: $fileName, error=${e.message}")
+                } finally {
+                    progressUpdates.close()
+                    writer.join()
                 }
-            )
-        } catch (e: CancellationException) {
-            downloadTaskDao.update(
-                task.copy(id = taskId, status = DownloadStatus.FAILED, completedAt = System.currentTimeMillis())
-            )
-            _downloadEvents.tryEmit(
-                DownloadEvent.Failed(taskId = taskId, fileName = fileName, error = "下载已取消")
-            )
-            Log.d(TAG, "下载已取消: $fileName")
+            }
+            val filePath = result.getOrThrow()
+            // 已获得完整文件后确保终态落库，避免退出页面留下下载中记录。
+            val size = withContext(NonCancellable + Dispatchers.IO) {
+                File(filePath).length().also { downloadTaskDao.complete(taskId, filePath, it, System.currentTimeMillis()) }
+            }
+            _downloadEvents.tryEmit(DownloadEvent.Completed(taskId, fileName, filePath))
+            return DownloadResult(taskId, fileName, filePath, size)
+        } catch (error: CancellationException) {
+            // 已取消的协程仍需落库终态，随后继续向上传递取消信号。
+            withContext(NonCancellable) { downloadTaskDao.fail(taskId, System.currentTimeMillis()) }
+            throw error
+        } catch (error: Exception) {
+            downloadTaskDao.fail(taskId, System.currentTimeMillis())
+            _downloadEvents.tryEmit(DownloadEvent.Failed(taskId, fileName, error.message ?: "下载失败"))
+            throw error
         } finally {
-            _isDownloading.value = false
+            activeTasks.update { it - taskId }
         }
-
-        return taskId
-    }
-
-    /**
-     * 取消下载
-     */
-    fun cancel() {
-        customDownloadManager.cancel()
     }
 
     /**

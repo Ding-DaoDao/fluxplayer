@@ -4,12 +4,15 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.fluxplayer.app.core.database.dao.AudiobookProgressDao
 import com.fluxplayer.app.core.database.dao.DirectoryDao
 import com.fluxplayer.app.core.database.dao.DownloadTaskDao
 import com.fluxplayer.app.core.database.dao.MediumDao
 import com.fluxplayer.app.core.database.dao.MediumStateDao
 import com.fluxplayer.app.core.database.dao.PlaybackHistoryDao
 import com.fluxplayer.app.core.database.entities.AudioStreamInfoEntity
+import com.fluxplayer.app.core.database.entities.AudiobookChapterProgressEntity
+import com.fluxplayer.app.core.database.entities.AudiobookResumeEntity
 import com.fluxplayer.app.core.database.entities.DirectoryEntity
 import com.fluxplayer.app.core.database.entities.DownloadTaskEntity
 import com.fluxplayer.app.core.database.entities.MediumEntity
@@ -28,8 +31,10 @@ import com.fluxplayer.app.core.database.entities.VideoStreamInfoEntity
         AudioStreamInfoEntity::class,
         SubtitleStreamInfoEntity::class,
         DownloadTaskEntity::class,
+        AudiobookResumeEntity::class,
+        AudiobookChapterProgressEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 abstract class MediaDatabase : RoomDatabase() {
@@ -44,8 +49,17 @@ abstract class MediaDatabase : RoomDatabase() {
 
     abstract fun downloadTaskDao(): DownloadTaskDao
 
+    abstract fun audiobookProgressDao(): AudiobookProgressDao
+
     companion object {
         const val DATABASE_NAME = "media_db"
+
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `audiobook_resume` (`bookPath` TEXT NOT NULL, `chapterIndex` INTEGER NOT NULL, `position` INTEGER NOT NULL, `lastPlayedAt` INTEGER NOT NULL, PRIMARY KEY(`bookPath`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `audiobook_chapter_progress` (`bookPath` TEXT NOT NULL, `chapterIndex` INTEGER NOT NULL, `position` INTEGER NOT NULL, `duration` INTEGER NOT NULL, PRIMARY KEY(`bookPath`, `chapterIndex`))")
+            }
+        }
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {

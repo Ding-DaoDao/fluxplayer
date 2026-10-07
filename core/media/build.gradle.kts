@@ -32,6 +32,7 @@ dependencies {
     implementation(project(":core:model"))
 
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.room.ktx)
     implementation(libs.github.anilbeesetti.nextlib.mediainfo)
     implementation(libs.coil.compose)
 
