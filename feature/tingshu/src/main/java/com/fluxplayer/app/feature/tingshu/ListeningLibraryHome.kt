@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.combinedClickable
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -153,9 +155,13 @@ fun ListeningLibraryHome(
         )
     }
     val repository = remember { TingshuRepository.get(context) }
-    val resumeBook: (AudioBook?, ListeningBook) -> Unit = { local, source ->
+    val resumeBook: (AudioBook?, ListeningBook) -> Unit = resume@{ local, source ->
         if (local != null) {
             val saved = localResume[local.folderPath].orEmpty()
+            if (saved.startsWith("-1|")) {
+                backgroundPlayer.reportError("上次收听的章节已移除，请打开本地书库重新选择章节")
+                return@resume
+            }
             val index = (saved.substringBefore('|').toIntOrNull() ?: 0).coerceIn(0, local.chapters.lastIndex.coerceAtLeast(0))
             local.chapters.getOrNull(index)?.let { chapter ->
                 backgroundPlayer.start(
@@ -232,6 +238,9 @@ fun ListeningLibraryHome(
         else -> null
     }
 
+    // 在组合阶段捕获显示模式，让切换触发网格内容和跨列缓存一同重建。
+    // 跨列回调直接读取可变状态会保留旧行索引，导致同一卡片被重复放置。
+    val recentGrid = grid
     LazyVerticalGrid(
         columns = GridCells.Adaptive(150.dp),
         modifier = modifier.fillMaxSize(),
@@ -399,14 +408,19 @@ fun ListeningLibraryHome(
                 Text("从书库挑一本开始，收听记录会留在这里。", style = FluxTheme.typography.bodyMedium, color = colors.onSurfaceVariant, modifier = Modifier.padding(vertical = 12.dp))
             }
         }
-        items(entries, key = { "recent-${it.book.key}" }, span = { GridItemSpan(if (grid) 1 else maxLineSpan) }) { entry ->
+        items(
+            entries,
+            key = { "recent-${it.book.key}" },
+            contentType = { if (recentGrid) "recent-grid" else "recent-list" },
+            span = { GridItemSpan(if (recentGrid) 1 else maxLineSpan) },
+        ) { entry ->
             val book = entry.book
             val cover = if (entry.localBook != null) entry.localBook.coverUri else rememberSourceCover(book.sourceId, book.coverUrl, repository)
             // 最近收听记录已有完整书籍数据，点击直接从保存进度续播。
             val open = {
                 resumeBook(entry.localBook, book)
             }
-            if (grid) {
+            if (recentGrid) {
                 RecentBookGridCard(book, entry.progress, cover, open, onLongClick = { removingBook = book })
             } else {
                 RecentBookRow(book, entry.progress, cover, open, onLongClick = { removingBook = book })
@@ -420,7 +434,16 @@ private fun CloudLibraryCard(source: ListeningSource, onClick: () -> Unit) {
     val colors = FluxTheme.colorScheme
     Surface(onClick = onClick, shape = HomeShapeMedium, color = colors.surfaceContainerLow, border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.35f))) {
         Column(Modifier.fillMaxWidth().padding(20.dp).heightIn(min = 64.dp), verticalArrangement = Arrangement.Center) {
-            Text(source.name, style = FluxTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(listeningSourceIcon(source)),
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    contentScale = ContentScale.Fit,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(source.name, modifier = Modifier.weight(1f), style = FluxTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
             Spacer(Modifier.height(8.dp))
             Text(if (source.isCloudLibrary) "云端藏书" else "在线有声书", style = FluxTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
@@ -654,7 +677,7 @@ private fun RecentBookGridCard(
             )
             if (percent > 0f) {
                 Text(
-                    text = "${(percent * 100).toInt()}%",
+                    text = "位置 ${(percent * 100).toInt()}%",
                     style = FluxTheme.typography.labelSmall,
                     color = colors.onPrimary,
                     modifier = Modifier
@@ -801,7 +824,7 @@ private fun CoverBox(
     }
 }
 
-/** 整本书的收听百分比：已播章节占比 + 当前章节内部进度。 */
+/** 当前收听位置在目录中的比例，不表示前面的章节都已听过。 */
 private fun progressPercent(book: ListeningBook, progress: ListeningProgress?): Float {
     if (progress == null || book.episodes.isEmpty()) return 0f
     val currentIndex = book.episodes.indexOfFirst { it.url == progress.episodeUrl }

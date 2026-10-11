@@ -57,7 +57,6 @@ import com.fluxplayer.app.feature.player.service.stopPlayerSession
 import com.fluxplayer.app.feature.player.utils.PlayerApi
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
-import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -169,7 +168,7 @@ class PlayerActivity : ComponentActivity() {
                 val coverArtworkUri = intent.getStringExtra("cover_uri")?.let { Uri.parse(it) }
                 if (isAudioOnly) {
                     val chapterPath = intent.data?.path ?: ""
-                    val bookPath = chapterPath.substringBeforeLast('/')
+                    val bookPath = com.fluxplayer.app.core.common.LocalListeningLibrary.find(this@PlayerActivity, intent.data.toString())?.path ?: chapterPath.substringBeforeLast('/')
                     val prefs by viewModel.audioSkipSettings(bookPath).collectAsStateWithLifecycle(initialValue = 0 to 0)
                     val chapterProgress by remember(bookPath) { audiobookProgressRepository.chapterProgress(bookPath) }
                         .distinctUntilChanged()
@@ -186,7 +185,7 @@ class PlayerActivity : ComponentActivity() {
                     ) {
                         val mp = player
                         // 从路径提取书名，供 loading 界面使用
-                        val bookTitle = bookPath.substringAfterLast('/').takeIf { it.isNotEmpty() }
+                        val bookTitle = com.fluxplayer.app.core.common.LocalListeningLibrary.find(this@PlayerActivity, bookPath)?.title ?: bookPath.substringAfterLast('/').takeIf { it.isNotEmpty() }
                         Crossfade(targetState = mp, label = "playerTransition") { currentPlayer ->
                             if (currentPlayer == null) {
                                 // player 未就绪时显示 loading 界面，避免黑屏
@@ -217,10 +216,10 @@ class PlayerActivity : ComponentActivity() {
                                     onSaveResume = { providedIndex, pos, dur ->
                                         lifecycleScope.launch {
                                             val bkPath = bookPath
-                                            // 使用路径反查章节索引，currentMediaItemIndex 在切集过渡期可能为 -1
-                                            val chapterIdx = resolveChapterIndex(providedIndex)
+                                            // 保存回调提供的章节标识，避免切章后把上一章进度写入下一章。
                                             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                                                audiobookProgressRepository.save(bkPath, chapterIdx, pos, dur, System.currentTimeMillis())
+                                                // 页面保存上一章的完成度，不覆盖服务保存的当前续播位置。
+                                                audiobookProgressRepository.save(bkPath, providedIndex, pos, dur, chapterUri = audioBookChapterPaths.getOrNull(providedIndex)?.let { localListeningUri(it).toString() }, updateResume = false)
                                             }
                                         }
                                     },
@@ -376,21 +375,26 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun startPlayback() {
-        val uri = intent.data ?: return
-
-        val returningFromBackground = !isIntentNew && mediaController?.currentMediaItem != null
-        val isNewUriTheCurrentMediaItem = mediaController?.currentMediaItem?.localConfiguration?.uri.toString() == uri.toString()
-
-        if (intent.getBooleanExtra("reopen_audiobook", false) && (isNewUriTheCurrentMediaItem || mediaController?.currentMediaItem?.mediaId == uri.path)) {
-            // 首页只打开当前播放页，不改变暂停状态，也不重新装载章节。
+        val activeItem = mediaController?.currentMediaItem
+        if (intent.getBooleanExtra("reopen_audiobook", false) && localListeningBookPath(activeItem) != null) {
+            // 通知携带的章节可能已过时，返回页面时始终使用服务当前章节，不重载或跳转进度。
             mediaController?.let { controller ->
+                intent.data = localListeningUri(activeItem!!.mediaId)
+                intent.putExtra("audio_only", true)
                 val items = List(controller.mediaItemCount) { controller.getMediaItemAt(it) }
                 audioBookChapterPaths = items.map { it.mediaId }
                 viewModel.audioChapterNames = items.map { it.mediaMetadata.title?.toString().orEmpty() }
                 viewModel.audioChapterCount = items.size
             }
+            pendingResumePosition = 0L
+            isIntentNew = false
             return
         }
+        val uri = intent.data ?: return
+
+        val returningFromBackground = !isIntentNew && mediaController?.currentMediaItem != null
+        val isNewUriTheCurrentMediaItem = mediaController?.currentMediaItem?.localConfiguration?.uri.toString() == uri.toString()
+
         if (returningFromBackground || isNewUriTheCurrentMediaItem) {
             // 从后台恢复：媒体源已准备完毕，直接恢复播放即可。
             // 不调用 prepare() —— 云盘下载直链有时效性，re-prepare 可能因 URL 过期而失败。
@@ -412,53 +416,12 @@ class PlayerActivity : ComponentActivity() {
         // 不通过 Intent 传 chapter_uris — Binder 事务有大小限制，
         // 大章节列表（~500KB+）会触发 TransactionTooLargeException
         if (isAudioOnly) {
-            val title = playerApi.title
-            val chapterPath = uri.path ?: ""
-            // 书籍封面：供通知栏/锁屏展示
-            val coverArtworkUri = intent.getStringExtra("cover_uri")?.let { Uri.parse(it) }
-
-            // 从 URI 的父目录扫描所有音频文件（文件 IO 移出主线程，避免启动卡顿）
-            val bookDir = File(chapterPath).parentFile
-            val bookName = bookDir?.name
-            val scanned = withContext(Dispatchers.IO) {
-                val files = scanAudioFiles(bookDir)
-                val startIdx = files.indexOfFirst { it.absolutePath == chapterPath }.coerceAtLeast(0)
-                // 在此构建媒体项与章节信息，减少主线程后续工作
-                val items = files.mapIndexed { index, file ->
-                    MediaItem.Builder()
-                        .setUri(Uri.fromFile(file))
-                        .setMediaId(file.absolutePath)
-                        .setMediaMetadata(
-                            MediaMetadata.Builder().apply {
-                                val itemTitle = if (index == startIdx) (title ?: file.nameWithoutExtension) else file.nameWithoutExtension
-                                setTitle(itemTitle)
-                                // 书名放 artist/albumTitle，锁屏大字显示章节名、副行显示书名
-                                bookName?.let {
-                                    setArtist(it)
-                                    setAlbumTitle(it)
-                                }
-                                coverArtworkUri?.let { setArtworkUri(it) }
-                            }.build(),
-                        )
-                        .build()
-                }
-                Triple(files, startIdx, items)
-            }
-            val chapterFiles = scanned.first
-            val startIndex = scanned.second
-            val mediaItems = scanned.third
-
-            // 最终安全检查：如果仍然没有文件，直接返回
-            if (chapterFiles.isEmpty()) {
-                Log.e("PlayerActivity", "无法找到任何音频文件: chapterPath=$chapterPath")
-                return
-            }
-
-            // 提取章节名列表供播放器 UI 使用
-            val chapterNames = chapterFiles.map { it.nameWithoutExtension }
-            // 缓存章节路径，供 finishAndStopPlayerSession 反查索引
-            audioBookChapterPaths = chapterFiles.map { it.absolutePath }
-            Log.d("PlayerActivity", "playVideo audio: startIndex=$startIndex, startUri=$chapterPath, paths=${audioBookChapterPaths.take(5)}${if (audioBookChapterPaths.size > 5) "..." else ""}")
+            val coverArtworkUri = intent.getStringExtra("cover_uri")?.let(Uri::parse)
+            val mediaItems = withContext(Dispatchers.IO) { localListeningItems(this@PlayerActivity, uri, coverArtworkUri) }
+            if (mediaItems.isEmpty()) return
+            val startIndex = mediaItems.indexOfFirst { localListeningUri(it.mediaId) == uri }.coerceAtLeast(0)
+            val chapterNames = mediaItems.map { it.mediaMetadata.title?.toString().orEmpty() }
+            audioBookChapterPaths = mediaItems.map { it.mediaId }
 
             mediaController?.run {
                 setMediaItems(mediaItems, startIndex, C.TIME_UNSET)
@@ -473,7 +436,7 @@ class PlayerActivity : ComponentActivity() {
             }
             // 存储到 viewModel 供 composer 读取
             viewModel.audioChapterNames = chapterNames
-            viewModel.audioChapterCount = chapterFiles.size
+            viewModel.audioChapterCount = mediaItems.size
             return
         }
 
@@ -636,31 +599,15 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * 听书续播：保存当前章节索引与播放位置到数据库。
-     * 通过 mediaId 反查章节索引（currentMediaItemIndex 在切集过渡期可能返回 C.INDEX_UNSET）。
+     * 听书续播：请求后台服务保存当前章节和位置，并等待保存完成。
      */
     private suspend fun saveAudiobookResumeState() {
-        val mediaId = mediaController?.currentMediaItem?.mediaId
-        val rawPos = mediaController?.currentPosition ?: 0L
-        val rawDur = mediaController?.duration ?: 0L
-        // C.TIME_UNSET 会转为负数，只保留有效值
-        val position = rawPos.coerceAtLeast(0L)
-        val duration = rawDur.coerceAtLeast(0L)
-        // 从缓存路径列表中反查真实章节索引，兜底 currentMediaItemIndex
-        val chapterIndex = resolveChapterIndex(
-            mediaController?.currentMediaItemIndex ?: 0,
-        )
-        // 只在有有效数据时保存（duration > 0 表示播放器已加载完毕）
-        if (mediaId != null && duration > 0) {
-            val bookPath = File(mediaId).parent ?: ""
-            Log.d("PlayerActivity", "save resume: mediaId=$mediaId, bookPath=$bookPath, chapterIndex=$chapterIndex, position=$position, duration=$duration")
-            if (bookPath.isNotEmpty()) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                    audiobookProgressRepository.save(bookPath, chapterIndex, position, duration)
-                }
-            }
-        } else {
-            Log.w("PlayerActivity", "save resume SKIPPED: mediaId=$mediaId, duration=$duration")
+        // 由服务读取真实位置并等待落盘，避免页面缓存覆盖定时暂停后的记录。
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            mediaController?.sendCustomCommand(
+                com.fluxplayer.app.feature.player.service.CustomCommands.SAVE_AUDIOBOOK_PROGRESS.sessionCommand,
+                Bundle.EMPTY,
+            )?.await()
         }
     }
 

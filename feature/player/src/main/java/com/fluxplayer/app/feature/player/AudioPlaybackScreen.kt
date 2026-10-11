@@ -1,6 +1,9 @@
 package com.fluxplayer.app.feature.player
 
 import android.net.Uri
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -24,24 +27,29 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -55,12 +63,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -68,6 +78,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -155,6 +166,12 @@ fun AudioPlaybackScreen(
     onSleepChange: ((Int, Int) -> Unit)? = null,
     coverModel: Any? = null,
     loading: Boolean = false,
+    loadingLabel: String? = null,
+    downloadAction: (@Composable () -> Unit)? = null,
+    onRefreshDirectory: (() -> Unit)? = null,
+    directoryRefreshing: Boolean = false,
+    directoryRefreshEnabled: Boolean = true,
+    directoryMessage: String? = null,
     playbackError: String? = null,
     playbackErrorContent: (@Composable () -> Unit)? = null,
     onRetry: () -> Unit = {},
@@ -346,12 +363,17 @@ fun AudioPlaybackScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 大数字实时显示当前倍速
+                // 支持每次微调 0.05 倍，预设和滑块使用相同精度。
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    TextButton(enabled = currentSpeed > 0.5f, onClick = {
+                        currentSpeed = ((currentSpeed * 20).roundToInt() - 1).coerceAtLeast(10) / 20f
+                        player.setPlaybackSpeed(currentSpeed)
+                        onSpeedChanged(currentSpeed)
+                    }) { Text("−", fontSize = 24.sp) }
                     Text(
                         text = formatSpeed(currentSpeed),
                         color = playerPrimary(),
@@ -364,21 +386,26 @@ fun AudioPlaybackScreen(
                         fontSize = 14.sp,
                         modifier = Modifier.padding(start = 2.dp),
                     )
+                    TextButton(enabled = currentSpeed < 4f, onClick = {
+                        currentSpeed = ((currentSpeed * 20).roundToInt() + 1).coerceAtMost(80) / 20f
+                        player.setPlaybackSpeed(currentSpeed)
+                        onSpeedChanged(currentSpeed)
+                    }) { Text("＋", fontSize = 24.sp) }
                 }
+                Text("调整立即试听，松手后保存。", color = playerOnSurfaceVariant(), fontSize = 12.sp)
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // 滑块（0.5~4.0，粒度 0.1，拖动即生效）
+                // 滑块与微调按钮均使用 0.05 倍精度，拖动立即试听。
                 CompactSlider(
                     value = currentSpeed,
                     onValueChange = { speed ->
                         currentSpeed = speed
                         player.setPlaybackSpeed(speed)
-                        onSpeedChanged(speed)
                     },
-                    onValueChangeFinished = {},
+                    onValueChangeFinished = { onSpeedChanged(currentSpeed) },
                     valueRange = 0.5f..4.0f,
-                    steps = 34,
+                    steps = 69,
                     modifier = Modifier.fillMaxWidth(),
                 )
 
@@ -398,351 +425,173 @@ fun AudioPlaybackScreen(
 
     // 鈹€鈹€ 閫熷害鑿滃崟 鈹€鈹€
 
-    // ── 片头跳过（设置变化 / 切集 / 恢复播放时重新应用，保证设置即时生效） ──
-    LaunchedEffect(introSkipSeconds, mediaState.isPlaying, selectedIndex) {
-        if (onSelectChapter != null) return@LaunchedEffect
-        if (mediaState.isPlaying && introSkipSeconds > 0) {
-            delay(400) // 如 ExoPlayer 缓冲就绪（含续播 seek 完成）
-            // 当前已在片头之后（续播/拖拽等场景）则不跳
-            if (player.currentPosition < introSkipSeconds * 1000L) {
-                player.seekTo(introSkipSeconds * 1000L)
-            }
+    // 每次打开都读取当前书籍设置，草稿在确认后才生效。
+    var showSkipSheet by remember(bookPath) { mutableStateOf(false) }
+    var editIntro by remember(bookPath) { mutableIntStateOf(introSkipSeconds) }
+    var editOutro by remember(bookPath) { mutableIntStateOf(outroSkipSeconds) }
+    var introText by remember(bookPath) { mutableStateOf("") }
+    var outroText by remember(bookPath) { mutableStateOf("") }
+    LaunchedEffect(showSkipSheet, bookPath, introSkipSeconds, outroSkipSeconds) {
+        if (showSkipSheet) {
+            editIntro = introSkipSeconds.coerceIn(0, 300)
+            editOutro = outroSkipSeconds.coerceIn(0, 300)
+            introText = editIntro.toString()
+            outroText = editOutro.toString()
         }
     }
-
-    // ── 片尾跳过（设置变化立即生效；轮询在单协程内，避免每秒重建 effect） ──
-    LaunchedEffect(outroSkipSeconds, player) {
-        if (onSelectChapter != null) return@LaunchedEffect
-        if (outroSkipSeconds <= 0) return@LaunchedEffect
-        // armed：当前章是否允许触发跳过。续播时若直接落在片尾区内，
-        // 先回到片尾区起点重听该段，而不是一打开就跳下一章
-        var armed = false
-        var lastChapterIndex = -1
-        while (true) {
-            val duration = player.duration
-            val position = player.currentPosition
-            if (duration > 0) {
-                val threshold = (duration - outroSkipSeconds * 1000L).coerceAtLeast(0)
-                if (player.currentMediaItemIndex != lastChapterIndex) {
-                    lastChapterIndex = player.currentMediaItemIndex
-                    if (position > threshold) {
-                        player.seekTo(threshold)
-                        armed = false
-                    } else {
-                        armed = true
-                    }
-                }
-                if (armed && player.isPlaying && position >= threshold && position > 0) {
-                    selectChapter(selectedIndex + 1)
-                    armed = false
-                }
-            }
-            delay(500)
-        }
-    }
-
-    // ── 片头片尾设置弹窗（居中 Dialog：预设 + 双滑块，滑动即生效） ──
-    var showSkipSheet by remember { mutableStateOf(false) }
-    var editIntro by remember { mutableIntStateOf(introSkipSeconds) }
-    var editOutro by remember { mutableIntStateOf(outroSkipSeconds) }
     if (showSkipSheet) {
         Dialog(onDismissRequest = { showSkipSheet = false }) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(playerSurfaceContainer())
-                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(playerSurfaceContainer())
+                    .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 18.dp),
             ) {
-                // 标题栏
-                SheetHeader(
-                    title = stringResource(R.string.audio_skip_title),
-                    icon = {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_player_skip_btn),
-                            contentDescription = null,
-                            tint = playerPrimary(),
-                            modifier = Modifier.size(18.dp),
-                        )
+                SheetHeader(title = stringResource(R.string.audio_skip_title), icon = { Icon(painterResource(R.drawable.ic_player_skip_btn), null, tint = playerPrimary()) }, onDismiss = { showSkipSheet = false })
+                Text("应用于本书所有章节，保存后生效。", color = playerOnSurfaceVariant(), fontSize = 12.sp)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = introText,
+                    onValueChange = {
+                        introText = it.filter(Char::isDigit).take(3)
+                        editIntro = introText.toIntOrNull()?.coerceIn(0, 300) ?: 0
                     },
-                    onDismiss = { showSkipSheet = false },
+                    label = { Text("片头秒数（0–300）") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                // 跳过片头滑块（滑动即生效）
                 SliderBlock(
-                    title = stringResource(R.string.audio_skip_intro),
-                    valueText = if (editIntro > 0) {
-                        stringResource(R.string.audio_seconds_format, editIntro)
-                    } else {
-                        null
+                    title = "跳过片头", valueText = "$editIntro 秒", value = editIntro.toFloat(),
+                    onValueChange = {
+                        editIntro = it.roundToInt()
+                        introText = editIntro.toString()
                     },
-                    value = editIntro.toFloat(),
-                    onValueChange = { editIntro = it.toInt() },
-                    onValueChangeFinished = { onSkipSettingsChanged(editIntro, editOutro) },
-                    valueRange = 0f..180f,
-                    steps = 35,
-                    startLabel = "0秒",
-                    endLabel = "180秒",
+                    onValueChangeFinished = {}, valueRange = 0f..300f, steps = 59, startLabel = "0秒", endLabel = "300秒",
                 )
-                // 片头预设
-                Spacer(modifier = Modifier.height(8.dp))
                 PresetChips(
-                    options = listOf("10秒", "30秒", "60秒", "120秒"),
-                    selected = if (editIntro in listOf(10, 30, 60, 120)) "${editIntro}秒" else null,
-                    onSelect = { label ->
-                        editIntro = when (label) {
-                            "10秒" -> 10
-                            "30秒" -> 30
-                            "60秒" -> 60
-                            else -> 120
-                        }
-                        onSkipSettingsChanged(editIntro, editOutro)
+                    options = listOf("0秒", "30秒", "60秒", "120秒"),
+                    selected = "${editIntro}秒",
+                    onSelect = {
+                        editIntro = it.removeSuffix("秒").toInt()
+                        introText = editIntro.toString()
                     },
                 )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // 跳过片尾滑块（滑动即生效）
+                TextButton(onClick = {
+                    editIntro = (player.currentPosition / 1000).toInt().coerceIn(0, 300)
+                    introText = editIntro.toString()
+                }) { Text("当前位置设为片头结束（最多300秒）") }
+                OutlinedTextField(
+                    value = outroText,
+                    onValueChange = {
+                        outroText = it.filter(Char::isDigit).take(3)
+                        editOutro = outroText.toIntOrNull()?.coerceIn(0, 300) ?: 0
+                    },
+                    label = { Text("片尾秒数（0–300）") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 SliderBlock(
-                    title = stringResource(R.string.audio_skip_outro),
-                    valueText = if (editOutro > 0) {
-                        stringResource(R.string.audio_seconds_format, editOutro)
-                    } else {
-                        null
+                    title = "跳过片尾", valueText = "$editOutro 秒", value = editOutro.toFloat(),
+                    onValueChange = {
+                        editOutro = it.roundToInt()
+                        outroText = editOutro.toString()
                     },
-                    value = editOutro.toFloat(),
-                    onValueChange = { editOutro = it.toInt() },
-                    onValueChangeFinished = { onSkipSettingsChanged(editIntro, editOutro) },
-                    valueRange = 0f..180f,
-                    steps = 35,
-                    startLabel = "0秒",
-                    endLabel = "180秒",
+                    onValueChangeFinished = {}, valueRange = 0f..300f, steps = 59, startLabel = "0秒", endLabel = "300秒",
                 )
-                // 片尾预设
-                Spacer(modifier = Modifier.height(8.dp))
                 PresetChips(
-                    options = listOf("10秒", "30秒", "60秒", "120秒"),
-                    selected = if (editOutro in listOf(10, 30, 60, 120)) "${editOutro}秒" else null,
-                    onSelect = { label ->
-                        editOutro = when (label) {
-                            "10秒" -> 10
-                            "30秒" -> 30
-                            "60秒" -> 60
-                            else -> 120
-                        }
-                        onSkipSettingsChanged(editIntro, editOutro)
+                    options = listOf("0秒", "30秒", "60秒", "120秒"),
+                    selected = "${editOutro}秒",
+                    onSelect = {
+                        editOutro = it.removeSuffix("秒").toInt()
+                        outroText = editOutro.toString()
                     },
                 )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = {
+                        editIntro = 0
+                        editOutro = 0
+                        introText = "0"
+                        outroText = "0"
+                    }) { Text("全部归零") }
+                    TextButton(
+                        enabled = (introText.toIntOrNull() ?: -1) in 0..300 && (outroText.toIntOrNull() ?: -1) in 0..300,
+                        onClick = {
+                            onSkipSettingsChanged(editIntro, editOutro)
+                            showSkipSheet = false
+                        },
+                    ) { Text("保存设置") }
+                }
             }
         }
     }
 
-    // ── 定时关闭弹窗（居中 Dialog：预设 + 小时/分钟双滑块，滑动即生效） ──
+    // 自定义定时先编辑，确认后启动；打开弹窗不会重置已有倒计时。
     if (showSleepSheet) {
         Dialog(onDismissRequest = { showSleepSheet = false }) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(playerSurfaceContainer())
-                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(playerSurfaceContainer())
+                    .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 18.dp),
             ) {
-                // 标题栏
-                SheetHeader(
-                    title = stringResource(R.string.audio_sleep_timer),
-                    icon = {
-                        Icon(
-                            imageVector = Icons.Outlined.AccessTime,
-                            contentDescription = null,
-                            tint = playerPrimary(),
-                            modifier = Modifier.size(18.dp),
-                        )
+                SheetHeader(title = stringResource(R.string.audio_sleep_timer), icon = { Icon(painterResource(R.drawable.ic_player_timing_btn), null, tint = playerPrimary()) }, onDismiss = { showSleepSheet = false })
+                if (sleepRemaining > 0) Text("当前剩余 ${sleepRemaining / 60}分${sleepRemaining % 60}秒", color = playerPrimary())
+                if (sleepEpisodes > 0) Text(if (sleepEpisodes == 1) "当前设置：本章结束后停止" else "当前设置：再听 $sleepEpisodes 集", color = playerPrimary())
+                TextButton(onClick = {
+                    changeSleep(episodes = 1)
+                    showSleepSheet = false
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text("播完本章后停止")
+                }
+                PresetChips(
+                    options = listOf("15分钟", "30分钟", "45分钟", "60分钟"),
+                    selected = null,
+                    onSelect = {
+                        changeSleep(seconds = it.removeSuffix("分钟").toInt() * 60)
+                        showSleepSheet = false
                     },
-                    onDismiss = { showSleepSheet = false },
                 )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // 播完本章再停（听书最常用：把当前章节听完即暂停，等价于按 1 集定时）
-                Text(
-                    text = "播完本章后停止",
-                    color = playerPrimary(),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable {
-                            changeSleep(episodes = 1)
-                            showSleepSheet = false
-                        }
-                        .padding(vertical = 8.dp),
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // 预设值（点选即生效，并同步滑块位置）
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SleepModeTab(text = "按时长", selected = sleepModeMinutes, onClick = { sleepModeMinutes = true }, modifier = Modifier.weight(1f))
+                    SleepModeTab(text = "按集数", selected = !sleepModeMinutes, onClick = { sleepModeMinutes = false }, modifier = Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(12.dp))
                 if (sleepModeMinutes) {
-                    PresetChips(
-                        options = listOf("30分钟", "1小时", "2小时", "3小时"),
-                        selected = when (sleepRemaining) {
-                            1800 -> "30分钟"
-                            3600 -> "1小时"
-                            7200 -> "2小时"
-                            10800 -> "3小时"
-                            else -> null
-                        },
-                        onSelect = { label ->
-                            val seconds = when (label) {
-                                "30分钟" -> 1800
-                                "1小时" -> 3600
-                                "2小时" -> 7200
-                                else -> 10800
-                            }
-                            changeSleep(seconds = seconds)
-                            sleepHourIdx = seconds / 3600
-                            sleepMinIdx = (seconds % 3600) / 60
-                        },
+                    Text("按实际收听时长计时，暂停和缓冲期间不计时。", color = playerOnSurfaceVariant(), fontSize = 12.sp)
+                    SliderBlock(
+                        title = "小时", valueText = "$sleepHourIdx 小时", value = sleepHourIdx.toFloat(),
+                        onValueChange = { sleepHourIdx = it.roundToInt() }, onValueChangeFinished = {},
+                        valueRange = 0f..23f, steps = 22, startLabel = "0小时", endLabel = "23小时",
+                    )
+                    SliderBlock(
+                        title = "分钟", valueText = "$sleepMinIdx 分钟", value = sleepMinIdx.toFloat(),
+                        onValueChange = { sleepMinIdx = it.roundToInt() }, onValueChangeFinished = {},
+                        valueRange = 0f..59f, steps = 58, startLabel = "0分钟", endLabel = "59分钟",
                     )
                 } else {
+                    Text("包含当前章节；手动切章不消耗集数。", color = playerOnSurfaceVariant(), fontSize = 12.sp)
                     PresetChips(
                         options = listOf("2集", "5集", "10集"),
-                        selected = when (sleepEpisodes) {
-                            2 -> "2集"
-                            5 -> "5集"
-                            10 -> "10集"
-                            else -> null
+                        selected = "${sleepEpisodeIdx}集",
+                        onSelect = { sleepEpisodeIdx = it.removeSuffix("集").toInt() },
+                    )
+                    SliderBlock(
+                        title = "集数", valueText = "$sleepEpisodeIdx 集", value = sleepEpisodeIdx.toFloat(),
+                        onValueChange = { sleepEpisodeIdx = it.roundToInt() }, onValueChangeFinished = {},
+                        valueRange = 0f..10f, steps = 9, startLabel = "0集", endLabel = "10集",
+                    )
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(enabled = sleepRemaining > 0 || sleepEpisodes > 0, onClick = {
+                        changeSleep()
+                        showSleepSheet = false
+                    }) { Text("取消定时") }
+                    TextButton(
+                        enabled = if (sleepModeMinutes) sleepHourIdx * 3600 + sleepMinIdx * 60 > 0 else sleepEpisodeIdx > 0,
+                        onClick = {
+                            if (sleepModeMinutes) changeSleep(seconds = sleepHourIdx * 3600 + sleepMinIdx * 60) else changeSleep(episodes = sleepEpisodeIdx)
+                            showSleepSheet = false
                         },
-                        onSelect = { label ->
-                            val episodes = when (label) {
-                                "2集" -> 2
-                                "5集" -> 5
-                                else -> 10
-                            }
-                            sleepEpisodeIdx = episodes
-                            changeSleep(episodes = episodes)
-                        },
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // 分段切换：按分钟 / 按集数
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(playerSurfaceVariant()),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    SleepModeTab(
-                        text = stringResource(R.string.audio_sleep_tab_minutes),
-                        selected = sleepModeMinutes,
-                        onClick = { sleepModeMinutes = true },
-                        modifier = Modifier.weight(1f),
-                    )
-                    SleepModeTab(
-                        text = stringResource(R.string.audio_sleep_tab_episodes),
-                        selected = !sleepModeMinutes,
-                        onClick = { sleepModeMinutes = false },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                if (sleepModeMinutes) {
-                    // 滑块容器（圆角浅灰底）：小时滑块 + 分钟滑块，滑动即生效
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(playerSurfaceVariant())
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                    ) {
-                        SliderBlock(
-                            title = stringResource(R.string.audio_unit_hours),
-                            valueText = stringResource(R.string.audio_sleep_hours_format, sleepHourIdx),
-                            value = sleepHourIdx.toFloat(),
-                            onValueChange = { sleepHourIdx = it.toInt() },
-                            onValueChangeFinished = {
-                                changeSleep(seconds = sleepHourIdx * 3600 + sleepMinIdx * 60)
-                            },
-                            valueRange = 0f..23f,
-                            steps = 22,
-                            startLabel = "0小时",
-                            endLabel = "23小时",
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        SliderBlock(
-                            title = stringResource(R.string.audio_unit_minutes),
-                            valueText = stringResource(R.string.audio_sleep_minutes_format, sleepMinIdx),
-                            value = sleepMinIdx.toFloat(),
-                            onValueChange = { sleepMinIdx = it.toInt() },
-                            onValueChangeFinished = {
-                                changeSleep(seconds = sleepHourIdx * 3600 + sleepMinIdx * 60)
-                            },
-                            valueRange = 0f..59f,
-                            steps = 58,
-                            startLabel = "0分钟",
-                            endLabel = "59分钟",
-                        )
-                    }
-                } else {
-                    // 集数单滑块（容器）
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(playerSurfaceVariant())
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                    ) {
-                        SliderBlock(
-                            title = stringResource(R.string.audio_unit_episodes),
-                            valueText = if (sleepEpisodeIdx > 0) {
-                                stringResource(R.string.audio_sleep_episodes_format, sleepEpisodeIdx)
-                            } else {
-                                null
-                            },
-                            value = sleepEpisodeIdx.toFloat(),
-                            onValueChange = { sleepEpisodeIdx = it.toInt() },
-                            onValueChangeFinished = {
-                                if (sleepEpisodeIdx > 0) {
-                                    changeSleep(episodes = sleepEpisodeIdx)
-                                } else {
-                                    changeSleep()
-                                }
-                            },
-                            valueRange = 0f..10f,
-                            steps = 9,
-                            startLabel = "0集",
-                            endLabel = "10集",
-                        )
-                    }
-                }
-
-                // 取消定时（仅已激活时显示）
-                val hasSleepActive = sleepRemaining > 0 || sleepEpisodes > 0
-                if (hasSleepActive) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.audio_cancel_timer),
-                        color = FluxTheme.colorScheme.error,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                changeSleep()
-                                showSleepSheet = false
-                            }
-                            .padding(vertical = 8.dp),
-                    )
+                    ) { Text("开始定时") }
                 }
             }
         }
@@ -750,6 +599,10 @@ fun AudioPlaybackScreen(
 
     // ── 播放列表弹窗 ──
     if (showPlaylistSheet && chapterNames.isNotEmpty()) {
+        var query by remember(bookPath) { mutableStateOf("") }
+        var chapterNumber by remember(bookPath) { mutableStateOf("") }
+        var locatedIndex by remember(bookPath) { mutableStateOf<Int?>(null) }
+        val matching = remember(chapterNames, query) { matchingListeningChapters(chapterNames, query) }
         // 播放列表滚动状态 + 已播章节（进度打点）
         val playlistListState = rememberLazyListState()
         val playedChapterIndexes = remember(localProgress) {
@@ -762,7 +615,7 @@ fun AudioPlaybackScreen(
         LaunchedEffect(showPlaylistSheet) {
             if (showPlaylistSheet) {
                 delay(300)
-                playlistListState.scrollToItem(playlistCurrentIndex)
+                playlistListState.scrollToItem(playlistCurrentIndex.coerceIn(chapterNames.indices))
             }
         }
 
@@ -786,23 +639,69 @@ fun AudioPlaybackScreen(
                         )
                     },
                     onDismiss = { showPlaylistSheet = false },
+                    trailingAction = onRefreshDirectory?.let { refresh ->
+                        {
+                            TextButton(onClick = refresh, enabled = directoryRefreshEnabled && !directoryRefreshing) {
+                                Text(if (directoryRefreshing) "更新中…" else "更新目录")
+                            }
+                        }
+                    },
                     modifier = Modifier.padding(horizontal = 24.dp),
                 )
+                directoryMessage?.let { Text(it, color = playerOnSurfaceVariant(), modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) }
                 Spacer(modifier = Modifier.height(16.dp))
+                androidx.compose.material3.OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("搜索章节标题") },
+                    singleLine = true,
+                    trailingIcon = if (query.isNotEmpty()) {
+                        { TextButton(onClick = { query = "" }) { Text("清空") } }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                )
+                Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = chapterNumber,
+                        onValueChange = { chapterNumber = it.filter(Char::isDigit).take(8) },
+                        label = { Text("输入章数（1–${chapterNames.size}）") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    androidx.compose.material3.TextButton(
+                        enabled = listeningChapterNumber(chapterNumber, chapterNames.size) != null,
+                        onClick = {
+                            val index = listeningChapterNumber(chapterNumber, chapterNames.size) ?: return@TextButton
+                            query = ""
+                            playlistScope.launch {
+                                while (playlistListState.layoutInfo.totalItemsCount != chapterNames.size) withFrameNanos { }
+                                playlistListState.scrollToItem(index)
+                                locatedIndex = index
+                                delay(1800)
+                                if (locatedIndex == index) locatedIndex = null
+                            }
+                        },
+                    ) { Text("定位章节") }
+                }
+                if (query.isNotBlank()) Text("找到 ${matching.size} 章", color = playerOnSurfaceVariant(), modifier = Modifier.padding(horizontal = 24.dp))
+                if (matching.isEmpty()) Text("没有匹配的章节", modifier = Modifier.padding(24.dp))
                 Box(modifier = Modifier.weight(1f)) {
                     LazyColumn(
                         state = playlistListState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(start = 24.dp, end = 70.dp, top = 8.dp, bottom = 8.dp),
                     ) {
-                        itemsIndexed(chapterNames) { index, name ->
+                        itemsIndexed(matching, key = { _, index -> index }) { _, index ->
+                            val name = chapterNames[index]
                             val isActive = index == selectedIndex
                             val progress = localProgress[index]
                             val progressText = if (progress != null && progress.second > 0) {
                                 val pct = (progress.first * 100 / progress.second).coerceIn(0, 100)
-                                stringResource(R.string.audio_played_percent, pct)
+                                if (pct >= 95) "已听完" else if (pct > 0) "听了 $pct%" else "未听"
                             } else {
-                                null
+                                "未听"
                             }
 
                             Surface(
@@ -814,7 +713,7 @@ fun AudioPlaybackScreen(
                                     .fillMaxWidth()
                                     .padding(vertical = 2.dp),
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (isActive) playerPrimary().copy(alpha = 0.3f) else Color.Transparent,
+                                color = if (isActive) playerPrimary().copy(alpha = 0.3f) else if (locatedIndex == index) playerPrimary().copy(alpha = 0.12f) else Color.Transparent,
                             ) {
                                 Row(
                                     modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp),
@@ -830,7 +729,7 @@ fun AudioPlaybackScreen(
                                             contentAlignment = Alignment.Center,
                                         ) {
                                             Icon(
-                                                painter = painterResource(coreUiR.drawable.ic_play),
+                                                painter = painterResource(if (mediaState.isPlaying) coreUiR.drawable.ic_play else coreUiR.drawable.ic_pause),
                                                 contentDescription = null,
                                                 tint = playerOnPrimary(),
                                                 modifier = Modifier.size(9.dp),
@@ -869,40 +768,44 @@ fun AudioPlaybackScreen(
                         }
                     }
                     // 右侧可拖拽滚动条（共享组件：胶囊 + 已播打点）
-                    ChapterDragScrollbar(
-                        listState = playlistListState,
-                        totalCount = chapterNames.size,
-                        playedChapters = playedChapterIndexes,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 6.dp),
-                    )
+                    if (query.isBlank()) {
+                        ChapterDragScrollbar(
+                            listState = playlistListState,
+                            totalCount = chapterNames.size,
+                            playedChapters = playedChapterIndexes,
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 2.dp),
+                        )
+                    }
                     // 圆形导航按钮组：顶部 / 当前 / 底部（右下角，避开滚动条）
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(end = 58.dp, bottom = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        CircleNavButton(
-                            text = stringResource(R.string.audio_nav_top),
-                            onClick = { playlistScope.launch { playlistListState.scrollToItem(0) } },
-                        )
-                        CircleNavButton(
-                            text = stringResource(R.string.audio_nav_current),
-                            selected = true,
-                            onClick = {
-                                playlistScope.launch { playlistListState.scrollToItem(playlistCurrentIndex) }
-                            },
-                        )
-                        CircleNavButton(
-                            text = stringResource(R.string.audio_nav_bottom),
-                            onClick = {
-                                playlistScope.launch {
-                                    playlistListState.scrollToItem(chapterNames.lastIndex)
-                                }
-                            },
-                        )
+                    if (query.isBlank()) {
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 12.dp, bottom = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CircleNavButton(
+                                text = stringResource(R.string.audio_nav_top),
+                                onClick = { playlistScope.launch { playlistListState.scrollToItem(0) } },
+                            )
+                            CircleNavButton(
+                                text = stringResource(R.string.audio_nav_current),
+                                selected = true,
+                                onClick = {
+                                    playlistScope.launch { playlistListState.scrollToItem(playlistCurrentIndex) }
+                                },
+                            )
+                            CircleNavButton(
+                                text = stringResource(R.string.audio_nav_bottom),
+                                onClick = {
+                                    playlistScope.launch {
+                                        playlistListState.scrollToItem(chapterNames.lastIndex)
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(24.dp))
@@ -916,6 +819,12 @@ fun AudioPlaybackScreen(
     var artworkTint by remember(playbackArtwork) { mutableStateOf(Color.Transparent) }
     var artworkBackdrop by remember(playbackArtwork) { mutableStateOf<ImageBitmap?>(null) }
     val artworkBreath = rememberArtworkBreath(mediaState.isPlaying)
+
+    // 进入页面时轻微上移并淡入；切章、缓冲和播放状态变化不会重播动画。
+    val entranceProgress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        entranceProgress.animateTo(1f, tween(durationMillis = 260, easing = FastOutSlowInEasing))
+    }
 
     // ── UI ──
     Box(
@@ -934,6 +843,10 @@ fun AudioPlaybackScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer {
+                    alpha = entranceProgress.value
+                    translationY = 16.dp.toPx() * (1f - entranceProgress.value)
+                }
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(horizontal = 24.dp),
@@ -993,10 +906,14 @@ fun AudioPlaybackScreen(
             BottomFunctionRow(
                 currentSpeed = currentSpeed,
                 sleepRemaining = sleepRemaining,
+                sleepEpisodes = sleepEpisodes,
+                introSkipSeconds = introSkipSeconds,
+                outroSkipSeconds = outroSkipSeconds,
                 onSleepClick = { showSleepSheet = true },
                 onSkipClick = { showSkipSheet = true },
                 onSpeedClick = { showSpeedSheet = true },
                 onPlaylistClick = { showPlaylistSheet = true },
+                downloadAction = downloadAction,
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -1024,6 +941,7 @@ fun AudioPlaybackScreen(
         }
 
         if (mediaState.isBuffering || loading) {
+            loadingLabel?.let { Text(it, modifier = Modifier.align(Alignment.Center).padding(top = 80.dp), color = playerOnSurface()) }
             CircularProgressIndicator(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -1066,6 +984,7 @@ private fun SheetHeader(
     icon: @Composable () -> Unit,
     onDismiss: () -> Unit,
     subtitle: String? = null,
+    trailingAction: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -1098,6 +1017,7 @@ private fun SheetHeader(
             }
         }
         Spacer(modifier = Modifier.weight(1f))
+        trailingAction?.invoke()
         IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
             Icon(
                 imageVector = Icons.Filled.Close,
@@ -1550,21 +1470,29 @@ private fun TransportRow(player: Player, isPlaying: Boolean, currentIndex: Int, 
 private fun BottomFunctionRow(
     currentSpeed: Float,
     sleepRemaining: Int,
+    sleepEpisodes: Int,
+    introSkipSeconds: Int,
+    outroSkipSeconds: Int,
     onSleepClick: () -> Unit,
     onSkipClick: () -> Unit,
     onSpeedClick: () -> Unit,
     onPlaylistClick: () -> Unit,
+    downloadAction: (@Composable () -> Unit)? = null,
 ) {
     val sleepLabel = if (sleepRemaining > 0) {
         val mins = sleepRemaining / 60
         val secs = sleepRemaining % 60
         "$mins:%02d".format(secs)
+    } else if (sleepEpisodes == 1) {
+        "本章结束"
+    } else if (sleepEpisodes > 1) {
+        "再听${sleepEpisodes}集"
     } else {
         stringResource(R.string.audio_sleep_label)
     }
     val onSurfaceAlpha = FluxTheme.colorScheme.onSurface.copy(alpha = 0.8f)
 
-    // 4 功能按钮：定时 | 跳过头尾 | 倍速 | 目录
+    // 下载入口位于目录右侧，与已有功能按钮共用同一行。
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly,
@@ -1576,12 +1504,13 @@ private fun BottomFunctionRow(
                 Icon(
                     painter = painterResource(R.drawable.ic_player_timing_btn),
                     contentDescription = null,
-                    tint = if (sleepRemaining > 0) FluxTheme.colorScheme.primary else onSurfaceAlpha,
+                    tint = if (sleepRemaining > 0 || sleepEpisodes > 0) FluxTheme.colorScheme.primary else onSurfaceAlpha,
                     modifier = Modifier.size(28.dp),
                 )
             },
             label = sleepLabel,
             onClick = onSleepClick,
+            modifier = Modifier.weight(1f),
         )
 
         // 跳过头尾（对齐小梨 ic_player_skip_btn）
@@ -1590,12 +1519,13 @@ private fun BottomFunctionRow(
                 Icon(
                     painter = painterResource(R.drawable.ic_player_skip_btn),
                     contentDescription = null,
-                    tint = onSurfaceAlpha,
+                    tint = if (introSkipSeconds > 0 || outroSkipSeconds > 0) FluxTheme.colorScheme.primary else onSurfaceAlpha,
                     modifier = Modifier.size(28.dp),
                 )
             },
-            label = stringResource(R.string.audio_skip_intro_outro),
+            label = if (introSkipSeconds > 0 || outroSkipSeconds > 0) "头${introSkipSeconds}s/尾${outroSkipSeconds}s" else stringResource(R.string.audio_skip_intro_outro),
             onClick = onSkipClick,
+            modifier = Modifier.weight(1f),
         )
 
         // 倍速（对齐小梨 ic_player_speed_btn）
@@ -1610,6 +1540,7 @@ private fun BottomFunctionRow(
             },
             label = "${formatSpeed(currentSpeed)}x",
             onClick = onSpeedClick,
+            modifier = Modifier.weight(1f),
         )
 
         // 目录（对齐小梨 ic_player_list_btn）
@@ -1624,8 +1555,15 @@ private fun BottomFunctionRow(
             },
             label = stringResource(R.string.audio_list),
             onClick = onPlaylistClick,
+            modifier = Modifier.weight(1f),
         )
+        downloadAction?.invoke()
     }
+}
+
+@Composable
+fun AudioDownloadButton(onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 56.dp)) { Text("下载") }
 }
 
 @Composable
@@ -1633,24 +1571,14 @@ private fun FunctionButton(
     icon: @Composable () -> Unit,
     label: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Column(
+        modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 68.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        IconButton(
-            onClick = onClick,
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(FluxTheme.colorScheme.onSurface.copy(alpha = 0.06f)),
-        ) {
-            icon()
-        }
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            color = FluxTheme.colorScheme.onSurfaceVariant,
-        )
+        Box(Modifier.size(40.dp).clip(CircleShape).background(FluxTheme.colorScheme.onSurface.copy(alpha = 0.06f)), contentAlignment = Alignment.Center) { icon() }
+        Text(text = label, fontSize = 10.sp, color = FluxTheme.colorScheme.onSurfaceVariant, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.height(28.dp))
     }
 }
 

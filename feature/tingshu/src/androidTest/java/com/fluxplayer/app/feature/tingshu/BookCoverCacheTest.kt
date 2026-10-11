@@ -8,6 +8,7 @@ import coil3.network.httpHeaders
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
+import coil3.toBitmap
 import com.fluxplayer.app.core.tingshu.ListeningResource
 import com.fluxplayer.app.core.ui.cache.BookCoverCache
 import java.io.ByteArrayOutputStream
@@ -23,6 +24,49 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class BookCoverCacheTest {
+    @Test
+    fun manualRefreshReplacesCoverAtSameAddressAndKeepsOfflineCache(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val server = MockWebServer()
+        for (color in listOf(android.graphics.Color.RED, android.graphics.Color.BLUE)) {
+            val bytes = ByteArrayOutputStream().apply {
+                Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888).apply { eraseColor(color) }
+                    .compress(Bitmap.CompressFormat.PNG, 100, this)
+            }.toByteArray()
+            server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(bytes)))
+        }
+        server.start()
+        val enabled = BookCoverCache.enabled(context).value
+        val calls = AtomicInteger()
+        try {
+            BookCoverCache.clear(context)
+            BookCoverCache.setEnabled(context, true)
+            val loader = BookCoverCache.imageLoader(context)
+            val factory = SourceCoverFetcher {
+                calls.incrementAndGet()
+                ListeningResource(server.url("/cover.png").toString(), emptyMap())
+            }
+            val request = ImageRequest.Builder(context).data(SourceCover("same-cover"))
+                .fetcherFactory(factory).diskCacheKey("refresh-cover").memoryCachePolicy(CachePolicy.DISABLED).build()
+            val first = loader.execute(request) as SuccessResult
+            assertEquals(android.graphics.Color.RED, first.image.toBitmap().copy(Bitmap.Config.ARGB_8888, false).getPixel(0, 0))
+            server.takeRequest()
+            val refresh = request.newBuilder().data(SourceCover("same-cover", forceRefresh = true))
+                .diskCachePolicy(CachePolicy.WRITE_ONLY).build()
+            val updated = loader.execute(refresh) as SuccessResult
+            assertEquals(android.graphics.Color.BLUE, updated.image.toBitmap().copy(Bitmap.Config.ARGB_8888, false).getPixel(0, 0))
+            assertEquals("no-cache", server.takeRequest().getHeader("Cache-Control"))
+            val offline = loader.execute(request.newBuilder().networkCachePolicy(CachePolicy.DISABLED).build()) as SuccessResult
+            assertEquals(android.graphics.Color.BLUE, offline.image.toBitmap().copy(Bitmap.Config.ARGB_8888, false).getPixel(0, 0))
+            assertEquals(2, calls.get())
+            assertEquals(2, server.requestCount)
+        } finally {
+            BookCoverCache.clear(context)
+            BookCoverCache.setEnabled(context, enabled)
+            server.shutdown()
+        }
+    }
+
     @Test
     fun cachedSourceCoverSkipsResolutionAndWorksWithExpiredCredentials(): Unit = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

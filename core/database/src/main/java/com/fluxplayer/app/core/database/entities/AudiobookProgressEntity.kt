@@ -1,5 +1,6 @@
 package com.fluxplayer.app.core.database.entities
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -9,6 +10,7 @@ data class AudiobookResumeEntity(
     val chapterIndex: Int,
     val position: Long,
     val lastPlayedAt: Long,
+    @ColumnInfo(defaultValue = "''") val chapterUri: String = "",
 )
 
 @Entity(tableName = "audiobook_chapter_progress", primaryKeys = ["bookPath", "chapterIndex"])
@@ -17,4 +19,5 @@ data class AudiobookChapterProgressEntity(
     val chapterIndex: Int,
     val position: Long,
     val duration: Long,
+    @ColumnInfo(defaultValue = "''") val chapterUri: String = "",
 )

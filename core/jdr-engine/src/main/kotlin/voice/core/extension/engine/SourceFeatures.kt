@@ -68,7 +68,7 @@ public data class SourceLogin(
 )
 
 public data class DirectoryItem(val id: String, val name: String, val directory: Boolean, val extra: JsonObject)
-public data class DirectoryPage(val items: List<DirectoryItem>, val nextPage: Int?)
+public data class DirectoryPage(val items: List<DirectoryItem>, val nextPage: Int?, val shortcuts: List<DirectoryItem> = emptyList())
 
 public object SourceFeatures {
     public fun validateSettings(fields: List<SourceSetting>, canBrowse: Boolean) {
@@ -150,7 +150,15 @@ public object SourceFeatures {
         val next = (obj["nextPage"] as? JsonPrimitive)?.intOrNull?.takeIf { it > 0 }
         require(next == null || next > currentPage) { "下一页必须大于当前页" }
         require(mapped.map { it.id }.distinct().size == mapped.size) { "目录项 ID 重复" }
-        return DirectoryPage(mapped, next)
+        val shortcuts = (obj["shortcuts"] as? JsonArray)?.map { item ->
+            val data = item as? JsonObject ?: throw SourceContractException("分类入口必须是对象")
+            val id = data.text("id")
+            val name = data.text("name")
+            require(id.isNotBlank() && name.isNotBlank()) { "分类入口需要 id/name" }
+            DirectoryItem(id, name, true, data)
+        }.orEmpty()
+        require(shortcuts.size <= 32 && shortcuts.map { it.id }.distinct().size == shortcuts.size) { "分类入口过多或 ID 重复" }
+        return DirectoryPage(mapped, next, shortcuts)
     }
 
     private fun JsonObject.text(key: String): String = (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()

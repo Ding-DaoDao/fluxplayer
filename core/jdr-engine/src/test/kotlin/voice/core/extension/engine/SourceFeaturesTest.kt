@@ -50,6 +50,11 @@ class SourceFeaturesTest {
     fun validatesLoginAndDirectoryResults() {
         val pending = SourceFeatures.parseLogin("""{"webUrl":"https://example.com/login","qrImage":"https://example.com/qr.png","state":{"session":"s"}}""")
         assertEquals("https://example.com/login", pending.cookieUrl)
+        val home = SourceFeatures.parseDirectory("""{"items":[{"id":"book","name":"书籍","type":"book"}],"shortcuts":[{"id":"0","name":"热门"}],"nextPage":2}""", 1)
+        assertEquals("book", home.items.single().id)
+        assertEquals("0", home.shortcuts.single().id)
+        assertEquals(2, home.nextPage)
+        assertTrue(SourceFeatures.parseDirectory("""{"items":[]}""", 1).shortcuts.isEmpty())
         assertEquals("s", pending.state["session"]?.toString()?.trim('"'))
         assertFailsWith<IllegalArgumentException> { SourceFeatures.parseLogin("""{"webUrl":"file:///private"}""") }
         assertFailsWith<IllegalArgumentException> { SourceFeatures.parseLogin("""{"authenticated":"yes"}""") }

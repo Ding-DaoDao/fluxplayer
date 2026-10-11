@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * 备份/恢复数据包，包含用户设置、播放器设置、WebDAV 服务器、OpenList 配置和云盘凭证。
- * 历史记录不包含在内。
+ * 包含听书目录与进度，普通视频历史记录不包含在内。
  */
 @Serializable
 data class BackupData(
@@ -20,9 +20,10 @@ data class BackupData(
     val quarkConfig: QuarkBackupConfig? = null,
     val yun139Config: Yun139BackupConfig? = null,
     val backupWebDavConfig: BackupWebDavConfig? = null,
+    val onlineListeningLibrary: String? = null,
 ) {
     companion object {
-        const val CURRENT_VERSION = 2
+        const val CURRENT_VERSION = 3
     }
 }
 

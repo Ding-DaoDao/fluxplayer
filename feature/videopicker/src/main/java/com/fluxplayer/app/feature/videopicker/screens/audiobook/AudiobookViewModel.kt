@@ -2,10 +2,10 @@ package com.fluxplayer.app.feature.videopicker.screens.audiobook
 
 import android.content.Context
 import android.net.Uri
-import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.fluxplayer.app.core.common.sortedByNaturalName
+import com.fluxplayer.app.core.common.LocalListeningLibrary
+import com.fluxplayer.app.core.common.NaturalOrder
 import com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.ui.base.DataState
@@ -14,12 +14,10 @@ import com.fluxplayer.app.feature.videopicker.model.AudioChapter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
-import java.security.MessageDigest
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -27,15 +25,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-/** 封面图备选文件名（无扩展名，大小写敏感） */
-private val COVER_NAMES = setOf("cover", "Cover")
-
-/** 支持的图片扩展名 */
-private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "bmp")
-
-/** 支持的音频扩展名 */
-private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "ogg", "wav", "flac", "wma", "opus")
 
 @HiltViewModel
 class AudiobookViewModel @Inject constructor(
@@ -46,6 +35,8 @@ class AudiobookViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(AudiobookUiState())
     val uiState = _uiState.asStateFlow()
+
+    private var scanJob: Job? = null
 
     init {
         // 更新进度/续播状态（不触发重扫）
@@ -59,9 +50,25 @@ class AudiobookViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            var cachedPaths: List<String>? = null
             audiobookProgressRepository.progress.collect { progress ->
+                val paths = (progress.resumeStates.keys + progress.lastPlayedAt.keys)
+                    .sortedByDescending { progress.lastPlayedAt[it] ?: 0L }
+                    .take(20)
+                // 历史卡片先用磁盘索引恢复，不等待外部目录扫描；进度跳动不重复读索引。
+                val recent = if (paths != cachedPaths) {
+                    withContext(Dispatchers.IO) {
+                        paths.mapNotNull { path ->
+                            LocalListeningLibrary.find(appContext, path)?.let { book ->
+                                AudioBook(book.title, book.path, book.cover, book.chapters.size, book.chapters.map { AudioChapter(it.name.substringBeforeLast('.'), it.uri, it.size) })
+                            }
+                        }
+                    }.also { cachedPaths = paths }
+                } else {
+                    _uiState.value.recentLocalBooks
+                }
                 _uiState.update {
-                    it.copy(resumeStates = progress.resumeStates, chapterProgress = progress.chapterProgress, lastPlayedAt = progress.lastPlayedAt)
+                    it.copy(resumeStates = progress.resumeStates, chapterProgress = progress.chapterProgress, lastPlayedAt = progress.lastPlayedAt, recentLocalBooks = recent)
                 }
             }
         }
@@ -71,7 +78,12 @@ class AudiobookViewModel @Inject constructor(
                 .map { it.audiobookRootUri }
                 .distinctUntilChanged()
                 .collect { rootUri ->
-                    if (rootUri.isNotBlank()) scanBooks(rootUri)
+                    if (rootUri.isNotBlank()) {
+                        scanBooks(rootUri)
+                    } else {
+                        scanJob?.cancel()
+                        _uiState.update { it.copy(scanState = DataState.Success(emptyList()), partialBooks = emptyList(), isRefreshing = false, scanError = null) }
+                    }
                 }
         }
     }
@@ -84,192 +96,46 @@ class AudiobookViewModel @Inject constructor(
         }
     }
 
-    fun scanBooks(rootUri: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(scanState = DataState.Loading, partialBooks = emptyList()) }
-            try {
-                val books = withContext(Dispatchers.IO) {
-                    // 并行扫描，每扫完一本立即回调发布（增量填充书架）
-                    scanDirectory(rootUri) { book ->
-                        _uiState.update { it.copy(partialBooks = it.partialBooks + book) }
-                    }
-                }
-                _uiState.update { it.copy(scanState = DataState.Success(books)) }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(scanState = DataState.Error(e)) }
-            }
-        }
+    fun reportDirectoryError(message: String) {
+        _uiState.update { it.copy(scanError = message) }
     }
+
+    fun scanBooks(rootUri: String) = scan(rootUri, false)
 
     fun refresh() {
-        val root = _uiState.value.rootUri ?: return
-        scanBooks(root)
+        _uiState.value.rootUri?.let { scan(it, false) }
     }
 
-    // 进度独立存储，扫描不到的书籍可能只是暂时离线，不再因目录扫描结果删除续播记录。
-
-    /**
-     * 下拉刷新：保留当前书架直到新结果到达（旧列表不闪空），
-     * 完成后整体替换列表；刷新期间由 [AudiobookUiState.isRefreshing] 驱动下拉指示器。
-     */
     fun refreshBooks() {
-        val root = _uiState.value.rootUri ?: return
-        viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true) }
+        _uiState.value.rootUri?.let { scan(it, true) }
+    }
+
+    private fun scan(rootUri: String, refresh: Boolean) {
+        scanJob?.cancel()
+        scanJob = viewModelScope.launch {
+            val previous = _uiState.value.scanState
+            _uiState.update { it.copy(isRefreshing = refresh, scanError = null, partialBooks = emptyList(), scanState = if (refresh) previous else DataState.Loading) }
             try {
                 val books = withContext(Dispatchers.IO) {
-                    scanDirectory(root, onBookScanned = {})
+                    val root = if (rootUri.startsWith("/")) Uri.fromFile(File(rootUri)) else Uri.parse(rootUri)
+                    LocalListeningLibrary.children(appContext, root)
+                        .filter { it.directory && !it.name.startsWith('.') }
+                        .sortedWith(compareBy(NaturalOrder.fileNameComparator) { it.name })
+                        .mapNotNull { folder ->
+                            val book = LocalListeningLibrary.scanBook(appContext, folder)
+                            if (book.chapters.isEmpty()) return@mapNotNull null
+                            audiobookProgressRepository.reconcile(book.path, book.chapters.map { it.uri.toString() })
+                            AudioBook(book.title, book.path, book.cover, book.chapters.size, book.chapters.map { AudioChapter(it.name.substringBeforeLast('.'), it.uri, it.size) }).also { scanned ->
+                                if (!refresh) _uiState.update { it.copy(partialBooks = it.partialBooks + scanned) }
+                            }
+                        }
                 }
-                _uiState.update {
-                    it.copy(
-                        isRefreshing = false,
-                        scanState = DataState.Success(books),
-                        partialBooks = emptyList(),
-                    )
-                }
+                _uiState.update { it.copy(scanState = DataState.Success(books), partialBooks = emptyList(), isRefreshing = false) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(isRefreshing = false, scanState = DataState.Error(e)) }
+                _uiState.update { it.copy(isRefreshing = false, scanError = e.message ?: "无法读取书库，请重新选择目录", scanState = if (previous is DataState.Success) previous else DataState.Error(e)) }
             }
-        }
-    }
-
-    /**
-     * 扫描根目录：遍历一级子文件夹，每个子文件夹 = 一本书。
-     * 并发扫描（IO 密集任务并行收益明显），每本书扫描完成即回调 [onBookScanned]。
-     */
-    private suspend fun scanDirectory(
-        rootUriStr: String,
-        onBookScanned: (AudioBook) -> Unit,
-    ): List<AudioBook> {
-        val rootDir = uriToFile(rootUriStr) ?: return emptyList()
-        if (!rootDir.isDirectory) return emptyList()
-
-        val folders = rootDir.listFiles()
-            ?.filter { it.isDirectory && !it.name.startsWith(".") }
-            ?.let { it.sortedByNaturalName() }
-            ?: emptyList()
-
-        return coroutineScope {
-            folders.map { folder ->
-                async(Dispatchers.IO) {
-                    scanBookFolder(folder).also { onBookScanned(it) }
-                }
-            }.awaitAll()
-        }
-    }
-
-    /**
-     * 扫描单本书文件夹：收集音频文件 + 封面图。
-     */
-    private fun scanBookFolder(folder: File): AudioBook {
-        val allFiles = folder.listFiles()
-            ?.filter { !it.isDirectory && !it.name.startsWith(".") }
-            ?: emptyList()
-
-        // 音频文件
-        val audioFiles = allFiles
-            .filter { it.extension.lowercase() in AUDIO_EXTENSIONS }
-            .let { it.sortedByNaturalName() }
-
-        val chapters = audioFiles.map { file ->
-            AudioChapter(
-                title = file.nameWithoutExtension,
-                uri = file.toUri(),
-                size = file.length(),
-            )
-        }
-
-        // 封面图：复制到 app 缓存目录，确保 scoped storage 下可读
-        val coverFile = findCoverImage(allFiles)
-        val coverUri = coverFile?.let { cacheCover(it, folder.name) }
-
-        return AudioBook(
-            title = folder.name,
-            folderPath = folder.absolutePath,
-            coverUri = coverUri,
-            chapterCount = chapters.size,
-            chapters = chapters,
-        )
-    }
-
-    /**
-     * 将封面文件复制到 app 缓存目录，返回可被 Coil 加载的 URI。
-     * crc32 文件夹路径防止不同书封面重名冲突。
-     */
-    private fun cacheCover(source: File, folderName: String): Uri? {
-        return try {
-            val ext = source.extension.takeIf { it.isNotBlank() } ?: "jpg"
-            val hash = MessageDigest.getInstance("MD5")
-                .digest(source.absolutePath.toByteArray())
-                .take(4)
-                .joinToString("") { "%02x".format(it) }
-            val coverDir = File(appContext.cacheDir, "audiobook_covers")
-            if (!coverDir.exists()) coverDir.mkdirs()
-            val dest = File(coverDir, "${folderName}_${hash}.$ext")
-            // 已存在则跳过复制
-            if (!dest.exists()) {
-                source.copyTo(dest, overwrite = false)
-            }
-            dest.toUri()
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    /**
-     * 封面检测：
-     * 1. 优先找 cover/Cover.* (jpg/jpeg/png/webp/bmp)
-     * 2. 没找到 → 取目录下第一个图片文件
-     * 3. 都没有 → null
-     */
-    private fun findCoverImage(files: List<File>): File? {
-        val images = files
-            .filter { it.extension.lowercase() in IMAGE_EXTENSIONS }
-            .sortedBy { it.name.lowercase() }
-
-        if (images.isEmpty()) return null
-
-        val coverFile = images.firstOrNull { it.nameWithoutExtension in COVER_NAMES }
-        return coverFile ?: images.firstOrNull()
-    }
-
-    /**
-     * 将根目录 URI 字符串转为 File 对象。
-     * 支持两种格式：
-     * 1. SAF content URI: content://com.android.externalstorage.documents/tree/primary%3A...
-     * 2. 原始文件路径: /storage/emulated/0/Audiobook
-     */
-    private fun uriToFile(uriString: String): File? {
-        return when {
-            uriString.startsWith("/") -> File(uriString)
-            uriString.startsWith("content://") -> contentUriToFile(uriString)
-            else -> null
-        }
-    }
-
-    /**
-     * 尝试从 SAF content URI 提取真实文件路径。
-     * 格式: content://com.android.externalstorage.documents/tree/primary%3AAudiobook
-     *   → /storage/emulated/0/Audiobook
-     * SD 卡等外部卷的卷 ID 是 FAT UUID（如 1A2B-3C4D）：
-     *   → /storage/1A2B-3C4D/Audiobook
-     */
-    private fun contentUriToFile(uriString: String): File? {
-        return try {
-            val uri = Uri.parse(uriString)
-            val docId = Uri.decode(uri.lastPathSegment ?: return null)
-            // 处理 URL 编码（如 primary%3A → primary:）
-            val separator = docId.indexOf(':')
-            if (separator <= 0) return null
-            val volume = docId.substring(0, separator)
-            val path = docId.substring(separator + 1)
-            val base = if (volume == "primary") "/storage/emulated/0" else "/storage/$volume"
-            val dir = File(if (path.isEmpty()) base else "$base/$path")
-            // 卷映射可能不存在（厂商自定义路径等），校验后再返回，
-            // 避免 scanDirectory 静默返回空列表造成"未找到书籍"的误导
-            if (dir.isDirectory) dir else null
-        } catch (_: Exception) {
-            null
         }
     }
 }
@@ -281,9 +147,12 @@ data class AudiobookUiState(
     val partialBooks: List<AudioBook> = emptyList(),
     /** 下拉刷新进行中（列表保持显示，顶部指示器驱动） */
     val isRefreshing: Boolean = false,
+    val scanError: String? = null,
     val resumeStates: Map<String, String> = emptyMap(),
     /** key: "bookPath|chapterIndex", value: "positionMs|durationMs" */
     val chapterProgress: Map<String, String> = emptyMap(),
     /** 书籍最近播放时间（epochMillis），用于书架排序 */
     val lastPlayedAt: Map<String, Long> = emptyMap(),
+    /** 历史记录的书籍快照，独立于当前书库扫描结果。 */
+    val recentLocalBooks: List<AudioBook> = emptyList(),
 )

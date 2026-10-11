@@ -62,6 +62,7 @@ fun AudiobookTabContent(
     val sources by sourceViewModel.repository.sources.collectAsStateWithLifecycle()
     val localState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
     var destination by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     var showingDetail by remember { mutableStateOf(false) }
     val sourceState by sourceViewModel.state.collectAsStateWithLifecycle()
@@ -107,7 +108,8 @@ fun AudiobookTabContent(
             onLocalClick = {
                 destination = "local"
             },
-            localBooks = (localState.scanState as? DataState.Success)?.value ?: localState.partialBooks,
+            localBooks = (((localState.scanState as? DataState.Success)?.value ?: localState.partialBooks) + localState.recentLocalBooks)
+                .distinctBy { it.folderPath },
             localResume = localState.resumeStates,
             localChapterProgress = localState.chapterProgress,
             localLastPlayedAt = localState.lastPlayedAt,
@@ -144,6 +146,23 @@ private fun LocalAudiobookTabContent(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    val directoryPicker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                viewModel.setRootUri(uri.toString())
+            } catch (_: SecurityException) {
+                viewModel.reportDirectoryError("目录授权失败，请选择可读取的文件夹")
+            }
+        }
+    }
+
+    uiState.scanError?.let { message ->
+        Column {
+            Text(message, color = FluxTheme.colorScheme.error)
+            androidx.compose.material3.TextButton(onClick = { directoryPicker.launch(null) }) { Text("重新选择目录") }
+        }
+    }
     // 待确认播放的书籍：点击书籍只弹确认窗，确认后才起播
     var pendingBook by remember { mutableStateOf<AudioBook?>(null) }
 
@@ -157,7 +176,7 @@ private fun LocalAudiobookTabContent(
             title = book.title,
             chapterCount = book.chapters.size,
             coverModel = book.coverUri,
-            resumeLabel = resumeIndex?.let { "继续收听第 ${it + 1} 集" },
+            resumeLabel = resumeIndex?.let { "继续收听第 ${it + 1} 集" } ?: if (resumeEntry.startsWith("-1|")) "原章节已移除，将从第一章开始" else null,
             onDismiss = { pendingBook = null },
             onPlay = {
                 pendingBook = null
@@ -172,6 +191,7 @@ private fun LocalAudiobookTabContent(
         // 空状态：未选择听书目录
         EmptySelectionView(
             onSelectDirectory = {
+                directoryPicker.launch(null)
             },
             modifier = modifier,
         )
@@ -230,7 +250,7 @@ private fun LocalAudiobookTabContent(
                 val books = state.value
                 if (books.isEmpty()) {
                     EmptyBooksView(
-                        onChangeDirectory = { },
+                        onChangeDirectory = { directoryPicker.launch(null) },
                         modifier = modifier,
                     )
                 } else {

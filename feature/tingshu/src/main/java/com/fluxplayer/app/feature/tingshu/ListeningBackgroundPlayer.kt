@@ -33,6 +33,10 @@ internal class ListeningBackgroundPlayer : ViewModel() {
         error = null
     }
 
+    fun reportError(message: String) {
+        error = message
+    }
+
     fun start(context: Context, component: ComponentName, command: SessionCommand, args: Bundle) {
         if (starting) return
         starting = true

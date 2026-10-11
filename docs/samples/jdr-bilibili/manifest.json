@@ -1,0 +1,19 @@
+{
+  "id": "com.fluxplayer.bilibili",
+  "name": "B站听书（abts 移植）",
+  "version": "0.1.2",
+  "author": "Flux Player / BiliTingShu Contributors",
+  "description": "基于 abts 移植的 B 站有声内容书源，支持搜索、分类浏览和分 P 音频。",
+  "homepage": "https://github.com/Ding-DaoDao/abts",
+  "sources": [{
+    "id": "bilibili",
+    "name": "B站听书",
+    "script": "bilibili.js",
+    "capabilities": ["search", "browse", "chapters", "audio", "login"],
+    "settings": [
+      {"key": "cookie", "label": "B站 Cookie（可选）", "type": "password", "hint": "公开内容可免登录；登录后以自己的账号搜索和解析音频，不同步推荐、收藏或观看记录。"},
+      {"key": "filter", "label": "只显示听书内容", "type": "switch", "default": "true"},
+      {"key": "line", "label": "音频线路", "type": "select", "default": "自动", "options": ["自动", "主线路", "备用线路1", "备用线路2"], "hint": "自动优先选择普通 CDN，遇到缓冲或超时可切换备用线路。"}
+    ]
+  }]
+}

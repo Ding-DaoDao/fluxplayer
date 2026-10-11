@@ -36,6 +36,7 @@ dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:model"))
     implementation(project(":core:datastore"))
+    implementation(project(":core:tingshu"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)

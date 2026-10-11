@@ -130,7 +130,7 @@ class PlaybackReliabilityTest {
                 audiobookLastPlayedAt = mapOf("/books/A" to 50L, "/books/B" to 40L),
             )
         }
-        val repository = AudiobookProgressRepository(database, settings)
+        val repository = AudiobookProgressRepository(database, settings, context)
         repository.save("/books/A", 2, 500, 1000, 60)
         val state = repository.progress.first()
         assertEquals("2|500", state.resumeStates["/books/A"])
@@ -140,13 +140,29 @@ class PlaybackReliabilityTest {
         val preferencesBytes = settingsFile.readBytes()
         repository.save("/books/A", 2, 600, 1000, 60)
         assertTrue(preferencesBytes.contentEquals(settingsFile.readBytes()))
-        val reopened = AudiobookProgressRepository(database, settings)
+        val reopened = AudiobookProgressRepository(database, settings, context)
         assertEquals("2|600", reopened.progress.first().resumeStates["/books/A"])
     }
 
     @Test
+    fun reorderedChaptersResumeTheSameFileAndMissingChaptersDoNotResumeAnotherFile() = runBlocking {
+        val repository = AudiobookProgressRepository(database, settings, context)
+        repository.save("/books/A", 1, 900, 2000, 100, "file:///books/A/02.mp3")
+        repository.reconcile("/books/A", listOf("file:///books/A/00.mp3", "file:///books/A/01.mp3", "file:///books/A/02.mp3"))
+        assertEquals("2|900", repository.progress.first().resumeStates["/books/A"])
+        assertEquals(900L to 2000L, repository.chapterProgress("/books/A").first()[2])
+        val backup = repository.exportTo(ApplicationPreferences())
+        repository.clear()
+        repository.restore(backup)
+        repository.reconcile("/books/A", listOf("file:///books/A/02.mp3", "file:///books/A/01.mp3"))
+        assertEquals("0|900", repository.progress.first().resumeStates["/books/A"])
+        repository.reconcile("/books/A", listOf("file:///books/A/01.mp3"))
+        assertEquals("-1|0", repository.progress.first().resumeStates["/books/A"])
+    }
+
+    @Test
     fun backupRoundTripAndClearUseTheNewProgressStorage() = runBlocking {
-        val repository = AudiobookProgressRepository(database, settings)
+        val repository = AudiobookProgressRepository(database, settings, context)
         repository.save("/books/A", 3, 900, 2000, 100)
         val backup = repository.exportTo(ApplicationPreferences(audiobookRootUri = "/books"))
         repository.clear()
@@ -170,7 +186,7 @@ class PlaybackReliabilityTest {
                     val entity = schema.getJSONObject(i)
                     val table = entity.getString("tableName")
                     old.execSQL(entity.getString("createSql").replace("\${TABLE_NAME}", table))
-                    val indices = entity.getJSONArray("indices")
+                    val indices = entity.optJSONArray("indices") ?: entity.optJSONArray("indexes") ?: org.json.JSONArray()
                     for (j in 0 until indices.length()) {
                         old.execSQL(indices.getJSONObject(j).getString("createSql").replace("\${TABLE_NAME}", table))
                     }
@@ -179,7 +195,7 @@ class PlaybackReliabilityTest {
                 old.version = 11
             }
             val upgraded = Room.databaseBuilder(context, MediaDatabase::class.java, name)
-                .addMigrations(MediaDatabase.MIGRATION_11_12).build()
+                .addMigrations(MediaDatabase.MIGRATION_11_12, MediaDatabase.MIGRATION_12_13).build()
             try {
                 assertEquals("one", upgraded.mediumDao().get("legacy")?.name)
                 upgraded.audiobookProgressDao().save("/books/A", 1, 10, 100, 20)

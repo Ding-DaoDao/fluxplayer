@@ -25,14 +25,17 @@ data class SourceBrowseState(
     val menus: List<CategoryMenu> = emptyList(),
     val books: List<Book> = emptyList(),
     val folders: List<JdrFolder> = emptyList(),
+    val shortcuts: List<JdrFolder> = emptyList(),
     val directoryId: String? = null,
     val browseNextPage: Int? = null,
     val detail: ListeningBook? = null,
     /** 播放确认弹窗预解析出的详情，就绪后可一键起播 */
     val pendingDetail: ListeningBook? = null,
     val pendingBookUrl: String? = null,
+    val pendingCoverRevision: Long = 0,
     val configMessage: String? = null,
     val title: String = "",
+    val searchKeyword: String? = null,
     val page: Int = 0,
     val totalPages: Int = 0,
     val nextUrl: String = "",
@@ -86,7 +89,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         operation {
             if ("browse" in source.capabilities) {
                 val page = repository.browseJdr(source.id, null)
-                mutableState.update { it.copy(books = page.books, folders = page.folders, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
+                mutableState.update { it.copy(books = page.books, folders = page.folders, shortcuts = page.shortcuts, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
                 return@operation
             }
             val menus = repository.menus(source.id)
@@ -109,17 +112,21 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun browseDirectory(id: String, name: String, append: Boolean = false) {
+    fun browseDirectory(id: String, name: String, append: Boolean = false, shortcut: Boolean = false) {
         val source = state.value.source ?: return
         val previous = state.value
         val pageNumber = if (append) previous.browseNextPage ?: return else 1
         operation {
             val page = repository.browseJdr(source.id, id, pageNumber)
-            if (!append) history.add(previous.copy(loading = false, error = null))
+            if (shortcut) history.clear() else if (!append) history.add(previous.copy(loading = false, error = null))
             mutableState.update {
                 it.copy(
                     books = if (append) (it.books + page.books).distinctBy { book -> book.bookUrl } else page.books,
                     folders = if (append) (it.folders + page.folders).distinctBy { folder -> folder.id } else page.folders,
+                    shortcuts = page.shortcuts,
+                    searchKeyword = null,
+                    totalPages = 0,
+                    nextUrl = "",
                     directoryId = page.directoryId,
                     browseNextPage = page.nextPage,
                     page = pageNumber,
@@ -152,11 +159,33 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun search(keyword: String, append: Boolean = false) {
+        val query = keyword.trim().takeIf { it.isNotEmpty() } ?: return
+        val previous = state.value
+        val source = previous.source ?: return
+        val page = if (append) previous.page + 1 else 1
+        if (append) mutableState.update { it.copy(loadingMore = true) }
+        operation {
+            val (books, total) = repository.search(source.id, query, page)
+            if (!append && previous.searchKeyword == null) history.add(previous.copy(loading = false, error = null))
+            mutableState.update {
+                it.copy(
+                    books = if (append) (it.books + books).distinctBy { book -> book.bookUrl } else books,
+                    folders = emptyList(), menus = emptyList(), directoryId = null, browseNextPage = null,
+                    nextUrl = "", searchKeyword = query, page = page, totalPages = total,
+                    title = "搜索：$query", canGoBack = history.isNotEmpty(),
+                )
+            }
+        }
+    }
+
     fun nextPage() {
         val state = state.value
         if (state.loading || state.loadingMore) return
         if (!hasMore(state)) return
-        if (state.directoryId != null && state.browseNextPage != null) {
+        if (state.searchKeyword != null) {
+            search(state.searchKeyword, true)
+        } else if (state.directoryId != null && state.browseNextPage != null) {
             browseDirectory(state.directoryId, state.title, true)
         } else if (state.nextUrl.isNotBlank()) {
             category(state.nextUrl, state.title, true)
@@ -165,7 +194,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
 
     /** 是否还有下一页：网盘看 browseNextPage，分类看 nextUrl。 */
     private fun hasMore(state: SourceBrowseState): Boolean =
-        state.browseNextPage != null || state.nextUrl.isNotBlank()
+        state.browseNextPage != null || state.nextUrl.isNotBlank() || (state.searchKeyword != null && state.page < state.totalPages)
 
     /** 供列表触底回调：返回是否真的发起了加载（已到末页或正在加载时为 false）。 */
     fun loadMoreIfNeeded(): Boolean {
@@ -185,10 +214,14 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         mutableState.update { it.copy(source = source) }
         if (state.refreshing) return
         mutableState.update { it.copy(refreshing = true, error = null) }
+        if (state.searchKeyword != null) {
+            search(state.searchKeyword)
+            return
+        }
         operation {
             if ("browse" in source.capabilities) {
-                val page = repository.browseJdr(source.id, if (state.canGoBack) state.directoryId else null)
-                mutableState.update { it.copy(books = page.books, folders = page.folders, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
+                val page = repository.browseJdr(source.id, if (state.canGoBack || state.shortcuts.isNotEmpty()) state.directoryId else null)
+                mutableState.update { it.copy(books = page.books, folders = page.folders, shortcuts = page.shortcuts, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
                 return@operation
             }
             val refreshed = when {
@@ -243,18 +276,46 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
 
     /**
      * 解析书籍详情用于填充播放确认弹窗（章节数等），不启动播放。
-     * 结果写入 [state.pendingDetail]，UI 侧监听它关闭弹窗并起播。
-     * 弹窗打开时立刻调用：绝大多数情况几百毫秒内就返回，用户点击时已就绪。
+     * 先用持久化详情填充弹窗，再从书源更新目录；用户确认后才起播。
      */
-    fun resolvePending(book: Book) {
+    fun resolvePending(book: Book, refresh: Boolean = false) {
         val source = state.value.source ?: return
-        mutableState.update { it.copy(pendingDetail = null, pendingBookUrl = book.bookUrl) }
-        operation(resolvingBook = true) { mutableState.update { it.copy(pendingDetail = repository.detail(source.id, book)) } }
+        val sameBook = state.value.pendingBookUrl == book.bookUrl
+        mutableState.update {
+            it.copy(
+                pendingDetail = if (sameBook) it.pendingDetail else null,
+                pendingBookUrl = book.bookUrl,
+                pendingCoverRevision = if (refresh) System.nanoTime() else if (sameBook) it.pendingCoverRevision else 0,
+            )
+        }
+        operation(resolvingBook = true) {
+            if (!refresh) {
+                repository.cachedBook(source.id, book.bookUrl)?.let { cached ->
+                    mutableState.update { it.copy(pendingDetail = cached) }
+                }
+            }
+            val detail = repository.detail(source.id, book, refreshMetadata = refresh)
+            mutableState.update { current ->
+                current.copy(
+                    pendingDetail = detail,
+                    books = current.books.map { listed ->
+                        if (listed.bookUrl != detail.url) {
+                            listed
+                        } else {
+                            Book(detail.coverUrl, detail.url, detail.title, listed.author, detail.intro).apply {
+                                sourceId = source.id
+                                jdrExtras = detail.jdrBookExtras
+                            }
+                        }
+                    },
+                )
+            }
+        }
     }
 
     fun consumePendingDetail() {
         if (state.value.pendingBookUrl != null) loadJob?.cancel()
-        mutableState.update { it.copy(pendingDetail = null, pendingBookUrl = null, resolvingBook = false, error = null) }
+        mutableState.update { it.copy(pendingDetail = null, pendingBookUrl = null, pendingCoverRevision = 0, resolvingBook = false, error = null) }
     }
 
     fun openSavedBook(key: String) = operation {

@@ -1,3 +1,12 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:usesCleartextTraffic="true" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application android:usesCleartextTraffic="true">
+        <activity
+            android:name="com.fluxplayer.app.feature.tingshu.TingshuPlayerActivity"
+            android:exported="true"
+            tools:replace="android:exported" />
+        <activity android:name="com.fluxplayer.app.feature.tingshu.JdrDiscoveryPreviewActivity" android:exported="true" />
+        <activity android:name="com.fluxplayer.app.feature.tingshu.ListeningHomePreviewActivity" android:exported="true" />
+        <activity android:name="com.fluxplayer.app.feature.tingshu.ListeningControlsPreviewActivity" android:exported="true" />
+    </application>
 </manifest>

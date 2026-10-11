@@ -44,7 +44,7 @@ import voice.core.extension.engine.SourceSetting
 /** 每个脚本使用自己的 QuickJS 线程，宿主调用由仓库调度器串行处理。 */
 data class JdrConfiguration(val fields: List<SourceSetting>, val values: Map<String, String>, val canLogin: Boolean, val canBrowse: Boolean, val initialDirectory: String)
 data class JdrFolder(val id: String, val name: String)
-data class JdrBrowserPage(val directoryId: String, val folders: List<JdrFolder>, val books: List<Book>, val nextPage: Int?)
+data class JdrBrowserPage(val directoryId: String, val folders: List<JdrFolder>, val books: List<Book>, val nextPage: Int?, val shortcuts: List<JdrFolder> = emptyList())
 
 internal class JdrSourceBackend(private val context: Context) {
     private data class Source(val archive: JdrArchive, val metadata: ExtensionSourceMeta, var fields: List<SourceSetting> = metadata.declaredSettings().ifEmpty { commonSettings })
@@ -85,17 +85,31 @@ internal class JdrSourceBackend(private val context: Context) {
     }
 
     suspend fun search(id: String, keyword: String, page: Int): Pair<List<Book>, Int> {
-        // Timbre 的搜索接口没有总页数字段，只请求第一页。
-        if (page != 1) return emptyList<Book>() to 1
-        val result = invoke(id, "search", params(id, mapOf("keyword" to keyword, "page" to 1, "limit" to 30)), 15_000)
+        require(page >= 1)
+        val result = invoke(id, "search", params(id, mapOf("keyword" to keyword, "page" to page, "limit" to 30)), 15_000)
         val canResolveCover = supportsCover(id)
-        return SourceContract.parseSearchResults(result).map { item ->
+        val searchPage = SourceContract.parseSearchPage(result, page)
+        return searchPage.items.map { item ->
             Book(coverReference(canResolveCover, item.id, item.extra, item.cover), item.id, item.title, item.author, "").apply {
                 sourceId = id
                 intro = item.intro
                 jdrExtras = item.extra.toString()
             }
-        } to 1
+        } to searchPage.totalPages
+    }
+
+    /** 重新读取书籍所在列表，章节接口只返回目录时也可同步书名与封面。 */
+    suspend fun refreshMetadata(id: String, book: Book): Book {
+        val extras = Json.parseToJsonElement(book.jdrExtras) as? JsonObject ?: JsonObject(emptyMap())
+        if (mutex.withLock { requireSource(id).metadata.id == "bilibili" }) {
+            return search(id, book.bookUrl, 1).first.firstOrNull { it.bookUrl == book.bookUrl } ?: book
+        }
+        val parent = (extras["__fluxParentDirectory"] as? JsonPrimitive)?.content
+        if (parent != null) {
+            val page = (extras["__fluxBrowsePage"] as? JsonPrimitive)?.content?.toIntOrNull() ?: 1
+            return browse(id, parent, page).books.firstOrNull { it.bookUrl == book.bookUrl } ?: book
+        }
+        return book
     }
 
     suspend fun detail(id: String, book: Book, key: String): ListeningBook {
@@ -251,7 +265,7 @@ internal class JdrSourceBackend(private val context: Context) {
         val books = result.items.filterNot { it.directory }.map { item ->
             // 旧包 browse 返回裸目录 ID，chapters/cover 却要求 D_ 前缀。
             val bookId = if (requireSource(id).archive.isLegacyNetdisk() && !item.id.startsWith("D_")) "D_${item.id}" else item.id
-            val extra = item.extra + mapOf("id" to JsonPrimitive(bookId), "bookTitle" to JsonPrimitive(item.name))
+            val extra = item.extra + mapOf("id" to JsonPrimitive(bookId), "bookTitle" to JsonPrimitive(item.name), "__fluxParentDirectory" to JsonPrimitive(selected), "__fluxBrowsePage" to JsonPrimitive(page))
             val parsed = SourceContract.parseSearchResults(JsonArray(listOf(JsonObject(extra))).toString()).single()
             Book(coverReference(canResolveCover, parsed.id, parsed.extra, parsed.cover), parsed.id, parsed.title, parsed.author, "").apply {
                 sourceId = id
@@ -259,7 +273,7 @@ internal class JdrSourceBackend(private val context: Context) {
                 jdrExtras = parsed.extra.toString()
             }
         }
-        return JdrBrowserPage(selected, result.items.filter { it.directory }.map { JdrFolder(it.id, it.name) }, books, result.nextPage)
+        return JdrBrowserPage(selected, result.items.filter { it.directory }.map { JdrFolder(it.id, it.name) }, books, result.nextPage, result.shortcuts.map { JdrFolder(it.id, it.name) })
     }
 
     suspend fun clearMetadataCache(id: String) = mutex.withLock {
@@ -274,6 +288,13 @@ internal class JdrSourceBackend(private val context: Context) {
         return Uri.Builder().scheme("jdr-cover").authority("book")
             .appendQueryParameter("bookId", bookId).appendQueryParameter("extras", extra.toString())
             .appendQueryParameter("fallback", fallback).build().toString()
+    }
+
+    /** 手动刷新只失效当前封面，防止短期的空结果或旧地址阻止重试。 */
+    suspend fun invalidateCover(id: String, reference: String) = mutex.withLock {
+        covers.remove(id to reference)
+        coverRequests.remove(id to reference)?.cancel()
+        coverRevision++
     }
 
     suspend fun resolveCover(id: String, reference: String): ListeningResource? {

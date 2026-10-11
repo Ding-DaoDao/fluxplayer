@@ -43,14 +43,32 @@ public class SourceContractException public constructor(
     cause: Throwable? = null,
 ) : Exception(message, cause)
 
-/**
- * Validates and normalizes the JSON the three source stages return. Field
- * rules mirror the reference contract: search items need `id` + `bookTitle`,
- * chapter items need `chapter_id` + `title`, audio needs an http(s) url.
- */
+/** 搜索页；旧版数组格式按单页处理。 */
+public data class SearchPage(public val items: List<SearchItem>, public val totalPages: Int)
+
+/** 校验并规范化书源返回的书籍、章节和音频信息。 */
 public object SourceContract {
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    public fun parseSearchPage(value: String, page: Int = 1): SearchPage {
+        require(page >= 1)
+        val element = try {
+            json.parseToJsonElement(value)
+        } catch (error: Exception) {
+            throw SourceContractException("search 返回的不是合法 JSON", error)
+        }
+        if (element is JsonArray) return SearchPage(if (page == 1) parseSearchResults(value) else emptyList(), 1)
+        if (element !is JsonObject || element["items"] !is JsonArray) {
+            throw SourceContractException("search 必须返回数组或包含 items 数组的分页对象")
+        }
+        val total = (element["totalPages"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+        val next = (element["nextPage"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+        if (total != null && total < page || next != null && next != page + 1) {
+            throw SourceContractException("search 分页信息无效")
+        }
+        return SearchPage(parseSearchResults(element.getValue("items").toString()), total ?: next ?: page)
+    }
 
     public fun parseSearchResults(json: String): List<SearchItem> {
         return parseItems(json, "search") { item, index ->

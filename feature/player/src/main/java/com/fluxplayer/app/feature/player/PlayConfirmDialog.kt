@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 
@@ -46,6 +48,7 @@ fun PlayConfirmDialog(
     loading: Boolean = false,
     playEnabled: Boolean = true,
     errorContent: (@Composable () -> Unit)? = null,
+    onRefresh: (() -> Unit)? = null,
 ) {
     val colors = FluxTheme.colorScheme
     androidx.compose.material3.AlertDialog(
@@ -69,6 +72,7 @@ fun PlayConfirmDialog(
                     if (coverModel != null) {
                         AsyncImage(
                             model = coverModel,
+                            imageLoader = rememberBookCoverImageLoader(),
                             contentDescription = title,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize(),
@@ -91,8 +95,13 @@ fun PlayConfirmDialog(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                onRefresh?.let { refresh ->
+                    TextButton(onClick = refresh, enabled = !loading) {
+                        Text("刷新信息")
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
-                if (!loading && errorContent == null) {
+                if (chapterCount > 0 || !loading && errorContent == null) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = colors.primaryContainer,

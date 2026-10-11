@@ -20,6 +20,7 @@ android {
         targetCompatibility = JavaVersion.toVersion(libs.versions.android.jvm.get().toInt())
     }
     buildFeatures { compose = true }
+    sourceSets.getByName("androidTest").assets.srcDir(rootProject.file("docs/samples/jdr-bilibili"))
 }
 
 kotlin {
@@ -54,6 +55,7 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     androidTestImplementation(libs.androidx.test.ext)
     androidTestImplementation(libs.androidx.test.espresso.core)
+    androidTestImplementation(libs.androidx.compose.ui.test)
     androidTestImplementation(libs.okhttp.mockwebserver)
 }
 

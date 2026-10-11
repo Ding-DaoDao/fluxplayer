@@ -48,11 +48,16 @@ abstract class AudiobookProgressDao {
     @Query("DELETE FROM audiobook_chapter_progress")
     abstract suspend fun clearChapters()
 
+    @Query("DELETE FROM audiobook_chapter_progress WHERE bookPath = :bookPath")
+    abstract suspend fun clearChapters(bookPath: String)
+
     @Transaction
-    open suspend fun save(bookPath: String, index: Int, position: Long, duration: Long, lastPlayedAt: Long?) {
-        val previousTime = getResume(bookPath)?.lastPlayedAt ?: 0L
-        upsertResume(AudiobookResumeEntity(bookPath, index, position, maxOf(previousTime, lastPlayedAt ?: previousTime)))
-        upsertChapter(AudiobookChapterProgressEntity(bookPath, index, position, duration))
+    open suspend fun save(bookPath: String, index: Int, position: Long, duration: Long, lastPlayedAt: Long?, chapterUri: String = "", updateResume: Boolean = true) {
+        if (updateResume) {
+            val previousTime = getResume(bookPath)?.lastPlayedAt ?: 0L
+            upsertResume(AudiobookResumeEntity(bookPath, index, position, maxOf(previousTime, lastPlayedAt ?: previousTime), chapterUri))
+        }
+        upsertChapter(AudiobookChapterProgressEntity(bookPath, index, position, duration, chapterUri))
     }
 
     @Transaction

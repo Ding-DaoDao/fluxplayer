@@ -67,7 +67,7 @@ class TingshuPlayerActivity : ComponentActivity() {
             }
             LaunchedEffect(controller) {
                 val connected = controller ?: return@LaunchedEffect
-                if (!selectionSent && requestedBook != null && !intent.getBooleanExtra("reopen", false)) {
+                if (!selectionSent && requestedBook != null && (!intent.getBooleanExtra("reopen", false) || ListeningPlayback.state.value.book == null)) {
                     select(connected, requestedBook!!, requestedIndex, requestedPosition)
                     selectionSent = true
                 }
@@ -124,6 +124,14 @@ class TingshuPlayerActivity : ComponentActivity() {
                         },
                         coverModel = rememberSourceCover(book.sourceId, book.coverUrl, repository),
                         loading = state.loading,
+                        loadingLabel = if (state.resolving) "正在解析章节地址" else if (state.loading) "正在缓冲音频" else null,
+                        downloadAction = {
+                            ListeningOnlineControls(book, state, repository)
+                        },
+                        onRefreshDirectory = { connected.sendCustomCommand(SessionCommand(ListeningPlayback.REFRESH, Bundle.EMPTY), Bundle.EMPTY) },
+                        directoryRefreshing = state.refreshing,
+                        directoryRefreshEnabled = !state.resolving,
+                        directoryMessage = state.directoryMessage,
                         playbackError = state.error,
                         playbackErrorContent = state.error?.let { error ->
                             { SourceErrorNotice(error, onRetry = { select(connected, book.key, state.index, state.position) }) }
@@ -142,6 +150,12 @@ class TingshuPlayerActivity : ComponentActivity() {
         outState.putInt("index", if (state.book != null) state.index else requestedIndex)
         outState.putLong("position", if (state.book != null) state.position else requestedPosition)
         super.onSaveInstanceState(outState)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        // 通知返回只更新页面入口，不重新发送章节选择命令。
+        setIntent(intent)
     }
 
     private fun select(controller: MediaController, book: String, index: Int, position: Long) {

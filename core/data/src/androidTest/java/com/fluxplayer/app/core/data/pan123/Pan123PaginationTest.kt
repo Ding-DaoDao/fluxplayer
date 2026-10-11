@@ -32,7 +32,7 @@ class Pan123PaginationTest {
             assertEquals("标题 & 第二集", url.queryParameter("SearchData"))
             // 大写 Page 属于分享接口，出现即视为回归
             assertNull("自己网盘列目录不应下发分享接口的 Page 参数", url.queryParameter("Page"))
-            // Emulate an API that only honors lowercase page.
+            // 模拟只识别小写 page 参数的接口。
             val page = url.queryParameter("page")?.toInt() ?: 1
             Response.Builder()
                 .request(chain.request())
@@ -50,7 +50,7 @@ class Pan123PaginationTest {
     }
 
     @Test
-    fun noCursorParameterIsSentForOwnDriveListing() = runBlocking {
+    fun noCursorParameterIsSentForOwnDriveListing(): Unit = runBlocking {
         val client = OkHttpClient.Builder().addInterceptor { chain ->
             val url = chain.request().url
             // next 是分享接口（shareFileDetails）的游标，自己网盘列目录不应携带

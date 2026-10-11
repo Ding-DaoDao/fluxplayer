@@ -8,6 +8,7 @@ import kotlinx.coroutines.guava.await
 
 enum class CustomCommands(val customAction: String) {
     START_AUDIOBOOK(customAction = "START_AUDIOBOOK"),
+    SAVE_AUDIOBOOK_PROGRESS(customAction = "SAVE_AUDIOBOOK_PROGRESS"),
     ADD_SUBTITLE_TRACK(customAction = "ADD_SUBTITLE_TRACK"),
     SET_SKIP_SILENCE_ENABLED(customAction = "SET_SKIP_SILENCE_ENABLED"),
     GET_SKIP_SILENCE_ENABLED(customAction = "GET_SKIP_SILENCE_ENABLED"),

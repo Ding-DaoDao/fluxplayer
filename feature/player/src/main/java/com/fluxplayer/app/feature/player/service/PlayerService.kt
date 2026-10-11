@@ -11,7 +11,6 @@ import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -66,7 +65,10 @@ import com.fluxplayer.app.feature.player.extensions.subtitleSpeed
 import com.fluxplayer.app.feature.player.extensions.subtitleTrackIndex
 import com.fluxplayer.app.feature.player.extensions.switchTrack
 import com.fluxplayer.app.feature.player.extensions.uriToSubtitleConfiguration
-import com.fluxplayer.app.feature.player.scanAudioFiles
+import com.fluxplayer.app.feature.player.listeningBitmapLoader
+import com.fluxplayer.app.feature.player.localListeningBookPath
+import com.fluxplayer.app.feature.player.localListeningItems
+import com.fluxplayer.app.feature.player.localListeningUri
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
@@ -158,6 +160,8 @@ class PlayerService : MediaSessionService() {
      */
     @Volatile
     private var isAudioSession = false
+    private var nextAfterAudioSleep = false
+    private var speedSaveJob: Job? = null
 
     private var loudnessEnhancer: LoudnessEnhancer? = null
 
@@ -170,28 +174,29 @@ class PlayerService : MediaSessionService() {
     private val playbackStateListener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             publishLocalAudiobook(player)
-            if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+            if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) || events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED)) {
                 saveLocalAudiobookProgress()
+            }
+        }
+
+        override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+            // 听书被其他音频打断后明确暂停，使系统通知和续播操作保持一致。
+            if (isAudioSession && playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) {
+                mediaSession?.player?.pause()
             }
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             super.onMediaItemTransition(mediaItem, reason)
+            mediaSession?.setMediaButtonPreferences(notificationButtons())
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) return
             isMediaItemReady = false
             // 听书章节始终自动连播；视频会话按"自动连播"偏好（此处运行在主线程）
             // MediaSession 暴露的是 Player 接口，pauseAtEndOfMediaItems 是 ExoPlayer 专属属性
+            if (isAudioSession && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) AudioSleepTimer.finishEpisode()
             (mediaSession?.player as? ExoPlayer)?.pauseAtEndOfMediaItems =
-                if (isAudioSession) false else !playerPreferences.autoplay
-            // 睡眠定时（按集数）：达到 起始集 + N 时暂停并清除定时
-            val sleepState = AudioSleepTimer.state.value
-            if (sleepState.remainingEpisodes > 0 && sleepState.startEpisodeIndex >= 0) {
-                val index = mediaSession?.player?.currentMediaItemIndex ?: -1
-                if (index >= 0 && index >= sleepState.startEpisodeIndex + sleepState.remainingEpisodes) {
-                    AudioSleepTimer.cancel()
-                    mediaSession?.player?.pause()
-                }
-            }
+                if (isAudioSession) AudioSleepTimer.state.value.remainingEpisodes == 1 else !playerPreferences.autoplay
+            if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) nextAfterAudioSleep = false
             loadArtworkForCurrentMediaItem()
             // 听书会话：同步刷新通知栏点击的 PendingIntent，携带听书上下文
             updateSessionActivityForAudiobook()
@@ -341,7 +346,10 @@ class PlayerService : MediaSessionService() {
             if (!isRestoringPlaybackSpeed) {
                 val mediaId = currentMediaItem.mediaId
                 // 用 saveScope 保证不被 serviceScope 取消（与拆分前行为一致）
-                saveScope.launch {
+                speedSaveJob?.cancel()
+                speedSaveJob = saveScope.launch {
+                    // 拖动倍速时立即试听，停止调整后再保存最终值。
+                    delay(300)
                     val dirKey = mediaItemEnricher.computeDirKey(mediaId)
                     if (dirKey.isNotEmpty()) {
                         persistence.savePlaybackSpeed(dirKey, playbackSpeed)
@@ -356,6 +364,11 @@ class PlayerService : MediaSessionService() {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             super.onPlaybackStateChanged(playbackState)
+
+            if (isAudioSession && playbackState == Player.STATE_ENDED) {
+                AudioSleepTimer.cancel()
+                mediaSession?.player?.pause()
+            }
 
             if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_IDLE) {
                 mediaSession?.player?.trackSelectionParameters = TrackSelectionParameters.DEFAULT
@@ -379,6 +392,19 @@ class PlayerService : MediaSessionService() {
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             super.onPlayWhenReadyChanged(playWhenReady, reason)
+
+            if (isAudioSession && playWhenReady && nextAfterAudioSleep) {
+                nextAfterAudioSleep = false
+                mediaSession?.player?.takeIf { it.hasNextMediaItem() }?.seekToNextMediaItem()
+            }
+
+            if (isAudioSession && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM && AudioSleepTimer.state.value.remainingEpisodes > 0) {
+                AudioSleepTimer.finishEpisode()
+                nextAfterAudioSleep = mediaSession?.player?.hasNextMediaItem() == true
+                mediaSession?.player?.let(::publishLocalAudiobook)
+                saveLocalAudiobookProgress()
+                return
+            }
 
             if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
                 if (mediaSession?.player?.repeatMode != Player.REPEAT_MODE_OFF) {
@@ -553,13 +579,13 @@ class PlayerService : MediaSessionService() {
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = serviceScope.future(Dispatchers.Default) {
             // 纯音频模式：跳过 DB 查询、字幕扫描、artwork 加载
             // 仍需从 mediaId 重建 URI（localConfiguration 可能在 IPC 传输中丢失）
-            if (mediaItems.all { persistence.isAudioFile(it.mediaId) }) {
+            if (mediaItems.isNotEmpty() && mediaItems.all { it.mediaMetadata.extras?.containsKey("local_book_path") == true || persistence.isAudioFile(it.mediaId) }) {
                 isAudioSession = true
                 // 听书倍速独立于视频播放设置，从 DataStore 读取上次保存的倍速
                 sessionPlaybackSpeed = preferencesRepository.applicationPreferences.value.audiobookPlaybackSpeed
                 val updatedItems = mediaItems.map { item ->
                     item.buildUpon()
-                        .setUri(Uri.fromFile(File(item.mediaId)))
+                        .setUri(localListeningUri(item.mediaId))
                         .build()
                 }
                 return@future MediaSession.MediaItemsWithStartPosition(updatedItems, startIndex, startPositionMs)
@@ -575,12 +601,12 @@ class PlayerService : MediaSessionService() {
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> = serviceScope.future(Dispatchers.Default) {
             // 纯音频模式：跳过 metadata 增强，但仍需从 mediaId 重建 URI
-            if (mediaItems.all { persistence.isAudioFile(it.mediaId) }) {
+            if (mediaItems.isNotEmpty() && mediaItems.all { it.mediaMetadata.extras?.containsKey("local_book_path") == true || persistence.isAudioFile(it.mediaId) }) {
                 isAudioSession = true
                 sessionPlaybackSpeed = preferencesRepository.applicationPreferences.value.audiobookPlaybackSpeed
                 val updatedItems = mediaItems.map { item ->
                     item.buildUpon()
-                        .setUri(Uri.fromFile(File(item.mediaId)))
+                        .setUri(localListeningUri(item.mediaId))
                         .build()
                 }
                 return@future updatedItems.toMutableList()
@@ -600,24 +626,21 @@ class PlayerService : MediaSessionService() {
                 ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
 
             when (command) {
+                CustomCommands.SAVE_AUDIOBOOK_PROGRESS -> {
+                    if (controller.packageName != packageName) return@future SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED)
+                    mediaSession?.player?.let(::publishLocalAudiobook)
+                    saveLocalAudiobookProgress()
+                    localProgressSaveJob?.join()
+                    return@future SessionResult(SessionResult.RESULT_SUCCESS)
+                }
+
                 CustomCommands.START_AUDIOBOOK -> {
                     if (controller.packageName != packageName) return@future SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED)
                     val chapterUri = args.getString("chapter_uri")?.let(Uri::parse)
                         ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
-                    val chapterPath = chapterUri.path ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
                     val cover = args.getString("cover_uri")?.let(Uri::parse)
-                    val bookTitle = args.getString("book_title").orEmpty()
-                    // 只传当前章节地址，在服务内扫描，避免大量章节超过系统消息大小限制。
-                    val items = withContext(Dispatchers.IO) {
-                        scanAudioFiles(File(chapterPath).parentFile).map { file ->
-                            MediaItem.Builder().setUri(Uri.fromFile(file)).setMediaId(file.absolutePath)
-                                .setMediaMetadata(
-                                    MediaMetadata.Builder().setTitle(file.nameWithoutExtension)
-                                        .setAlbumTitle(bookTitle).setArtist(bookTitle).setArtworkUri(cover).build(),
-                                ).build()
-                        }
-                    }
-                    val index = items.indexOfFirst { it.mediaId == chapterPath }
+                    val items = withContext(Dispatchers.IO) { localListeningItems(this@PlayerService, chapterUri, cover) }
+                    val index = items.indexOfFirst { localListeningUri(it.mediaId) == chapterUri }
                     if (index < 0) return@future SessionResult(SessionError.ERROR_BAD_VALUE)
                     val player = mediaSession?.player ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
                     saveLocalAudiobookProgress()
@@ -816,6 +839,13 @@ class PlayerService : MediaSessionService() {
 
         buildMediaSession(player)
 
+        serviceScope.launch {
+            AudioSleepTimer.state.collect { timer ->
+                (mediaSession?.player as? ExoPlayer)?.pauseAtEndOfMediaItems =
+                    if (isAudioSession) timer.remainingEpisodes == 1 else !playerPreferences.autoplay
+            }
+        }
+
         // 监听缓存开关变化，实时更新 MediaSourceFactory
         serviceScope.launch {
             preferencesRepository.playerPreferences
@@ -839,7 +869,10 @@ class PlayerService : MediaSessionService() {
         serviceScope.launch {
             while (true) {
                 delay(1000)
-                mediaSession?.player?.let { publishLocalAudiobook(it) }
+                mediaSession?.player?.let {
+                    publishLocalAudiobook(it)
+                    applyLocalAudiobookSkip(it)
+                }
                 if (LocalAudiobookPlayback.state.value.playing && ++localProgressTicks >= 5) {
                     localProgressTicks = 0
                     saveLocalAudiobookProgress()
@@ -855,19 +888,40 @@ class PlayerService : MediaSessionService() {
 
     private var localProgressTicks = 0
 
+    /** 跳过逻辑由服务驱动，退出页面或息屏后仍然生效。 */
+    private fun applyLocalAudiobookSkip(player: Player) {
+        if (!isAudioSession || !player.isPlaying || player.duration <= 0) return
+        val path = localListeningBookPath(player.currentMediaItem) ?: return
+        val values = preferencesRepository.applicationPreferences.value.audiobookSkipSettings[path].orEmpty().split(',')
+        val intro = ((values.getOrNull(0)?.toLongOrNull() ?: 0) * 1000).coerceIn(0, (player.duration - 1000).coerceAtLeast(0))
+        val outro = ((values.getOrNull(1)?.toLongOrNull() ?: 0) * 1000).coerceIn(0, (player.duration - intro - 1000).coerceAtLeast(0))
+        if (player.currentPosition < intro) player.seekTo(intro)
+        if (outro > 0 && player.currentPosition >= player.duration - outro) {
+            if (AudioSleepTimer.finishEpisode()) {
+                nextAfterAudioSleep = player.hasNextMediaItem()
+                player.pause()
+            } else if (player.hasNextMediaItem()) {
+                player.seekToNextMediaItem()
+            } else {
+                AudioSleepTimer.cancel()
+                player.pause()
+            }
+        }
+    }
+
     private fun publishLocalAudiobook(player: Player) {
         val item = player.currentMediaItem
-        if (!isAudioSession || item == null || !persistence.isAudioFile(item.mediaId)) {
+        if (!isAudioSession || item == null) {
             LocalAudiobookPlayback.mutableState.value = LocalAudiobookPlaybackState()
             return
         }
-        val path = File(item.mediaId).parent ?: return
+        val path = localListeningBookPath(item) ?: return
         val previous = LocalAudiobookPlayback.state.value
         val started = previous.bookPath != path || (player.isPlaying && !previous.playing)
         LocalAudiobookPlayback.mutableState.value = LocalAudiobookPlaybackState(
             bookPath = path,
             title = item.mediaMetadata.albumTitle?.toString() ?: File(path).name,
-            chapterUri = Uri.fromFile(File(item.mediaId)).toString(),
+            chapterUri = localListeningUri(item.mediaId).toString(),
             chapterTitle = item.mediaMetadata.title?.toString() ?: File(item.mediaId).nameWithoutExtension,
             coverUri = item.mediaMetadata.artworkUri?.toString(),
             index = player.currentMediaItemIndex.coerceAtLeast(0),
@@ -880,16 +934,22 @@ class PlayerService : MediaSessionService() {
         )
     }
 
+    private var localProgressSaveJob: Job? = null
+
     private fun saveLocalAudiobookProgress() {
         val state = LocalAudiobookPlayback.state.value
         if (state.bookPath.isBlank() || state.duration <= 0) return
-        saveScope.launch {
+        val previous = localProgressSaveJob
+        localProgressSaveJob = saveScope.launch {
+            // 按采样顺序落盘，避免旧的周期保存晚于定时暂停记录完成。
+            previous?.join()
             audiobookProgressRepository.save(
                 state.bookPath,
                 state.index,
                 state.position,
                 state.duration,
                 state.lastPlayedAt,
+                state.chapterUri,
             )
         }
     }
@@ -908,6 +968,7 @@ class PlayerService : MediaSessionService() {
     override fun onDestroy() {
         super.onDestroy()
 
+        mediaSession?.player?.let(::publishLocalAudiobook)
         saveLocalAudiobookProgress()
         LocalAudiobookPlayback.mutableState.value = LocalAudiobookPlaybackState()
         // 播放会话结束，睡眠定时随之失效
@@ -1002,12 +1063,40 @@ class PlayerService : MediaSessionService() {
         }
     }
 
+    private fun notificationButtons(): List<CommandButton> = if (isAudioSession) {
+        // 本地章节使用播放器原生按钮，避免和自定义按钮重复显示。
+        emptyList()
+    } else {
+        listOf(
+            // 上一章/下一章（听书章节或播放列表切换）；播放器不支持时自动隐藏
+            CommandButton.Builder(ICON_UNDEFINED)
+                .setCustomIconResId(coreUiR.drawable.ic_skip_prev)
+                .setDisplayName(getString(coreUiR.string.player_controls_previous))
+                .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .setEnabled(true)
+                .build(),
+            CommandButton.Builder(ICON_UNDEFINED)
+                .setCustomIconResId(coreUiR.drawable.ic_skip_next)
+                .setDisplayName(getString(coreUiR.string.player_controls_next))
+                .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .setEnabled(true)
+                .build(),
+            CommandButton.Builder(ICON_UNDEFINED)
+                .setCustomIconResId(coreUiR.drawable.ic_close)
+                .setDisplayName(getString(coreUiR.string.stop_player_session))
+                .setSessionCommand(CustomCommands.STOP_PLAYER_SESSION.sessionCommand)
+                .setEnabled(true)
+                .build(),
+        )
+    }
+
     /** 构建 MediaSession，用于初始化或降级重建。 */
     private fun buildMediaSession(player: ExoPlayer) {
         try {
             mediaSession = MediaSession.Builder(this, player).apply {
                 // 本地与视频播放器使用独立标识，避免与书源播放服务冲突。
                 setId("fluxplayer.main")
+                setShowPlayButtonIfPlaybackIsSuppressed(true)
                 setSessionActivity(
                     PendingIntent.getActivity(
                         this@PlayerService,
@@ -1017,29 +1106,8 @@ class PlayerService : MediaSessionService() {
                     ),
                 )
                 setCallback(mediaSessionCallback)
-                setCustomLayout(
-                    listOf(
-                        // 上一章/下一章（听书章节或播放列表切换）；播放器不支持时自动隐藏
-                        CommandButton.Builder(ICON_UNDEFINED)
-                            .setCustomIconResId(coreUiR.drawable.ic_skip_prev)
-                            .setDisplayName(getString(coreUiR.string.player_controls_previous))
-                            .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-                            .setEnabled(true)
-                            .build(),
-                        CommandButton.Builder(ICON_UNDEFINED)
-                            .setCustomIconResId(coreUiR.drawable.ic_skip_next)
-                            .setDisplayName(getString(coreUiR.string.player_controls_next))
-                            .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-                            .setEnabled(true)
-                            .build(),
-                        CommandButton.Builder(ICON_UNDEFINED)
-                            .setCustomIconResId(coreUiR.drawable.ic_close)
-                            .setDisplayName(getString(coreUiR.string.stop_player_session))
-                            .setSessionCommand(CustomCommands.STOP_PLAYER_SESSION.sessionCommand)
-                            .setEnabled(true)
-                            .build(),
-                    ),
-                )
+                setBitmapLoader(listeningBitmapLoader(this@PlayerService))
+                setMediaButtonPreferences(notificationButtons())
             }.build()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -1057,8 +1125,10 @@ class PlayerService : MediaSessionService() {
         val player = mediaSession?.player ?: return
         val currentItem = player.currentMediaItem ?: return
         val intent = Intent(this, PlayerActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             data = currentItem.localConfiguration?.uri
             putExtra("audio_only", true)
+            putExtra("reopen_audiobook", true)
             currentItem.mediaMetadata.artworkUri?.toString()?.let { putExtra("cover_uri", it) }
         }
         mediaSession?.setSessionActivity(

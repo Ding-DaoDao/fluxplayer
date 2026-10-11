@@ -34,7 +34,7 @@ import com.fluxplayer.app.core.database.entities.VideoStreamInfoEntity
         AudiobookResumeEntity::class,
         AudiobookChapterProgressEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 abstract class MediaDatabase : RoomDatabase() {
@@ -53,6 +53,13 @@ abstract class MediaDatabase : RoomDatabase() {
 
     companion object {
         const val DATABASE_NAME = "media_db"
+
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `audiobook_resume` ADD COLUMN `chapterUri` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `audiobook_chapter_progress` ADD COLUMN `chapterUri` TEXT NOT NULL DEFAULT ''")
+            }
+        }
 
         val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -244,7 +251,7 @@ abstract class MediaDatabase : RoomDatabase() {
             }
         }
 
-        val         MIGRATION_7_8 = object : Migration(7, 8) {
+        val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """

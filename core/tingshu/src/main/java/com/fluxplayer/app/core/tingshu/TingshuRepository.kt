@@ -19,6 +19,7 @@ import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.zip.ZipFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -78,15 +79,14 @@ class TingshuRepository private constructor(private val context: Context) {
     init {
         SourceHost.initialize(context)
         scope.launch {
+            // 历史只读取本地快照，先恢复进度再发布书籍，不等待书源加载或网络请求。
+            val keys = runCatching { readRecentKeys() }.getOrDefault(emptyList()).distinct().take(20)
+            val books = keys.mapNotNull { key -> runCatching { book(key) }.getOrNull() }
+            _progresses.value = keys.mapNotNull { key ->
+                runCatching { readProgress(key) }.getOrNull()?.let { key to it }
+            }.toMap() + _progresses.value
+            _recentBooks.value = books
             managePackages { reload(readPackages()) }
-            readRecentKeys().forEach { key ->
-                runCatching { book(key) }.getOrNull()?.let { _recentBooks.value += it }
-            }
-            // 回填磁盘进度：_progresses 只在 saveProgress 时更新，冷启动为空会让首页「继续收听」丢失进度与时长
-            if (_progresses.value.isEmpty()) {
-                val restored = readRecentKeys().mapNotNull { key -> readProgress(key)?.let { key to it } }.toMap()
-                if (restored.isNotEmpty()) _progresses.value = restored
-            }
         }
     }
 
@@ -173,11 +173,13 @@ class TingshuRepository private constructor(private val context: Context) {
         selected.search(keywords, page)
     }
 
-    suspend fun detail(sourceId: String, book: Book): ListeningBook = withContext(dispatcher) {
+    suspend fun detail(sourceId: String, book: Book, refreshMetadata: Boolean = false): ListeningBook = withContext(dispatcher) {
         if (jdr.handles(sourceId)) {
-            val snapshot = jdr.detail(sourceId, book, digest("$sourceId\u0000${book.bookUrl}"))
+            val latest = if (refreshMetadata) jdr.refreshMetadata(sourceId, book) else book
+            val snapshot = jdr.detail(sourceId, latest, digest("$sourceId\u0000${book.bookUrl}"))
             require(snapshot.episodes.isNotEmpty()) { "书源没有返回可播放章节" }
             writeBook(snapshot)
+            _recentBooks.value = _recentBooks.value.map { if (it.key == snapshot.key) snapshot else it }
             return@withContext snapshot
         }
         val selected = source(sourceId)
@@ -198,6 +200,7 @@ class TingshuRepository private constructor(private val context: Context) {
                 episodes = detail.playList,
             )
             writeBook(snapshot)
+            _recentBooks.value = _recentBooks.value.map { if (it.key == snapshot.key) snapshot else it }
             snapshot
         } finally {
             SourceHost.currentBook.remove()
@@ -225,6 +228,82 @@ class TingshuRepository private constructor(private val context: Context) {
                 extras.keys().asSequence().associateWith { extras.getString(it) }
             }.orEmpty(),
         )
+    }
+
+    /** 有持久化详情时先填充弹窗，缺失时仍由书源正常解析。 */
+    suspend fun cachedBook(sourceId: String, url: String): ListeningBook? = withContext(dispatcher) {
+        val key = digest("$sourceId\u0000$url")
+        try {
+            if (!File(bookDirectory, "$key.json").isFile) null else book(key)
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            null
+        }
+    }
+
+    suspend fun refreshBook(book: ListeningBook): ListeningBook {
+        val refreshed = detail(book.sourceId, Book(book.coverUrl, book.url, book.title, "", book.intro).apply { jdrExtras = book.jdrBookExtras }, refreshMetadata = true)
+        _recentBooks.value = _recentBooks.value.map { if (it.key == book.key) refreshed else it }
+        return refreshed
+    }
+
+    /** 备份书籍目录与收听偏好，不包含书源登录凭证和临时播放地址。 */
+    suspend fun exportLibrary(): String = withContext(dispatcher) {
+        val library = JSONObject()
+        prefs.all.forEach { (key, value) ->
+            if (key == "recentBooks" || key.startsWith("progress.") || key.startsWith("chapters.") || key.startsWith("playedAt.")) library.put(key, value)
+        }
+        val playback = JSONObject()
+        context.getSharedPreferences("tingshu_playback", Context.MODE_PRIVATE).all.forEach { (key, value) ->
+            if (key == "speed" || key.endsWith(".intro") || key.endsWith(".outro")) playback.put(key, value)
+        }
+        val books = JSONObject()
+        bookDirectory.listFiles().orEmpty().filter { it.extension == "json" }.forEach { books.put(it.nameWithoutExtension, JSONObject(it.readText())) }
+        JSONObject().put("version", 1).put("library", library).put("playback", playback).put("books", books).toString()
+    }
+
+    suspend fun restoreLibrary(raw: String) = withContext(dispatcher) {
+        val data = JSONObject(raw)
+        require(data.getInt("version") == 1) { "不支持的听书备份版本" }
+        val books = data.getJSONObject("books")
+        // 先校验全部数据，避免损坏的备份写入一部分后才失败。
+        val entries = books.keys().asSequence().map { key ->
+            require(key.matches(Regex("[a-f0-9]{64}"))) { "无效的备份书籍标识" }
+            val book = books.getJSONObject(key)
+            book.getString("sourceId")
+            book.getString("url")
+            book.getString("title")
+            book.getJSONArray("episodes")
+            key to book.toString()
+        }.toList()
+        val library = data.getJSONObject("library")
+        library.keys().asSequence().forEach { key ->
+            if (key.startsWith("progress.") || key.startsWith("chapters.")) JSONObject(library.getString(key))
+        }
+        entries.forEach { (key, value) ->
+            val temporary = File(bookDirectory, "$key.tmp")
+            temporary.writeText(value)
+            check(temporary.renameTo(File(bookDirectory, "$key.json"))) { "恢复书籍目录失败" }
+        }
+        prefs.edit().apply {
+            library.keys().asSequence().forEach { key ->
+                when {
+                    key == "recentBooks" || key.startsWith("progress.") || key.startsWith("chapters.") -> putString(key, library.getString(key))
+                    key.startsWith("playedAt.") -> putLong(key, library.getLong(key))
+                }
+            }
+        }.apply()
+        val playback = data.optJSONObject("playback") ?: JSONObject()
+        context.getSharedPreferences("tingshu_playback", Context.MODE_PRIVATE).edit().apply {
+            playback.keys().asSequence().forEach { key ->
+                when {
+                    key == "speed" -> putFloat(key, playback.getDouble(key).toFloat().coerceIn(0.5f, 4f))
+                    key.endsWith(".intro") || key.endsWith(".outro") -> putInt(key, playback.getInt(key).coerceIn(0, 300))
+                }
+            }
+        }.apply()
+        _recentBooks.value = readRecentKeys().mapNotNull { runCatching { book(it) }.getOrNull() }
+        _progresses.value = _recentBooks.value.mapNotNull { book -> readProgress(book.key)?.let { book.key to it } }.toMap()
     }
 
     suspend fun resolve(book: ListeningBook, index: Int): ListeningResource = withContext(dispatcher) {
@@ -259,8 +338,13 @@ class TingshuRepository private constructor(private val context: Context) {
         result
     }
 
-    suspend fun resolveCover(sourceId: String, url: String): ListeningResource? = withContext(dispatcher) {
-        if (jdr.handles(sourceId)) jdr.resolveCover(sourceId, url) else ListeningResource(url, coverHeaders(sourceId, url))
+    suspend fun resolveCover(sourceId: String, url: String, forceRefresh: Boolean = false): ListeningResource? = withContext(dispatcher) {
+        if (jdr.handles(sourceId)) {
+            if (forceRefresh) jdr.invalidateCover(sourceId, url)
+            jdr.resolveCover(sourceId, url)
+        } else {
+            ListeningResource(url, coverHeaders(sourceId, url))
+        }
     }
 
     suspend fun playbackHeaders(sourceId: String, url: String): Map<String, String> = withContext(dispatcher) {

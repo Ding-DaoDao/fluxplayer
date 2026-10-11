@@ -19,6 +19,7 @@ import com.fluxplayer.app.core.model.Pan123BackupConfig
 import com.fluxplayer.app.core.model.QuarkBackupConfig
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.model.Yun139BackupConfig
+import com.fluxplayer.app.core.tingshu.TingshuRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -67,6 +68,7 @@ class BackupManager @Inject constructor(
             quarkConfig = readQuarkConfig(),
             yun139Config = readYun139Config(),
             backupWebDavConfig = backupConfig,
+            onlineListeningLibrary = TingshuRepository.get(context).exportLibrary(),
         )
     }
 
@@ -76,6 +78,7 @@ class BackupManager @Inject constructor(
         if ("app_preferences" !in ignoreList) {
             audiobookProgressRepository.restore(backup.appPreferences)
             preferencesRepository.updateApplicationPreferences { AudiobookProgressRepository.withoutLegacyProgress(backup.appPreferences) }
+            backup.onlineListeningLibrary?.let { TingshuRepository.get(context).restoreLibrary(it) }
         }
         if ("player_preferences" !in ignoreList) {
             preferencesRepository.updatePlayerPreferences { backup.playerPreferences }
@@ -237,7 +240,7 @@ class BackupManager @Inject constructor(
                     val jsonBytes = bis.readBytes()
                     json.decodeFromString(
                         BackupData.serializer(),
-                        String(jsonBytes, Charsets.UTF_8)
+                        String(jsonBytes, Charsets.UTF_8),
                     )
                 }
             }
@@ -258,7 +261,7 @@ class BackupManager @Inject constructor(
                         }
                         backupData = json.decodeFromString(
                             BackupData.serializer(),
-                            String(jsonBytes, Charsets.UTF_8)
+                            String(jsonBytes, Charsets.UTF_8),
                         )
                     }
                     entry.name.startsWith("openlist_data/") -> {
@@ -302,7 +305,9 @@ class BackupManager @Inject constructor(
                 autoStart = autoStart,
                 adminPassword = password,
             )
-        } else null
+        } else {
+            null
+        }
     }
 
     private fun restoreOpenListConfig(config: OpenListBackupConfig) {

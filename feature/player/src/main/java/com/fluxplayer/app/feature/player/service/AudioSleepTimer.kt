@@ -18,7 +18,7 @@ object AudioSleepTimer {
         val remainingSeconds: Int = 0,
         /** 按集数模式剩余集数；0 表示未激活 */
         val remainingEpisodes: Int = 0,
-        /** 按集数模式激活时的起始章节索引 */
+        /** 保留激活时的章节位置，实际计数以章节完成事件为准。 */
         val startEpisodeIndex: Int = -1,
     )
 
@@ -38,6 +38,15 @@ object AudioSleepTimer {
     /** 取消定时。 */
     fun cancel() {
         _state.value = State()
+    }
+
+    /** 只在章节自然结束或跳过片尾时消耗集数，手动切章不消耗。 */
+    fun finishEpisode(): Boolean {
+        val current = _state.value
+        if (current.remainingEpisodes <= 0) return false
+        val remaining = current.remainingEpisodes - 1
+        _state.value = if (remaining == 0) State() else current.copy(remainingEpisodes = remaining)
+        return remaining == 0
     }
 
     /** 由 Service 的倒计时循环每秒调用（仅在播放中），返回是否已到时。 */
