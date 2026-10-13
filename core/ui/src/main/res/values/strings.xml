@@ -399,6 +399,14 @@
     <string name="backup_device_name">Device Name</string>
     <string name="backup_device_name_hint">Optional. Included in backup filename (e.g., MyPhone)</string>
     <string name="backup_device_name_format_hint">Backup file format: fluxplayer_backup_{DeviceName}_{Date}_{Time}.zip</string>
+    <string name="backup_passphrase">Backup Password</string>
+    <string name="backup_passphrase_desc">Encrypts backup files. Required before exporting or uploading.</string>
+    <string name="backup_passphrase_set">Set</string>
+    <string name="backup_passphrase_not_set">Not set — required for export and upload</string>
+    <string name="backup_passphrase_required">Please set a backup password first</string>
+    <string name="backup_passphrase_hint">Backup files are encrypted with this password and can only be restored with it. It cannot be recovered if lost.</string>
+    <string name="backup_passphrase_enter">Enter Backup Password</string>
+    <string name="backup_passphrase_wrong">Wrong password, or the file is corrupted</string>
     <string name="backup_test_webdav">Test WebDAV Configuration</string>
     <string name="backup_test_webdav_desc">Test WebDAV service status</string>
     <string name="backup_auto_check">Auto check new backups</string>

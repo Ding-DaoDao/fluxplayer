@@ -21,6 +21,12 @@ class AutoBackupHelper @Inject constructor(
         backupMutex.withLock {
             val config = backupWebDavDataSource.config.first()
             if (!config.isConfigured || config.autoBackupSyncMode != "remote") return
+            // 归档一律加密：没设备份密码就不上传，避免把凭证以明文推到 WebDAV。
+            // 不静默降级为明文——那正是这次要堵的窟窿。
+            if (config.backupPassphrase.isBlank()) {
+                Log.w(TAG, "未设置备份密码，跳过自动备份（请在备份设置中配置）")
+                return
+            }
             val now = System.currentTimeMillis()
             if (!force && now - lastAutoBackupAtMs < MIN_AUTO_BACKUP_INTERVAL_MS) return
             lastAutoBackupAtMs = now

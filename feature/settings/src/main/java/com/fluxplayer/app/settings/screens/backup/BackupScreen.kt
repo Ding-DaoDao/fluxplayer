@@ -60,6 +60,9 @@ fun BackupScreen(
     var showAccount by remember { mutableStateOf(false) }
     var showRemote by remember { mutableStateOf(false) }
     var showNewBackup by remember { mutableStateOf(false) }
+    var showPassphrase by remember { mutableStateOf(false) }
+    var passphraseDraft by remember { mutableStateOf("") }
+    var importPassphrase by remember { mutableStateOf("") }
     var draft by remember { mutableStateOf(BackupWebDavConfig()) }
     val createFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) {
         it?.let(viewModel::createBackup)
@@ -78,6 +81,10 @@ fun BackupScreen(
     }
     LaunchedEffect(state.pendingBackup) {
         if (state.pendingBackup != null) showRemote = false
+    }
+    // 新的导入目标出现时清空密码输入（密码错误重试时目标不变，保留用户输入以便修改）
+    LaunchedEffect(state.pendingPassphrase) {
+        if (state.pendingPassphrase != null) importPassphrase = ""
     }
 
     FluxSettingsScaffold(
@@ -100,15 +107,35 @@ fun BackupScreen(
                     description = stringResource(R.string.backup_export_local_desc),
                     enabled = !state.isLoading,
                     isFirstItem = true,
-                    onClick = { createFile.launch(config.generateBackupFileName()) },
+                    onClick = {
+                        if (config.backupPassphrase.isBlank()) {
+                            viewModel.reportMissingPassphrase()
+                        } else {
+                            createFile.launch(config.generateBackupFileName())
+                        }
+                    },
                 )
                 HorizontalDivider()
                 ClickablePreferenceItem(
                     title = stringResource(R.string.backup_restore_local),
                     description = stringResource(R.string.backup_restore_local_desc),
                     enabled = !state.isLoading,
-                    isLastItem = true,
                     onClick = { openFile.launch(arrayOf("*/*")) },
+                )
+                HorizontalDivider()
+                ClickablePreferenceItem(
+                    title = stringResource(R.string.backup_passphrase),
+                    description = if (config.backupPassphrase.isBlank()) {
+                        stringResource(R.string.backup_passphrase_not_set)
+                    } else {
+                        "${stringResource(R.string.backup_passphrase_set)} · ${stringResource(R.string.backup_passphrase_desc)}"
+                    },
+                    enabled = !state.isLoading,
+                    isLastItem = true,
+                    onClick = {
+                        passphraseDraft = config.backupPassphrase
+                        showPassphrase = true
+                    },
                 )
 
                 ListSectionTitle(text = stringResource(R.string.backup_webdav_section))
@@ -134,7 +161,9 @@ fun BackupScreen(
                     title = stringResource(R.string.backup_upload_to_cloud),
                     description = stringResource(R.string.backup_upload_to_cloud_desc),
                     enabled = config.isConfigured && !state.isLoading,
-                    onClick = viewModel::uploadToCloud,
+                    onClick = {
+                        if (config.backupPassphrase.isBlank()) viewModel.reportMissingPassphrase() else viewModel.uploadToCloud()
+                    },
                 )
                 HorizontalDivider()
                 ClickablePreferenceItem(
@@ -155,7 +184,14 @@ fun BackupScreen(
                     isChecked = config.autoBackupSyncMode == "remote",
                     enabled = config.isConfigured && !state.isLoading,
                     isFirstItem = true,
-                    onClick = { viewModel.updateConfigField { it.copy(autoBackupSyncMode = if (it.autoBackupSyncMode == "remote") "off" else "remote") } },
+                    onClick = {
+                        // 开启自动备份前必须有密码：后台无法弹窗，没密码只能明文上传
+                        if (config.autoBackupSyncMode != "remote" && config.backupPassphrase.isBlank()) {
+                            viewModel.reportMissingPassphrase()
+                        } else {
+                            viewModel.updateConfigField { it.copy(autoBackupSyncMode = if (it.autoBackupSyncMode == "remote") "off" else "remote") }
+                        }
+                    },
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
@@ -291,6 +327,79 @@ fun BackupScreen(
                     showNewBackup = false
                     viewModel.clearPendingNewBackup()
                 }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+    if (showPassphrase) {
+        NextDialog(
+            title = { Text(stringResource(R.string.backup_passphrase)) },
+            onDismissRequest = { if (!state.isLoading) showPassphrase = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.savePassphrase(passphraseDraft.trim())
+                        showPassphrase = false
+                    },
+                    enabled = !state.isLoading && passphraseDraft.isNotBlank(),
+                ) { Text(stringResource(R.string.done)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { if (!state.isLoading) showPassphrase = false }, enabled = !state.isLoading) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        stringResource(R.string.backup_passphrase_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = passphraseDraft,
+                        onValueChange = { passphraseDraft = it },
+                        label = { Text(stringResource(R.string.backup_passphrase)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+        )
+    }
+    state.pendingPassphrase?.let {
+        NextDialog(
+            title = { Text(stringResource(R.string.backup_passphrase_enter)) },
+            onDismissRequest = viewModel::cancelPassphrase,
+            confirmButton = {
+                TextButton(onClick = { viewModel.submitPassphrase(importPassphrase) }, enabled = !state.isLoading) {
+                    Text(stringResource(R.string.done))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelPassphrase, enabled = !state.isLoading) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        stringResource(R.string.backup_passphrase_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = importPassphrase,
+                        onValueChange = { importPassphrase = it },
+                        label = { Text(stringResource(R.string.backup_passphrase)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        isError = state.passphraseError != null,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    state.passphraseError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (state.isLoading) CircularProgressIndicator()
+                }
             },
         )
     }

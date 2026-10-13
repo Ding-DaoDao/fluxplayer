@@ -113,6 +113,8 @@ class BackupManager @Inject constructor(
                             hasPendingNewBackup = false,
                             lastSeenRemoteBackup = "",
                             deviceName = current.deviceName,
+                            // 旧归档（明文 ZIP 时代）没有密码字段，别把本机已设的备份密码清空
+                            backupPassphrase = restored.backupPassphrase.ifBlank { current.backupPassphrase },
                         )
                     }
                 }
@@ -145,9 +147,10 @@ class BackupManager @Inject constructor(
         }
     }
 
-    suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
+    /** 导出到用户选定的文件；归档始终加密，[passphrase] 由调用方从用户输入取。 */
+    suspend fun exportToUri(uri: Uri, passphrase: CharArray) = withContext(Dispatchers.IO) {
         operationMutex.withLock {
-            val bytes = BackupArchiveCodec.encode(createArchive())
+            val bytes = BackupArchiveCodec.encodeEncrypted(createArchive(), passphrase)
             val output = checkNotNull(context.contentResolver.openOutputStream(uri, "wt")) { "无法写入备份文件" }
             output.use {
                 it.write(bytes)
@@ -156,10 +159,15 @@ class BackupManager @Inject constructor(
         }
     }
 
-    suspend fun importFromUri(uri: Uri): Result<BackupArchive> = withContext(Dispatchers.IO) {
+    /**
+     * 读取备份文件。[passphrase] 为空且文件是加密归档时，抛
+     * [BackupPassphraseRequiredException]；密码错误抛 [BackupDecryptException]。
+     * 未加密的旧备份文件不需要密码。
+     */
+    suspend fun importFromUri(uri: Uri, passphrase: CharArray? = null): Result<BackupArchive> = withContext(Dispatchers.IO) {
         backupResult {
             val input = checkNotNull(context.contentResolver.openInputStream(uri)) { "无法打开备份文件" }
-            input.use(BackupArchiveCodec::decode)
+            input.use { BackupArchiveCodec.decode(it, passphrase) }
         }
     }
 
@@ -168,7 +176,13 @@ class BackupManager @Inject constructor(
         backupResult {
             operationMutex.withLock {
                 require(config.isConfigured) { "请先配置有效的 WebDAV 地址" }
-                val bytes = BackupArchiveCodec.encode(createArchive())
+                require(config.backupPassphrase.isNotBlank()) { "请先设置备份密码，再上传到云端" }
+                val passphrase = config.backupPassphrase.toCharArray()
+                val bytes = try {
+                    BackupArchiveCodec.encodeEncrypted(createArchive(), passphrase)
+                } finally {
+                    passphrase.fill('\u0000')
+                }
                 var folder = ""
                 config.subfolder.trim('/').split('/').filter { it.isNotBlank() }.forEach { part ->
                     require(part != "." && part != ".." && !part.contains('\\')) { "无效的 WebDAV 子文件夹" }
@@ -187,10 +201,25 @@ class BackupManager @Inject constructor(
         }
     }
 
-    suspend fun downloadFromCloud(config: BackupWebDavConfig, path: String): Result<BackupArchive> = withContext(Dispatchers.IO) {
+    /**
+     * 从云端下载并解析备份。
+     * [passphrase] 为空时用配置里保存的密码；远程备份若来自其他设备（密码不同），
+     * 调用方应捕获 [BackupDecryptException]／[BackupPassphraseRequiredException] 后让用户重输。
+     */
+    suspend fun downloadFromCloud(
+        config: BackupWebDavConfig,
+        path: String,
+        passphrase: CharArray? = null,
+    ): Result<BackupArchive> = withContext(Dispatchers.IO) {
         backupResult {
             val bytes = webDavRepository.downloadFile(config.url, path, config.basicAuthHeader).getOrThrow()
-            ByteArrayInputStream(bytes).use(BackupArchiveCodec::decode)
+            val effective = passphrase ?: config.backupPassphrase.takeIf { it.isNotBlank() }?.toCharArray()
+            try {
+                ByteArrayInputStream(bytes).use { BackupArchiveCodec.decode(it, effective) }
+            } finally {
+                // 只有本函数自己从配置派生的那份才清零；调用方传进来的由调用方负责
+                if (passphrase == null) effective?.fill('\u0000')
+            }
         }
     }
 

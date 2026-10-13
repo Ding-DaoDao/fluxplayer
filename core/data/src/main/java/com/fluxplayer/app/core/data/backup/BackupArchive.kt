@@ -47,8 +47,30 @@ internal object BackupArchiveCodec {
         }
     }
 
-    fun decode(input: InputStream): BackupArchive {
+    /**
+     * 归档载荷的密码信封版本：ZIP 外再包一层 [BackupCrypto]，
+     * 避免 123 明文账号密码与各平台 Cookie 以裸 ZIP 落盘或传 WebDAV。
+     */
+    fun encodeEncrypted(archive: BackupArchive, passphrase: CharArray): ByteArray =
+        BackupCrypto.encrypt(encode(archive), passphrase)
+
+    /**
+     * 解析归档。
+     *
+     * 加密归档（[BackupCrypto.isEncrypted]）必须提供 [passphrase]，否则抛
+     * [BackupPassphraseRequiredException] 让上层去要密码；密码错误抛 [BackupDecryptException]。
+     * **未加密的旧归档**（裸 ZIP / 裸 JSON）仍可直接读取，保证老备份文件能恢复。
+     */
+    fun decode(input: InputStream, passphrase: CharArray? = null): BackupArchive {
         val bytes = readLimited(input, MAX_ARCHIVE_BYTES)
+        if (BackupCrypto.isEncrypted(bytes)) {
+            if (passphrase == null || passphrase.isEmpty()) throw BackupPassphraseRequiredException()
+            return decodePlain(BackupCrypto.decrypt(bytes, passphrase))
+        }
+        return decodePlain(bytes)
+    }
+
+    private fun decodePlain(bytes: ByteArray): BackupArchive {
         if (bytes.size < 4 || bytes[0] != 'P'.code.toByte() || bytes[1] != 'K'.code.toByte()) {
             return BackupArchive(decodeJson(bytes))
         }
