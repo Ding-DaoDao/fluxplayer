@@ -19,6 +19,8 @@ import com.fluxplayer.app.core.data.quark.QuarkFileItem
 import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.data.security.getSecret
+import com.fluxplayer.app.core.data.security.putSecret
 import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.feature.videopicker.CloudDirectoryCache
@@ -137,7 +139,7 @@ class QuarkBrowserViewModel @Inject constructor(
         Log.d(TAG, "loginWithCookie: driveType=$driveType, cookie长度=${cookie.length}")
         val prefName = if (driveType == "uc") UC_PREF_NAME else PREF_NAME
         val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
-        prefs.edit().putString("cookie", cookie).apply()
+        prefs.edit().putSecret(prefName, "cookie", cookie).apply()
 
         apiClient.setCookie(cookie)
         setupCookiePersistence(prefName)
@@ -169,7 +171,7 @@ class QuarkBrowserViewModel @Inject constructor(
         apiClient.setDriveType(type)
         val prefName = if (type == "uc") UC_PREF_NAME else PREF_NAME
         val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
-        val cookie = prefs.getString("cookie", "") ?: ""
+        val cookie = prefs.getSecret(prefName, "cookie").orEmpty()
         // 切换 driveType 时重置状态，防止夸克/UC 之间数据泄漏
         if (isSwitching) {
             directoryCache.clear()
@@ -711,7 +713,7 @@ class QuarkBrowserViewModel @Inject constructor(
         apiClient.onCookieUpdated = { mergedCookie ->
             val prefs = getApplication<Application>()
                 .getSharedPreferences(prefName, Context.MODE_PRIVATE)
-            prefs.edit().putString("cookie", mergedCookie).apply()
+            prefs.edit().putSecret(prefName, "cookie", mergedCookie).apply()
         }
     }
 

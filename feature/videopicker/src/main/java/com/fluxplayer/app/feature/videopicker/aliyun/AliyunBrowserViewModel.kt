@@ -19,6 +19,8 @@ import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.data.security.getSecret
+import com.fluxplayer.app.core.data.security.putSecret
 import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.feature.videopicker.CloudDirectoryCache
@@ -154,18 +156,18 @@ class AliyunBrowserViewModel @Inject constructor(
                     val driveId = defaultDriveId.ifEmpty { driveInfo?.let { resolveDefaultDrive(it) } ?: "" }
                     apiClient.driveId = driveId
                     prefs.edit()
-                        .putString("authorization", auth)
+                        .putSecret(PREF_NAME, "authorization", auth)
                         .putString("drive_id", driveId)
-                        .putString("refresh_token", refreshToken)
-                        .putString("device_id", apiClient.getDeviceId())
-                        .putString("signature", apiClient.getSignature())
+                        .putSecret(PREF_NAME, "refresh_token", refreshToken)
+                        .putSecret(PREF_NAME, "device_id", apiClient.getDeviceId())
+                        .putSecret(PREF_NAME, "signature", apiClient.getSignature())
                         .apply()
                     // 将 WebView Cookie 持久化到 SharedPreferences，供备份系统读取
                     try {
                         val cookieManager = android.webkit.CookieManager.getInstance()
                         val cookies = cookieManager.getCookie("https://www.alipan.com")
                         if (!cookies.isNullOrBlank()) {
-                            prefs.edit().putString("cookies", cookies).apply()
+                            prefs.edit().putSecret(PREF_NAME, "cookies", cookies).apply()
                         }
                     } catch (_: Exception) {}
 
@@ -237,7 +239,7 @@ class AliyunBrowserViewModel @Inject constructor(
         if (_uiState.value.isLoggedIn) return
 
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val auth = prefs.getString("authorization", "") ?: ""
+        val auth = prefs.getSecret(PREF_NAME, "authorization").orEmpty()
         if (auth.isBlank()) {
             updateUiState { it.copy(isLoggedIn = false) }
             return
@@ -248,11 +250,11 @@ class AliyunBrowserViewModel @Inject constructor(
         if (savedDriveId.isNotBlank()) {
             apiClient.driveId = savedDriveId
         }
-        val savedDeviceId = prefs.getString("device_id", "") ?: ""
+        val savedDeviceId = prefs.getSecret(PREF_NAME, "device_id").orEmpty()
         if (savedDeviceId.isNotBlank()) {
             apiClient.setDeviceId(savedDeviceId)
         }
-        val savedSignature = prefs.getString("signature", "") ?: ""
+        val savedSignature = prefs.getSecret(PREF_NAME, "signature").orEmpty()
         if (savedSignature.isNotBlank()) {
             apiClient.setSignature(savedSignature)
         }
@@ -263,7 +265,7 @@ class AliyunBrowserViewModel @Inject constructor(
         CloudPlayHeaders.registerSuffix("aliyundrive.net") { AliyunAuthProvider.getPlayHeaders() }
 
         // 恢复 WebView Cookie（备份恢复时 CookieManager 可能为空，从 SharedPreferences 补回）
-        val savedCookies = prefs.getString("cookies", null)
+        val savedCookies = prefs.getSecret(PREF_NAME, "cookies")
         if (!savedCookies.isNullOrBlank()) {
             try {
                 val cookieManager = android.webkit.CookieManager.getInstance()

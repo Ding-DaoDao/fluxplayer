@@ -22,6 +22,8 @@ import com.fluxplayer.app.core.data.pan123.Pan123ShareFileItem
 import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.data.security.getSecret
+import com.fluxplayer.app.core.data.security.putSecret
 import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.feature.videopicker.CloudDirectoryCache
@@ -146,9 +148,9 @@ class Pan123BrowserViewModel @Inject constructor(
      */
     private fun autoLogin() {
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val passport = prefs.getString("passport", "") ?: ""
-        val password = prefs.getString("password", "") ?: ""
-        val token = prefs.getString("token", "") ?: ""
+        val passport = prefs.getSecret(PREF_NAME, "passport").orEmpty()
+        val password = prefs.getSecret(PREF_NAME, "password").orEmpty()
+        val token = prefs.getSecret(PREF_NAME, "token").orEmpty()
         val expireTime = prefs.getLong("refresh_token_expire_time", 0)
         val now = System.currentTimeMillis() / 1000
 
@@ -199,9 +201,9 @@ class Pan123BrowserViewModel @Inject constructor(
                 onSuccess = { loginResult ->
                     val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
                     prefs.edit()
-                        .putString("passport", passport)
-                        .putString("password", password)
-                        .putString("token", loginResult.token)
+                        .putSecret(PREF_NAME, "passport", passport)
+                        .putSecret(PREF_NAME, "password", password)
+                        .putSecret(PREF_NAME, "token", loginResult.token)
                         .putLong("refresh_token_expire_time", loginResult.refreshTokenExpireTime)
                         .apply()
                     Pan123AuthProvider.authorization = "Bearer ${loginResult.token}"
@@ -240,7 +242,7 @@ class Pan123BrowserViewModel @Inject constructor(
         prefs.edit()
             .remove("passport")
             .remove("password")
-            .putString("token", tokenValue)
+            .putSecret(PREF_NAME, "token", tokenValue)
             .apply()
         Pan123AuthProvider.authorization = trimmed
         Pan123AuthProvider.isActive = true

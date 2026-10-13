@@ -1,6 +1,7 @@
 package com.fluxplayer.app.core.data.backup
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
@@ -8,6 +9,8 @@ import com.fluxplayer.app.core.data.openlist.OpenListManagerProvider
 import com.fluxplayer.app.core.data.openlist.OpenListServerState
 import com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
 import com.fluxplayer.app.core.data.repository.WebDavRepository
+import com.fluxplayer.app.core.data.security.getSecret
+import com.fluxplayer.app.core.data.security.putSecret
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import com.fluxplayer.app.core.datastore.datasource.AppPreferencesDataSource
 import com.fluxplayer.app.core.datastore.datasource.BackupWebDavDataSource
@@ -241,7 +244,7 @@ class BackupManager @Inject constructor(
     private fun readOpenListConfig(): OpenListBackupConfig? {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val autoStart = prefs.getBoolean(PREF_AUTO_START, false)
-        val password = prefs.getString(PREF_PASSWORD, null)
+        val password = prefs.getSecret(PREFS_NAME, PREF_PASSWORD)
         return if (prefs.contains(PREF_AUTO_START) || password != null) {
             OpenListBackupConfig(
                 autoStart = autoStart,
@@ -257,7 +260,7 @@ class BackupManager @Inject constructor(
         check(
             prefs.edit()
                 .putBoolean(PREF_AUTO_START, config.autoStart)
-                .putString(PREF_PASSWORD, config.adminPassword)
+                .putSecret(PREFS_NAME, PREF_PASSWORD, config.adminPassword)
                 .commit(),
         ) { "保存 OpenList 配置失败" }
     }
@@ -266,20 +269,20 @@ class BackupManager @Inject constructor(
 
     private fun readAlipanConfig(): AlipanBackupConfig? {
         val prefs = context.getSharedPreferences(ALIPAN_PREFS, Context.MODE_PRIVATE)
-        val auth = prefs.getString("authorization", null)
+        val auth = readCredential(prefs, ALIPAN_PREFS, "authorization")
         if (auth.isNullOrBlank()) return null
         // 读取 WebView Cookie（用于备份后恢复时自动续期）
         val cookies = try {
             android.webkit.CookieManager.getInstance().getCookie("https://www.alipan.com")
         } catch (_: Exception) {
-            prefs.getString("cookies", null)
+            readCredential(prefs, ALIPAN_PREFS, "cookies")
         }
         return AlipanBackupConfig(
             authorization = auth,
-            driveId = prefs.getString("drive_id", null),
-            refreshToken = prefs.getString("refresh_token", null),
-            deviceId = prefs.getString("device_id", null),
-            signature = prefs.getString("signature", null),
+            driveId = readCredential(prefs, ALIPAN_PREFS, "drive_id"),
+            refreshToken = readCredential(prefs, ALIPAN_PREFS, "refresh_token"),
+            deviceId = readCredential(prefs, ALIPAN_PREFS, "device_id"),
+            signature = readCredential(prefs, ALIPAN_PREFS, "signature"),
             cookies = cookies,
         )
     }
@@ -354,11 +357,11 @@ class BackupManager @Inject constructor(
 
     private fun readPan123Config(): Pan123BackupConfig? {
         val prefs = context.getSharedPreferences(PAN123_PREFS, Context.MODE_PRIVATE)
-        val token = prefs.getString("token", null)
+        val token = readCredential(prefs, PAN123_PREFS, "token")
         if (token.isNullOrBlank()) return null
         return Pan123BackupConfig(
-            passport = prefs.getString("passport", null),
-            password = prefs.getString("password", null),
+            passport = readCredential(prefs, PAN123_PREFS, "passport"),
+            password = readCredential(prefs, PAN123_PREFS, "password"),
             token = token,
         )
     }
@@ -372,8 +375,8 @@ class BackupManager @Inject constructor(
     private fun readQuarkConfig(): QuarkBackupConfig? {
         val quarkPrefs = context.getSharedPreferences(QUARK_PREFS, Context.MODE_PRIVATE)
         val ucPrefs = context.getSharedPreferences(UC_PREFS, Context.MODE_PRIVATE)
-        val quarkCookie = quarkPrefs.getString("cookie", null)
-        val ucCookie = ucPrefs.getString("cookie", null)
+        val quarkCookie = readCredential(quarkPrefs, QUARK_PREFS, "cookie")
+        val ucCookie = readCredential(ucPrefs, UC_PREFS, "cookie")
         if (quarkCookie.isNullOrBlank() && ucCookie.isNullOrBlank()) return null
         return QuarkBackupConfig(quarkCookie = quarkCookie, ucCookie = ucCookie)
     }
@@ -387,12 +390,12 @@ class BackupManager @Inject constructor(
 
     private fun readYun139Config(): Yun139BackupConfig? {
         val prefs = context.getSharedPreferences(YUN139_PREFS, Context.MODE_PRIVATE)
-        val auth = prefs.getString("authorization", null)
+        val auth = readCredential(prefs, YUN139_PREFS, "authorization")
         if (auth.isNullOrBlank()) return null
         return Yun139BackupConfig(
             authorization = auth,
-            phoneNumber = prefs.getString("phoneNumber", null),
-            userDomainId = prefs.getString("userDomainId", null),
+            phoneNumber = readCredential(prefs, YUN139_PREFS, "phoneNumber"),
+            userDomainId = readCredential(prefs, YUN139_PREFS, "userDomainId"),
             lastRefresh = prefs.getLong("lastRefresh", 0),
         )
     }
@@ -413,13 +416,32 @@ class BackupManager @Inject constructor(
         Yun139AuthProvider.isActive = !config.authorization.isNullOrBlank()
     }
 
+    /**
+     * 读取某个凭证字段。
+     *
+     * 归档里必须放**明文**（归档本身由用户口令加密，见 [BackupArchiveCodec.encodeEncrypted]），
+     * 所以这里要把落盘的密文解出来；恢复时再由 [saveCredentials] 重新加密写回。
+     * 未迁移的 scope（目前只有天翼 `cloud189`）按明文读。
+     */
+    private fun readCredential(prefs: SharedPreferences, scope: String, key: String): String? =
+        if (shouldEncrypt(scope, key)) prefs.getSecret(scope, key) else prefs.getString(key, null)
+
+    /** 该字段是否走加密存储；读写两侧必须用同一判定，否则会互相读不到。 */
+    private fun shouldEncrypt(scope: String, key: String): Boolean =
+        scope in ENCRYPTED_SCOPES && key !in PLAINTEXT_KEYS
+
     /** 使用同步提交报告磁盘写入失败，并移除备份中缺失的旧账号字段。 */
     private fun saveCredentials(name: String, values: Map<String, Any?>) {
         val editor = context.getSharedPreferences(name, Context.MODE_PRIVATE).edit()
         values.forEach { (key, value) ->
             when (value) {
                 null -> editor.remove(key)
-                is String -> editor.putString(key, value)
+                is String ->
+                    if (shouldEncrypt(name, key)) {
+                        editor.putSecret(name, key, value)
+                    } else {
+                        editor.putString(key, value)
+                    }
                 is Long -> editor.putLong(key, value)
             }
         }
@@ -437,5 +459,17 @@ class BackupManager @Inject constructor(
         private const val QUARK_PREFS = "quark"
         private const val UC_PREFS = "uc"
         private const val YUN139_PREFS = "yun139"
+
+        /**
+         * 已迁移到 Android Keystore 加密存储的 prefs 文件（见 [CredentialCrypto]）。
+         * 天翼 `cloud189` 仍由自己的 `C189AuthProvider` 明文管理，暂不在列——**加进来之前
+         * 必须先把它的读写也迁移掉**，否则两边读法不一致会直接读不到凭证。
+         */
+        private val ENCRYPTED_SCOPES = setOf(
+            ALIPAN_PREFS, PAN123_PREFS, QUARK_PREFS, UC_PREFS, YUN139_PREFS, PREFS_NAME,
+        )
+
+        /** 非机密字段：多处按明文读写，保持原样，避免与既有读法不一致。 */
+        private val PLAINTEXT_KEYS = setOf("drive_id")
     }
 }

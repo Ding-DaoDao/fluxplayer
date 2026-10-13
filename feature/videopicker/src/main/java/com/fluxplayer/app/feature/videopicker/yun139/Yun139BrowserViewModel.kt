@@ -17,6 +17,8 @@ import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.data.security.getSecret
+import com.fluxplayer.app.core.data.security.putSecret
 import com.fluxplayer.app.core.data.yun139.Yun139ApiClient
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import com.fluxplayer.app.core.data.yun139.Yun139FileItem
@@ -143,9 +145,9 @@ class Yun139BrowserViewModel @Inject constructor(
 
     private fun autoLogin() {
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val authorization = prefs.getString("authorization", "") ?: ""
-        val phoneNumber = prefs.getString("phoneNumber", "") ?: ""
-        val userDomainId = prefs.getString("userDomainId", "") ?: ""
+        val authorization = prefs.getSecret(PREF_NAME, "authorization").orEmpty()
+        val phoneNumber = prefs.getSecret(PREF_NAME, "phoneNumber").orEmpty()
+        val userDomainId = prefs.getSecret(PREF_NAME, "userDomainId").orEmpty()
         val lastRefresh = prefs.getLong("lastRefresh", 0L)
 
         if (authorization.isBlank()) return
@@ -170,7 +172,7 @@ class Yun139BrowserViewModel @Inject constructor(
                     val refreshResult = apiClient.refreshToken()
                     if (refreshResult.isSuccess) {
                         prefs.edit()
-                            .putString("authorization", Yun139AuthProvider.authorization)
+                            .putSecret(PREF_NAME, "authorization", Yun139AuthProvider.authorization)
                             .putLong("lastRefresh", System.currentTimeMillis())
                             .apply()
                         Log.d(TAG, "token auto-refreshed")
@@ -204,9 +206,9 @@ class Yun139BrowserViewModel @Inject constructor(
 
             val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.edit()
-                .putString("authorization", tokenValue)
-                .putString("phoneNumber", phoneNumber)
-                .putString("userDomainId", userDomainId)
+                .putSecret(PREF_NAME, "authorization", tokenValue)
+                .putSecret(PREF_NAME, "phoneNumber", phoneNumber)
+                .putSecret(PREF_NAME, "userDomainId", userDomainId)
                 .putLong("lastRefresh", System.currentTimeMillis())
                 .apply()
 

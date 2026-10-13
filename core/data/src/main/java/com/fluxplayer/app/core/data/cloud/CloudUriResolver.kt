@@ -18,6 +18,8 @@ import com.fluxplayer.app.core.data.pan123.Pan123ApiClient
 import com.fluxplayer.app.core.data.pan123.Pan123AuthProvider
 import com.fluxplayer.app.core.data.quark.QuarkApiClient
 import com.fluxplayer.app.core.data.quark.QuarkAuthProvider
+import com.fluxplayer.app.core.data.security.getSecret
+import com.fluxplayer.app.core.data.security.putSecret
 import com.fluxplayer.app.core.data.yun139.Yun139ApiClient
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -115,7 +117,7 @@ class CloudUriResolver @Inject constructor(
      */
     suspend fun refreshPan123QualityUrls(fileId: String): List<VideoQualityCache.QualityOption>? {
         val prefs = context.getSharedPreferences("pan123", Context.MODE_PRIVATE)
-        val token = prefs.getString("token", "") ?: ""
+        val token = prefs.getSecret("pan123", "token").orEmpty()
         if (token.isBlank()) {
             Log.w(TAG, "refreshPan123QualityUrls: token is blank")
             return null
@@ -183,7 +185,7 @@ class CloudUriResolver @Inject constructor(
         Log.d(TAG, "========== resolvePan123 START: fileId=$fileId ==========")
         
         val prefs = context.getSharedPreferences("pan123", Context.MODE_PRIVATE)
-        val token = prefs.getString("token", "") ?: ""
+        val token = prefs.getSecret("pan123", "token").orEmpty()
         if (token.isBlank()) {
             Log.e(TAG, "resolvePan123: token is BLANK! Cannot proceed.")
             return null
@@ -309,7 +311,7 @@ class CloudUriResolver @Inject constructor(
 
     private suspend fun resolveQuark(fileId: String): String? {
         val prefs = context.getSharedPreferences("quark", Context.MODE_PRIVATE)
-        val cookie = prefs.getString("cookie", "") ?: ""
+        val cookie = prefs.getSecret("quark", "cookie").orEmpty()
         if (cookie.isBlank() || !cookie.contains("__uid=")) {
             Log.w(TAG, "resolveQuark: cookie invalid")
             return null
@@ -319,7 +321,7 @@ class CloudUriResolver @Inject constructor(
         client.setDriveType("quark")
         client.setCookie(cookie)
         // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
-        client.onCookieUpdated = { merged -> prefs.edit().putString("cookie", merged).apply() }
+        client.onCookieUpdated = { merged -> prefs.edit().putSecret("quark", "cookie", merged).apply() }
         clearOtherProviders("quark")
 
         // 注册夸克播放头（后缀匹配覆盖所有 *.quark.cn 子域名）
@@ -346,14 +348,14 @@ class CloudUriResolver @Inject constructor(
 
     private suspend fun resolveUC(fileId: String): String? {
         val prefs = context.getSharedPreferences("uc", Context.MODE_PRIVATE)
-        val cookie = prefs.getString("cookie", "") ?: ""
+        val cookie = prefs.getSecret("uc", "cookie").orEmpty()
         if (cookie.isBlank() || !cookie.contains("__uid=")) return null
 
         val client = QuarkApiClient()
         client.setDriveType("uc")
         client.setCookie(cookie)
         // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
-        client.onCookieUpdated = { merged -> prefs.edit().putString("cookie", merged).apply() }
+        client.onCookieUpdated = { merged -> prefs.edit().putSecret("uc", "cookie", merged).apply() }
         clearOtherProviders("uc")
 
         // 注册 UC 播放头（后缀匹配覆盖 *.quark.cn 和 *.uc.cn 子域名）
@@ -418,7 +420,7 @@ class CloudUriResolver @Inject constructor(
         if (!AliyunAuthProvider.isActive) return null
 
         val prefs = context.getSharedPreferences("alipan", Context.MODE_PRIVATE)
-        val auth = prefs.getString("authorization", "") ?: ""
+        val auth = prefs.getSecret("alipan", "authorization").orEmpty()
         if (auth.isBlank()) return null
 
         val client = AliyunApiClient()
@@ -430,10 +432,10 @@ class CloudUriResolver @Inject constructor(
         val driveId = prefs.getString("drive_id", "") ?: ""
         if (driveId.isNotBlank()) client.driveId = driveId
 
-        val deviceId = prefs.getString("device_id", "")
+        val deviceId = prefs.getSecret("alipan", "device_id")
         if (!deviceId.isNullOrBlank()) client.setDeviceId(deviceId)
 
-        val signature = prefs.getString("signature", "")
+        val signature = prefs.getSecret("alipan", "signature")
         if (!signature.isNullOrBlank()) client.setSignature(signature)
 
         // 注册阿里云播放头（后缀匹配覆盖所有 *.alipan.com 子域名）

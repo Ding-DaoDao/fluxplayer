@@ -2,6 +2,8 @@ package com.fluxplayer.app.core.data.openlist
 
 import android.content.Context
 import android.util.Log
+import com.fluxplayer.app.core.data.security.getSecret
+import com.fluxplayer.app.core.data.security.putSecret
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -481,11 +483,11 @@ class OpenListManager(
     // ====================================================================
 
     private fun getSavedPassword(): String? {
-        return prefs.getString(PREF_PASSWORD, null)?.takeIf { it.isNotBlank() }
+        return prefs.getSecret(PREFS_NAME, PREF_PASSWORD)?.takeIf { it.isNotBlank() }
     }
 
     private fun savePassword(password: String) {
-        prefs.edit().putString(PREF_PASSWORD, password).apply()
+        prefs.edit().putSecret(PREFS_NAME, PREF_PASSWORD, password).apply()
     }
 
     // ====================================================================
