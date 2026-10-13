@@ -1,6 +1,8 @@
 package com.fluxplayer.app
 
 import android.app.Application
+import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
+import com.fluxplayer.app.core.data.cloud189.C189SessionKeeper
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -43,6 +45,9 @@ class NextPlayerApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+
+        C189AuthProvider.initialize(this)
+        registerActivityLifecycleCallbacks(C189SessionKeeper(applicationScope))
 
         // OpenList 管理器初始化
         openListManager = OpenListManager(this, applicationScope)

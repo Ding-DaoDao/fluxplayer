@@ -377,6 +377,7 @@ class CloudUriResolver @Inject constructor(
     }
 
     private suspend fun resolveCloud189(fileId: String): String? {
+        C189AuthProvider.restoreSavedSession()
         if (!C189AuthProvider.isActive) {
             Log.w(TAG, "resolveCloud189: C189AuthProvider is not active")
             return null
@@ -386,11 +387,7 @@ class CloudUriResolver @Inject constructor(
         // 注册天翼云盘播放头（后缀匹配覆盖所有 *.189.cn 子域名）
         CloudPlayHeaders.registerSuffix(".189.cn") { C189AuthProvider.getPlayHeaders() }
 
-        val client = C189ApiClient().apply {
-            accessToken = C189AuthProvider.accessToken
-            sessionKey = C189AuthProvider.sessionKey
-            sessionSecret = C189AuthProvider.sessionSecret
-        }
+        val client = C189ApiClient()
         val url = client.getVideoPlayUrl(fileId).getOrNull()
         Log.d(TAG, "resolveCloud189 fileId=$fileId url=${url?.let(::sanitizeUrl)}")
         if (url != null) return url + "#189Play=true#"

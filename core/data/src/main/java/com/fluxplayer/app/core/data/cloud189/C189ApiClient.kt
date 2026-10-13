@@ -5,6 +5,8 @@ import android.util.Log
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import com.fluxplayer.app.core.data.GlobalCookieJar
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -32,9 +34,16 @@ class C189ApiClient(
         private const val OPEN_API_BASE = "https://cloud.189.cn/api/open"
     }
 
-    var accessToken: String = ""
-    var sessionKey: String = ""
-    var sessionSecret: String = ""
+    // 所有客户端读取同一份凭证，播放刷新后浏览页不会继续使用旧会话。
+    var accessToken: String
+        get() = C189AuthProvider.accessToken
+        set(value) { C189AuthProvider.accessToken = value }
+    var sessionKey: String
+        get() = C189AuthProvider.sessionKey
+        set(value) { C189AuthProvider.sessionKey = value }
+    var sessionSecret: String
+        get() = C189AuthProvider.sessionSecret
+        set(value) { C189AuthProvider.sessionSecret = value }
 
     // ==================== 密码学工具 ====================
 
@@ -45,7 +54,8 @@ class C189ApiClient(
 
     private fun hmacSha1(key: ByteArray, data: String): String {
         val mac = Mac.getInstance("HmacSHA1")
-        mac.init(SecretKeySpec(key, "HmacSHA1"))
+        // HMAC 的空密钥会补零到块长，避免 SecretKeySpec 拒绝空数组。
+        mac.init(SecretKeySpec(if (key.isEmpty()) ByteArray(64) else key, "HmacSHA1"))
         val hash = mac.doFinal(data.toByteArray(Charsets.UTF_8))
         return hash.joinToString("") { "%02x".format(it) }
     }
@@ -64,35 +74,32 @@ class C189ApiClient(
 
     // ==================== 会话刷新辅助 ====================
 
-    /**
-     * session 签名类请求（signedGet/signedPost）的过期处理：
-     * 用 accessToken 重新登录获取 session，并同步本地字段保持一致。
-     * @return 是否刷新成功（可重试）
-     */
-    private suspend fun refreshSessionAndSync(): Boolean {
-        return try {
-            login4MergedClient(accessToken)
-            // login4MergedClient 已同步 C189AuthProvider；同步本地字段保持一致
-            sessionKey = C189AuthProvider.sessionKey
-            sessionSecret = C189AuthProvider.sessionSecret
-            true
-        } catch (e: Exception) {
-            Log.w(TAG, "refreshSessionAndSync failed", e)
-            false
+    private suspend fun refreshSessionAndSync(expected: C189AuthProvider.Credentials): Boolean =
+        C189AuthProvider.refreshMutex.withLock {
+            if (C189AuthProvider.snapshot() !== expected) return@withLock C189AuthProvider.hasValidSession()
+            try {
+                val session = fetchSession(expected.accessToken)
+                C189AuthProvider.replaceIfCurrent(expected, expected.copy(sessionKey = session.first, sessionSecret = session.second))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "恢复天翼会话失败", e)
+                false
+            }
         }
-    }
 
-    /**
-     * open API 类请求（openApiPost/openApiGet）的过期处理：
-     * 刷新 accessToken 并同步本地全部字段（含 sessionSecret，缺失会导致后续签名失败）。
-     * @return 是否刷新成功（可重试）
-     */
-    private suspend fun refreshAccessTokenAndSync(): Boolean {
-        if (!refreshAccessToken()) return false
-        accessToken = C189AuthProvider.accessToken
-        sessionKey = C189AuthProvider.sessionKey
-        sessionSecret = C189AuthProvider.sessionSecret
-        return true
+    private fun responseError(body: String, httpCode: Int): C189ApiException? {
+        val json = try { JSONObject(body) } catch (_: Exception) { null }
+        val code = json?.let {
+            listOf("errorCode", "res_code", "code").map { key -> it.optString(key, "") }
+                .firstOrNull { value -> value.isNotBlank() && value != "0" && value != "200" && value != "SUCCESS" }
+        }
+        val message = json?.let {
+            listOf("errorMsg", "res_message", "message", "msg").map { key -> it.optString(key, "") }
+                .firstOrNull { value -> value.isNotBlank() }
+        }.orEmpty()
+        val errorMessage = if (json == null && C189SessionErrors.isAuthenticationError(body)) body else message
+        return C189SessionErrors.classify(httpCode, code, errorMessage, json?.optBoolean("success", true) ?: true)
     }
 
     // ==================== API 请求 ====================
@@ -101,9 +108,15 @@ class C189ApiClient(
     private suspend fun signedGet(
         path: String, queryParams: Map<String, String> = emptyMap(), retry: Boolean = true
     ): JSONObject {
-        val sk = sessionKey.ifBlank { C189AuthProvider.sessionKey }
-        val ss = sessionSecret.ifBlank { C189AuthProvider.sessionSecret }
-        if (sk.isBlank()) throw IllegalStateException("未登录: sessionKey 为空")
+        val credentials = C189AuthProvider.snapshot()
+        val sk = credentials.sessionKey
+        val ss = credentials.sessionSecret
+        if (sk.isBlank() || ss.isBlank()) {
+            if (retry && (refreshSessionAndSync(credentials) || refreshAccessToken(credentials))) {
+                return signedGet(path, queryParams, false)
+            }
+            throw C189ApiException("InvalidSessionKey", "未取得完整会话，请重新登录", true)
+        }
 
         val date = buildDateHeader()
         val queryStr = if (queryParams.isNotEmpty()) {
@@ -124,17 +137,17 @@ class C189ApiClient(
             .header("date", date)
             .build()
 
-        Log.d(TAG, "signedGet: sigData=$sigData, sig=$sig, url=$API_BASE$path$queryStr")
+        Log.d(TAG, "signedGet: $path")
 
         val resp = executeRequestAndGetResponse(request)
         val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
-        if (!resp.isSuccessful) {
-            // sessionKey 过期 → 尝试用 accessToken 重新获取 session 后重试
-            if (retry && (body.contains("InvalidSessionKey") || body.contains("SessionKeyInvalid"))
-                && accessToken.isNotBlank() && refreshSessionAndSync()) {
+        val error = responseError(body, resp.code)
+        resp.close()
+        if (error != null) {
+            if (retry && error.authentication && (refreshSessionAndSync(credentials) || refreshAccessToken(credentials))) {
                 return signedGet(path, queryParams, false)
             }
-            throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
+            throw error
         }
         return JSONObject(body)
     }
@@ -143,9 +156,15 @@ class C189ApiClient(
     private suspend fun signedPost(
         path: String, formParams: Map<String, String> = emptyMap(), retry: Boolean = true
     ): JSONObject {
-        val sk = sessionKey.ifBlank { C189AuthProvider.sessionKey }
-        val ss = sessionSecret.ifBlank { C189AuthProvider.sessionSecret }
-        if (sk.isBlank()) throw IllegalStateException("未登录: sessionKey 为空")
+        val credentials = C189AuthProvider.snapshot()
+        val sk = credentials.sessionKey
+        val ss = credentials.sessionSecret
+        if (sk.isBlank() || ss.isBlank()) {
+            if (retry && (refreshSessionAndSync(credentials) || refreshAccessToken(credentials))) {
+                return signedPost(path, formParams, false)
+            }
+            throw C189ApiException("InvalidSessionKey", "未取得完整会话，请重新登录", true)
+        }
 
         val date = buildDateHeader()
         val requestUri = path.substringBefore("?")
@@ -166,16 +185,17 @@ class C189ApiClient(
             .header("date", date)
             .build()
 
-        Log.d(TAG, "signedPost: $API_BASE$path, sig=$sig, form=$formBody")
+        Log.d(TAG, "signedPost: $path")
 
         val resp = executeRequestAndGetResponse(request)
         val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
-        if (!resp.isSuccessful) {
-            if (retry && (body.contains("InvalidSessionKey") || body.contains("SessionKeyInvalid"))
-                && accessToken.isNotBlank() && refreshSessionAndSync()) {
+        val error = responseError(body, resp.code)
+        resp.close()
+        if (error != null) {
+            if (retry && error.authentication && (refreshSessionAndSync(credentials) || refreshAccessToken(credentials))) {
                 return signedPost(path, formParams, false)
             }
-            throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
+            throw error
         }
         return JSONObject(body)
     }
@@ -184,7 +204,8 @@ class C189ApiClient(
     private suspend fun openApiPost(
         actionPath: String, formParams: Map<String, String>, retry: Boolean = true
     ): JSONObject {
-        val at = accessToken.ifBlank { C189AuthProvider.accessToken }
+        val credentials = C189AuthProvider.snapshot()
+        val at = credentials.accessToken
         if (at.isBlank()) throw IllegalStateException("未登录或 AccessToken 为空")
 
         val ts = System.currentTimeMillis().toString()
@@ -194,7 +215,7 @@ class C189ApiClient(
         sigParams["AccessToken"] = at
         val signature = md5Signature(sigParams)
 
-        val formBody = formParams.entries.joinToString("&") { "${it.key}=${it.value}" }
+        val formBody = formParams.entries.joinToString("&") { "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}" }
 
         val request = Request.Builder()
             .url("$OPEN_API_BASE/$actionPath")
@@ -213,12 +234,13 @@ class C189ApiClient(
         val resp = executeRequestAndGetResponse(request)
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response")
 
-        if (!resp.isSuccessful) {
-            val canRetry = respBody.contains("InvalidAccessToken") || respBody.contains("InvalidSessionKey")
-            if (retry && canRetry && refreshAccessTokenAndSync()) {
+        val error = responseError(respBody, resp.code)
+        resp.close()
+        if (error != null) {
+            if (retry && error.authentication && (refreshAccessToken(credentials))) {
                 return openApiPost(actionPath, formParams, false)
             }
-            throw IllegalStateException("HTTP ${resp.code}: ${respBody.take(200)}")
+            throw error
         }
         return JSONObject(respBody)
     }
@@ -227,7 +249,8 @@ class C189ApiClient(
     private suspend fun openApiGet(
         actionPath: String, queryParams: Map<String, String>, retry: Boolean = true
     ): JSONObject {
-        val at = accessToken.ifBlank { C189AuthProvider.accessToken }
+        val credentials = C189AuthProvider.snapshot()
+        val at = credentials.accessToken
         if (at.isBlank()) throw IllegalStateException("未登录或 AccessToken 为空")
 
         val ts = System.currentTimeMillis().toString()
@@ -237,7 +260,7 @@ class C189ApiClient(
         sigParams["AccessToken"] = at
         val signature = md5Signature(sigParams)
 
-        val queryStr = queryParams.entries.joinToString("&") { "${it.key}=${it.value}" }
+        val queryStr = queryParams.entries.joinToString("&") { "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}" }
 
         val request = Request.Builder()
             .url("$OPEN_API_BASE/$actionPath?$queryStr")
@@ -254,13 +277,13 @@ class C189ApiClient(
         val resp = executeRequestAndGetResponse(request)
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response")
 
-        if (!resp.isSuccessful) {
-            // token/session 过期 → 尝试刷新（需同步全部字段，含 sessionSecret）
-            val canRetry = respBody.contains("InvalidAccessToken") || respBody.contains("InvalidSessionKey")
-            if (retry && canRetry && refreshAccessTokenAndSync()) {
+        val error = responseError(respBody, resp.code)
+        resp.close()
+        if (error != null) {
+            if (retry && error.authentication && (refreshAccessToken(credentials))) {
                 return openApiGet(actionPath, queryParams, false)
             }
-            throw IllegalStateException("HTTP ${resp.code}: ${respBody.take(200)}")
+            throw error
         }
         return JSONObject(respBody)
     }
@@ -268,6 +291,7 @@ class C189ApiClient(
     // ==================== 登录 ====================
 
     suspend fun loginByCookies(cookies: String): Boolean {
+        val expected = C189AuthProvider.snapshot()
         try {
             val date = buildDateHeader()
             val requestUri = "/api/portal/loginByCookies.action"
@@ -286,20 +310,16 @@ class C189ApiClient(
                     .header("Cookie", cookies)
                     .build()
             )
-            val body = resp.body?.string() ?: return false
+            val body = resp.use { it.body?.string() } ?: return false
             val json = JSONObject(body)
-
-            accessToken = json.optString("accessToken", "")
-            sessionKey = json.optString("sessionKey", "")
-            sessionSecret = json.optString("sessionSecret", "")
-
-            if (accessToken.isNotBlank()) {
-                C189AuthProvider.accessToken = accessToken
-                C189AuthProvider.sessionKey = sessionKey
-                C189AuthProvider.sessionSecret = sessionSecret
-                C189AuthProvider.isActive = true
-            }
-            return accessToken.isNotBlank()
+            val token = json.optString("accessToken", "")
+            val key = json.optString("sessionKey", "")
+            val secret = json.optString("sessionSecret", "")
+            if (token.isBlank() || key.isBlank() || secret.isBlank()) return false
+            restoreCookies(cookies)
+            return C189AuthProvider.replaceIfCurrent(expected, C189AuthProvider.Credentials(token, key, secret, json.optString("refreshToken", "")))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "loginByCookies failed", e)
         }
@@ -307,6 +327,7 @@ class C189ApiClient(
     }
 
     suspend fun loginByPassword(phone: String, password: String): Result<String> = runCatching {
+        val expected = C189AuthProvider.snapshot()
         val ua = C189AuthProvider.userAgent
         val appKey = "8025431004"
         val returnUrl = "https://m.cloud.189.cn/zhuanti/2020/loginErrorPc/index.html"
@@ -419,9 +440,10 @@ class C189ApiClient(
         val resCode = sessionJson.optString("res_code", "")
         if (resCode != "0") throw IllegalStateException("[Step4] 失败: $resCode ${sessionJson.optString("res_message")}")
 
-        sessionKey = sessionJson.getString("sessionKey")
-        sessionSecret = sessionJson.optString("sessionSecret", "")
+        val sessionKey = sessionJson.getString("sessionKey")
+        val sessionSecret = sessionJson.optString("sessionSecret", "")
         val refreshToken = sessionJson.optString("refreshToken", "")
+        if (sessionKey.isBlank() || sessionSecret.isBlank()) throw IllegalStateException("登录未返回完整会话")
 
         // ---- 5) sessionKey 换 API accessToken ----
         val ts = System.currentTimeMillis().toString()
@@ -443,14 +465,13 @@ class C189ApiClient(
         }
         val atBody = atResp.body?.string() ?: "{}"
         val atJson = JSONObject(atBody)
-        accessToken = atJson.optString("accessToken", "")
+        val accessToken = atJson.optString("accessToken", "")
         if (accessToken.isBlank()) throw IllegalStateException("[Step5] 换取 accessToken 失败: ${atBody.take(200)}")
 
-        C189AuthProvider.setTokens(
+        check(C189AuthProvider.replaceIfCurrent(expected, C189AuthProvider.Credentials(
             accessToken = accessToken, sessionKey = sessionKey,
             sessionSecret = sessionSecret, refreshToken = refreshToken,
-            expiresIn = System.currentTimeMillis() + 518400000
-        )
+        ))) { "登录状态已改变，请重试" }
 
         "ok"
     }
@@ -538,6 +559,7 @@ class C189ApiClient(
      * @return 成功返回 "ok", 失败抛异常
      */
     suspend fun loginBySms(phone: String, smsCode: String): Result<String> = runCatching {
+        val expected = C189AuthProvider.snapshot()
         // 1) 获取 RSA 公钥
         val (pubKey, pre) = encryptConfForSms()
 
@@ -605,17 +627,10 @@ class C189ApiClient(
         val userId = parasMap["userId"] ?: ""
 
         // 5) 用 accessToken 换取 sessionKey (login4MergedClient)
-        login4MergedClient(smsAccessToken)
-
-        // 6) 保存 token
-        val at = accessToken.ifBlank { smsAccessToken }
-        C189AuthProvider.setTokens(
-            accessToken = at,
-            sessionKey = sessionKey,
-            sessionSecret = sessionSecret,
-            refreshToken = smsRefreshToken,
-            expiresIn = System.currentTimeMillis() + 518400000
-        )
+        val session = login4MergedClient(smsAccessToken)
+        check(C189AuthProvider.replaceIfCurrent(expected, session.copy(refreshToken = smsRefreshToken))) {
+            "登录状态已改变，请重试"
+        }
 
         "ok"
     }
@@ -624,7 +639,7 @@ class C189ApiClient(
      * 用 accessToken 换取移动端 sessionKey/sessionSecret (SMS 登录内部使用)
      * 调用 api.cloud.189.cn/login4MergedClient.action
      */
-    private suspend fun login4MergedClient(at: String) {
+    private suspend fun login4MergedClient(at: String): C189AuthProvider.Credentials {
         val deviceModel = randomDeviceModel()
         val rand = System.currentTimeMillis().toString()
 
@@ -671,9 +686,10 @@ class C189ApiClient(
             )
         }
 
-        accessToken = json.optString("eAccessToken", at)
-        sessionKey = json.getString("sessionKey")
-        sessionSecret = json.optString("sessionSecret", "")
+        val accessToken = json.optString("eAccessToken", at)
+        val sessionKey = json.getString("sessionKey")
+        val sessionSecret = json.optString("sessionSecret", "")
+        check(sessionKey.isNotBlank() && sessionSecret.isNotBlank()) { "登录未返回完整会话" }
 
         // 同时保存 family 系列 token (家庭云)
         val familySk = json.optString("familySessionKey", "")
@@ -682,12 +698,7 @@ class C189ApiClient(
             C189AuthProvider.setFamilyTokens(familySk, familySs)
         }
 
-        // 同步核心 token 到全局 AuthProvider 并触发持久化
-        C189AuthProvider.accessToken = accessToken
-        C189AuthProvider.sessionKey = sessionKey
-        C189AuthProvider.sessionSecret = sessionSecret
-        C189AuthProvider.isActive = true
-        C189AuthProvider.notifyTokensRefreshed()
+        return C189AuthProvider.Credentials(accessToken, sessionKey, sessionSecret)
     }
 
     /** 随机设备型号 (Xiaomi 系列, 来自海阔视界) */
@@ -716,133 +727,91 @@ class C189ApiClient(
 
     // ==================== Token 刷新 ====================
 
-    suspend fun refreshAccessToken(): Boolean {
-        try {
-            val rt = C189AuthProvider.refreshToken
-            if (rt.isNotBlank()) {
-                val resp = executeRequestOrNull(
-                    Request.Builder()
-                        .url("https://open.e.189.cn/api/oauth2/refreshToken.do")
-                        .header("User-Agent", C189AuthProvider.userAgent)
-                        .post("clientId=8025431004&refreshToken=$rt&grantType=refresh_token&format=json"
-                            .toRequestBody(formUrlEncoded))
-                        .build()
-                )
-                if (resp != null) {
-                    val json = JSONObject(resp)
-                    val newAt = json.optString("accessToken", "")
-                    if (newAt.isNotBlank()) {
-                        accessToken = newAt
-                        C189AuthProvider.accessToken = newAt
-                        C189AuthProvider.refreshToken = json.optString("refreshToken", rt)
-                        C189AuthProvider.expiresIn = System.currentTimeMillis() + 518400000
-
-                        // 关键：用新 accessToken 刷新 sessionKey/sessionSecret
-                        tryRefreshSessionViaAccessToken(newAt)
-                        C189AuthProvider.notifyTokensRefreshed()
-                        Log.d(TAG, "refreshAccessToken: 通过 refreshToken 成功")
-                        return true
+    suspend fun refreshAccessToken(expected: C189AuthProvider.Credentials = C189AuthProvider.snapshot()): Boolean =
+        C189AuthProvider.refreshMutex.withLock {
+            if (C189AuthProvider.snapshot() !== expected) return@withLock C189AuthProvider.hasValidSession()
+            var current = expected
+            try {
+                if (current.refreshToken.isNotBlank()) {
+                    val body = executeRequestOrNull(
+                        Request.Builder()
+                            .url("https://open.e.189.cn/api/oauth2/refreshToken.do")
+                            .header("User-Agent", C189AuthProvider.userAgent)
+                            .post(("clientId=8025431004&refreshToken=" + URLEncoder.encode(current.refreshToken, "UTF-8") +
+                                "&grantType=refresh_token&format=json").toRequestBody(formUrlEncoded))
+                            .build()
+                    ) ?: throw IllegalStateException("刷新凭证响应为空")
+                    val json = JSONObject(body)
+                    val newToken = json.optString("accessToken", "")
+                    if (newToken.isNotBlank()) {
+                        val lifetime = json.optLong("expiresIn", json.optLong("expires_in", 0))
+                        val refreshed = current.copy(
+                            accessToken = newToken,
+                            sessionKey = "",
+                            sessionSecret = "",
+                            refreshToken = json.optString("refreshToken", "").ifBlank { current.refreshToken },
+                            expiresIn = if (lifetime > 0) System.currentTimeMillis() + lifetime * 1000 else 0,
+                        )
+                        // 刷新令牌可能轮换，先保存新凭证；后续会话请求超时也不能丢失它。
+                        if (!C189AuthProvider.replaceIfCurrent(current, refreshed)) return@withLock false
+                        current = C189AuthProvider.snapshot()
                     }
                 }
-            }
-
-            // refreshToken 失败 → 尝试用 sessionKey 重新换取 accessToken
-            val sk = sessionKey.ifBlank { C189AuthProvider.sessionKey }
-            if (sk.isNotBlank()) {
-                val ts = System.currentTimeMillis().toString()
-                val sigParams = mapOf("sessionKey" to sk, "timestamp" to ts, "AppKey" to "600100422")
-                val sig = md5Signature(sigParams)
-
-                val resp = withContext(Dispatchers.IO) {
-                    client.newCall(
+                if (current === expected && current.sessionKey.isNotBlank()) {
+                    val timestamp = System.currentTimeMillis().toString()
+                    val signature = md5Signature(mapOf("sessionKey" to current.sessionKey, "timestamp" to timestamp, "AppKey" to "600100422"))
+                    val body = executeRequestOrNull(
                         Request.Builder()
-                            .url("https://cloud.189.cn/api/open/oauth2/getAccessTokenBySsKey.action?sessionKey=$sk")
+                            .url("$OPEN_API_BASE/oauth2/getAccessTokenBySsKey.action?sessionKey=${URLEncoder.encode(current.sessionKey, "UTF-8")}")
                             .header("User-Agent", C189AuthProvider.userAgent)
-                            .header("accept", "application/json;charset=UTF-8")
                             .header("Sign-Type", "1")
-                            .header("Signature", sig)
-                            .header("Timestamp", ts)
+                            .header("Signature", signature)
+                            .header("Timestamp", timestamp)
                             .header("AppKey", "600100422")
-                            .get().build()
-                    ).execute()
+                            .build()
+                    ) ?: return@withLock false
+                    val token = JSONObject(body).optString("accessToken", "")
+                    if (token.isBlank()) return@withLock false
+                    val refreshed = current.copy(accessToken = token, sessionKey = "", sessionSecret = "", expiresIn = 0)
+                    if (!C189AuthProvider.replaceIfCurrent(current, refreshed)) return@withLock false
+                    current = C189AuthProvider.snapshot()
                 }
-                val body = resp.body?.string() ?: ""
-                val json = JSONObject(body)
-                val newAt = json.optString("accessToken", "")
-                if (newAt.isNotBlank()) {
-                    accessToken = newAt
-                    C189AuthProvider.accessToken = newAt
-                    C189AuthProvider.expiresIn = System.currentTimeMillis() + 518400000
-                    // 用新 accessToken 刷新 sessionKey/sessionSecret
-                    tryRefreshSessionViaAccessToken(newAt)
-                    C189AuthProvider.notifyTokensRefreshed()
-                    Log.d(TAG, "refreshAccessToken: 通过 sessionKey 成功")
-                    return true
-                }
+                if (current.accessToken.isBlank()) return@withLock false
+                val session = fetchSession(current.accessToken)
+                C189AuthProvider.replaceIfCurrent(current, current.copy(sessionKey = session.first, sessionSecret = session.second))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "刷新天翼凭证或会话失败", e)
+                false
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "refreshAccessToken failed", e)
         }
-        return false
+
+    /** 以实际返回的完整会话为准，不根据 res_code 猜测是否包含会话。 */
+    private suspend fun fetchSession(token: String): Pair<String, String> {
+        val encodedToken = URLEncoder.encode(token, "UTF-8")
+        val urls = listOf(
+            "$API_BASE/getSessionForPC.action?appId=8025431004&clientType=TELEPC&version=6.2&channelId=web_cloud.189.cn&accessToken=$encodedToken",
+            "$API_BASE/loginByOpen189AccessToken.action?accessToken=$encodedToken",
+            "$API_BASE/login4MergedClient.action?accessToken=$encodedToken&clientType=TELEANDROID&version=8.9.0",
+        )
+        for (url in urls) {
+            val body = executeRequestOrNull(
+                Request.Builder().url(url).header("User-Agent", "Android")
+                    .header("accept", "application/json;charset=UTF-8")
+                    .header("appkey", "600100885").build()
+            ) ?: continue
+            val json = JSONObject(body)
+            val key = json.optString("sessionKey", "")
+            val secret = json.optString("sessionSecret", "")
+            if (key.isNotBlank() && secret.isNotBlank()) return key to secret
+        }
+        throw C189ApiException("InvalidSessionKey", "无法恢复完整会话，请重新登录", true)
     }
 
-    /** 用 accessToken 通过 getSessionForPC 刷新 sessionKey/sessionSecret */
-    private suspend fun tryRefreshSessionViaAccessToken(at: String) {
-        try {
-            val resp = executeRequestOrNull(
-                Request.Builder()
-                    .url("https://api.cloud.189.cn/getSessionForPC.action?" +
-                            "appId=8025431004&clientType=TELEPC&version=6.2" +
-                            "&channelId=web_cloud.189.cn" +
-                            "&rand=${System.currentTimeMillis()}&accessToken=$at")
-                    .header("User-Agent", "Android")
-                    .header("accept", "application/json;charset=UTF-8")
-                    .header("sign-type", "1")
-                    .post("".toRequestBody(null))
-                    .build()
-            ) ?: return
-            val json = JSONObject(resp)
-            // getSessionForPC?accessToken= 返回格式与 ?redirectURL= 不同
-            // 有 sessionKey 时 res_code 不为 0（可能是 -1 表示无此字段）
-            val resCode = json.optInt("res_code", -1)
-            if (resCode == 0) {
-                // res_code=0 表示返回的是普通成功响应，不含 sessionKey
-                // 回退到 loginByOpen189AccessToken
-                val loginResp = executeRequestOrNull(
-                    Request.Builder()
-                        .url("https://api.cloud.189.cn/loginByOpen189AccessToken.action?accessToken=$at")
-                        .header("User-Agent", "Android")
-                        .header("accept", "application/json;charset=UTF-8")
-                        .header("sign-type", "1")
-                        .get().build()
-                )
-                if (loginResp != null) {
-                    val loginJson = JSONObject(loginResp)
-                    val newSk = loginJson.optString("sessionKey", "")
-                    if (newSk.isNotBlank()) {
-                        val newSs = loginJson.optString("sessionSecret", "")
-                        sessionKey = newSk
-                        sessionSecret = newSs
-                        C189AuthProvider.sessionKey = newSk
-                        C189AuthProvider.sessionSecret = newSs
-                        Log.d(TAG, "tryRefreshSessionViaAccessToken(fallback): 刷新 sessionKey 成功")
-                    }
-                }
-                return
-            }
-            // res_code != 0 → 响应中包含 sessionKey
-            val newSk = json.optString("sessionKey", "")
-            if (newSk.isNotBlank()) {
-                val newSs = json.optString("sessionSecret", "")
-                sessionKey = newSk
-                sessionSecret = newSs
-                C189AuthProvider.sessionKey = newSk
-                C189AuthProvider.sessionSecret = newSs
-                Log.d(TAG, "tryRefreshSessionViaAccessToken: 刷新 sessionKey 成功")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "tryRefreshSessionViaAccessToken failed", e)
-        }
+    suspend fun keepAlive(): Result<Unit> = runCatching {
+        signedGet("/keepUserSession.action", mapOf("clientType" to "TELEPC", "version" to "6.2", "channelId" to "web_cloud.189.cn"))
+        Unit
     }
 
     fun getSessionCookie(): String = buildString {
@@ -851,7 +820,7 @@ class C189ApiClient(
         if (accessToken.isNotBlank()) append("accessToken=$accessToken")
     }
 
-    fun isLoggedIn(): Boolean = accessToken.isNotBlank() && sessionKey.isNotBlank()
+    fun isLoggedIn(): Boolean = C189AuthProvider.hasValidSession()
 
     /** 保存 GlobalCookieJar 中所有 cloud.189.cn 相关 Cookie 为字符串 */
     fun saveCookies(): String {
@@ -963,11 +932,13 @@ class C189ApiClient(
         C189ListResult(items, fileListAO?.optInt("count", 0) ?: json.optInt("totalCount", 0))
     }
 
-    suspend fun getVideoPlayUrl(fileId: String): Result<String> = runCatching {
+    suspend fun getVideoPlayUrl(fileId: String, retry: Boolean = true): Result<String> = runCatching {
+        val credentials = C189AuthProvider.snapshot()
         // cloud.189.cn/api/portal/getNewVlcVideoPlayUrl.action — Cookie 认证，无需签名
         val resp = executeRequestAndGetResponse(
             Request.Builder()
                 .url("https://cloud.189.cn/api/portal/getNewVlcVideoPlayUrl.action?fileId=$fileId&type=2")
+                .header("Cookie", "COOKIE_LOGIN_USER=${credentials.accessToken}")
                 .get()
                 .header("User-Agent", "Android")
                 .header("accept", "application/json;charset=UTF-8")
@@ -975,11 +946,20 @@ class C189ApiClient(
                 .build()
         )
         val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
-        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
+        val error = responseError(body, resp.code)
+        resp.close()
+        if (error != null) {
+            if (retry && error.authentication && refreshAccessToken(credentials)) {
+                return@runCatching getVideoPlayUrl(fileId, false).getOrThrow()
+            }
+            throw error
+        }
         val json = JSONObject(body)
-        json.optJSONObject("normal")?.optString("url", "")
-            ?: json.optString("playUrl", "")
-            ?: json.optString("url", "")
+        val url = json.optJSONObject("normal")?.optString("url", "").orEmpty()
+            .ifBlank { json.optString("playUrl", "") }
+            .ifBlank { json.optString("url", "") }
+        check(url.isNotBlank()) { "天翼云盘未返回播放地址" }
+        url
     }
 
     suspend fun getDownloadUrl(fileId: String): Result<String> = runCatching {

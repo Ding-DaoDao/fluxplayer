@@ -13,6 +13,7 @@ import com.fluxplayer.app.core.common.FluxNotificationDelegate
 import com.fluxplayer.app.core.common.PickerUtils
 import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
+import com.fluxplayer.app.core.data.cloud189.C189ApiException
 import com.fluxplayer.app.core.data.cloud189.C189ApiClient
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189FileItem
@@ -74,6 +75,7 @@ class C189BrowserViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(C189BrowserUiState())
     val uiState: StateFlow<C189BrowserUiState> = _uiState.asStateFlow()
 
+    private var restoreSessionJob: Job? = null
     private var loadSequence: Int = 0
     private var loadDirectoryJob: kotlinx.coroutines.Job? = null
     private var loadMoreJob: kotlinx.coroutines.Job? = null
@@ -93,8 +95,7 @@ class C189BrowserViewModel @Inject constructor(
     val downloadProgress: StateFlow<DownloadProgressData?> = _downloadProgress.asStateFlow()
 
     init {
-        // P2: 注册 token 刷新回调，API 层刷新成功后自动持久化
-        C189AuthProvider.onTokensRefreshed = { saveTokens() }
+        C189AuthProvider.initialize(application)
 
         viewModelScope.launch {
             playbackHistoryRepository.getHistoryFlow().collect { history ->
@@ -137,48 +138,34 @@ class C189BrowserViewModel @Inject constructor(
     }
 
     fun tryRestoreSession() {
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val accessToken = prefs.getString("accessToken", "") ?: ""
-        val sessionKey = prefs.getString("sessionKey", "") ?: ""
-        val sessionSecret = prefs.getString("sessionSecret", "") ?: ""
-
-        if (accessToken.isNotBlank() && sessionKey.isNotBlank()) {
-            apiClient.accessToken = accessToken
-            apiClient.sessionKey = sessionKey
-            apiClient.sessionSecret = sessionSecret
-            C189AuthProvider.accessToken = accessToken
-            C189AuthProvider.sessionKey = sessionKey
-            C189AuthProvider.sessionSecret = sessionSecret
-            C189AuthProvider.refreshToken = prefs.getString("refreshToken", "") ?: ""
-            C189AuthProvider.expiresIn = prefs.getLong("expiresIn", 0)
-            C189AuthProvider.isActive = true
-
-            // 恢复 Cookie（重启后丢失，从 SharedPreferences 注入到 GlobalCookieJar）
-            val cookies = prefs.getString("cookies", "") ?: ""
-            apiClient.restoreCookies(cookies)
-
+        restoreSessionJob?.cancel()
+        C189AuthProvider.restoreSavedSession()
+        if (C189AuthProvider.isActive) {
             updateUiState { it.copy(isLoggedIn = true, isLoading = true) }
             syncStackTop { it.copy(isLoading = true, error = null) }
             // 从磁盘缓存预填根目录，加速子目录导航
             CloudDirectoryCache.get(getApplication(), "cloud189", "-11")?.let { directoryCache["-11"] = it }
-            viewModelScope.launch {
+            restoreSessionJob = viewModelScope.launch {
                 val maxRetries = 3
                 val retryDelays = listOf(1000L, 3000L, 5000L)
                 var retryCount = 0
                 while (retryCount <= maxRetries) {
                     try {
-                        // 使用挂起版本，失败会抛异常从而被 catch 捕获
+                        if (!C189AuthProvider.hasValidSession() && !apiClient.refreshAccessToken()) {
+                            throw IllegalStateException("暂时无法恢复天翼会话，请稍后重试")
+                        }
                         loadDirectorySuspended("-11")
                         // 目录加载成功后才执行后续操作
                         autoSign()
                         detectClipboardShareUrl()
                         return@launch
                     } catch (e: Exception) {
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
                         android.util.Log.w(TAG, "tryRestoreSession attempt $retryCount failed: ${e.message}")
                         if (retryCount < maxRetries) {
                             delay(retryDelays[retryCount])
                             try {
-                                val ok = apiClient.refreshAccessToken()
+                                val ok = e is C189ApiException && e.authentication && apiClient.refreshAccessToken()
                                 if (ok) {
                                     saveTokens()
                                 }
@@ -188,8 +175,13 @@ class C189BrowserViewModel @Inject constructor(
                         }
                         retryCount++
                         if (retryCount > maxRetries) {
-                            android.util.Log.w(TAG, "tryRestoreSession: 所有重试均失败，需要重新登录")
-                            logout()
+                            val message = if (e is C189ApiException && e.authentication) {
+                                "登录已失效，请重新登录"
+                            } else {
+                                "连接天翼云盘失败，请检查网络后重试"
+                            }
+                            updateUiState { it.copy(isLoggedIn = !(e is C189ApiException && e.authentication), isLoading = false, error = message) }
+                            syncStackTop { it.copy(isLoading = false, error = message) }
                         }
                     }
                 }
@@ -203,15 +195,7 @@ class C189BrowserViewModel @Inject constructor(
 
     /** 持久化 token 到 SharedPreferences */
     private fun saveTokens() {
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString("accessToken", apiClient.accessToken)
-            .putString("sessionKey", apiClient.sessionKey)
-            .putString("sessionSecret", apiClient.sessionSecret)
-            .putString("refreshToken", C189AuthProvider.refreshToken)
-            .putLong("expiresIn", C189AuthProvider.expiresIn)
-            .putString("cookies", apiClient.saveCookies())
-            .apply()
+        C189AuthProvider.persist()
     }
 
     /**
@@ -309,7 +293,6 @@ class C189BrowserViewModel @Inject constructor(
     // region ==================== 登录 — loginWithCookies (Cookie登录备用) ====================
 
     fun loginWithCookies(cookies: String) {
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         updateUiState { it.copy(loginLoading = true) }
         viewModelScope.launch {
             val ok = apiClient.loginByCookies(cookies)
@@ -332,7 +315,10 @@ class C189BrowserViewModel @Inject constructor(
     // region ==================== 登出 ====================
 
     fun logout() {
-        C189AuthProvider.clear()
+        restoreSessionJob?.cancel()
+        loadDirectoryJob?.cancel()
+        loadMoreJob?.cancel()
+        C189AuthProvider.logout()
 
         // 清除 OkHttp GlobalCookieJar 中旧账号的 Cookie
         GlobalCookieJar.clearHost("cloud.189.cn")
@@ -340,13 +326,6 @@ class C189BrowserViewModel @Inject constructor(
         GlobalCookieJar.clearHost("m.cloud.189.cn")
         GlobalCookieJar.clearHost("open.e.189.cn")
 
-        // 重置 ApiClient 自身字段
-        apiClient.accessToken = ""
-        apiClient.sessionKey = ""
-        apiClient.sessionSecret = ""
-
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
         directoryCache.clear()
         CloudDirectoryCache.clear(getApplication(), "cloud189")
         _uiState.value = C189BrowserUiState()
