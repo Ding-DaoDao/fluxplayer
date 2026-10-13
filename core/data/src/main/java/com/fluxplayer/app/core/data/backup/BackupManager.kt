@@ -4,11 +4,14 @@ import android.content.Context
 import android.net.Uri
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
+import com.fluxplayer.app.core.data.openlist.OpenListManagerProvider
+import com.fluxplayer.app.core.data.openlist.OpenListServerState
 import com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
-import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.data.repository.WebDavRepository
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
+import com.fluxplayer.app.core.datastore.datasource.AppPreferencesDataSource
 import com.fluxplayer.app.core.datastore.datasource.BackupWebDavDataSource
+import com.fluxplayer.app.core.datastore.datasource.PlayerPreferencesDataSource
 import com.fluxplayer.app.core.datastore.datasource.WebDavServersDataSource
 import com.fluxplayer.app.core.model.AlipanBackupConfig
 import com.fluxplayer.app.core.model.BackupData
@@ -21,277 +24,187 @@ import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.model.Yun139BackupConfig
 import com.fluxplayer.app.core.tingshu.TingshuRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
-import java.util.zip.ZipOutputStream
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.serializer
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 @Singleton
 class BackupManager @Inject constructor(
-    private val preferencesRepository: PreferencesRepository,
+    private val appPreferencesDataSource: AppPreferencesDataSource,
+    private val playerPreferencesDataSource: PlayerPreferencesDataSource,
     private val audiobookProgressRepository: AudiobookProgressRepository,
     private val webDavRepository: WebDavRepository,
     private val webDavServersDataSource: WebDavServersDataSource,
     private val backupWebDavDataSource: BackupWebDavDataSource,
     @ApplicationContext private val context: Context,
 ) {
-    private val json = Json {
-        prettyPrint = true
-        ignoreUnknownKeys = true
+    private val operationMutex = Mutex()
+
+    /** 直接读取持久化设置，避免启动阶段的默认状态被误备份。 */
+    private suspend fun createBackup(): BackupData = BackupData(
+        appPreferences = audiobookProgressRepository.exportTo(appPreferencesDataSource.preferences.first()),
+        playerPreferences = playerPreferencesDataSource.preferences.first().copy(danmakuCacheMap = emptyMap()),
+        webDavServers = webDavServersDataSource.webDavServers.first(),
+        openListConfig = readOpenListConfig(),
+        alipanConfig = readAlipanConfig(),
+        cloud189Config = readCloud189Config(),
+        pan123Config = readPan123Config(),
+        quarkConfig = readQuarkConfig(),
+        yun139Config = readYun139Config(),
+        backupWebDavConfig = backupWebDavDataSource.config.first().copy(hasPendingNewBackup = false, lastSeenRemoteBackup = ""),
+        onlineListeningLibrary = TingshuRepository.get(context).exportLibrary(),
+    )
+
+    private suspend fun createArchive(): BackupArchive {
+        val dataDir = context.filesDir.resolve("openlist_data")
+        val files = dataDir.listFiles().orEmpty().filter { it.isFile }
+        if (files.isNotEmpty()) requireOpenListStopped()
+        require(files.sumOf { it.length() } <= 24L * 1024 * 1024) { "OpenList 数据过大，无法导出备份" }
+        return BackupArchive(createBackup(), files.associate { it.name to it.readBytes() })
     }
 
-    /** 创建备份数据包 */
-    suspend fun createBackup(): BackupData {
-        val appPrefs = audiobookProgressRepository.exportTo(preferencesRepository.applicationPreferences.value)
-        val playerPrefs = preferencesRepository.playerPreferences.value
-        val webDavServers = webDavServersDataSource.webDavServers.first()
-        val openListConfig = readOpenListConfig()
-        val backupConfig = backupWebDavDataSource.config.first()
-
-        return BackupData(
-            appPreferences = appPrefs,
-            playerPreferences = playerPrefs,
-            webDavServers = webDavServers,
-            openListConfig = openListConfig,
-            alipanConfig = readAlipanConfig(),
-            cloud189Config = readCloud189Config(),
-            pan123Config = readPan123Config(),
-            quarkConfig = readQuarkConfig(),
-            yun139Config = readYun139Config(),
-            backupWebDavConfig = backupConfig,
-            onlineListeningLibrary = TingshuRepository.get(context).exportLibrary(),
-        )
+    private fun requireOpenListStopped() {
+        val state = OpenListManagerProvider.get()?.state?.value
+        check(state == null || state == OpenListServerState.Stopped || state is OpenListServerState.Error) {
+            "请先停止 OpenList 本地服务，再备份或恢复其数据"
+        }
     }
 
-    /** 从备份数据包恢复，ignoreList 中的配置项将被跳过 */
-    suspend fun restoreFromBackup(backup: BackupData, ignoreList: Set<String> = emptySet()) {
-        // 1. 恢复设置
-        if ("app_preferences" !in ignoreList) {
-            audiobookProgressRepository.restore(backup.appPreferences)
-            preferencesRepository.updateApplicationPreferences { AudiobookProgressRepository.withoutLegacyProgress(backup.appPreferences) }
-            backup.onlineListeningLibrary?.let { TingshuRepository.get(context).restoreLibrary(it) }
-        }
-        if ("player_preferences" !in ignoreList) {
-            preferencesRepository.updatePlayerPreferences { backup.playerPreferences }
-        }
-
-        // 2. 恢复 WebDAV 服务器
-        if ("webdav_servers" !in ignoreList) {
-            webDavServersDataSource.update { backup.webDavServers }
-        }
-
-        // 3. 恢复 OpenList 配置
-        if ("openlist_config" !in ignoreList) {
-            backup.openListConfig?.let { config ->
-                restoreOpenListConfig(config)
+    /** 只有用户确认后才写入数据；忽略 OpenList 时也不会写入其数据文件。 */
+    suspend fun restoreFromBackup(archive: BackupArchive, ignoreList: Set<String> = emptySet()) = withContext(Dispatchers.IO) {
+        operationMutex.withLock {
+            val backup = archive.data
+            BackupArchiveCodec.validate(backup)
+            if ("openlist_config" !in ignoreList && archive.openListFiles.isNotEmpty()) requireOpenListStopped()
+            if ("app_preferences" !in ignoreList) {
+                backup.onlineListeningLibrary?.let { TingshuRepository.get(context).restoreLibrary(it) }
+                audiobookProgressRepository.restore(backup.appPreferences)
+                appPreferencesDataSource.updateOrThrow { AudiobookProgressRepository.withoutLegacyProgress(backup.appPreferences) }
             }
-        }
-
-        // 4. 恢复云盘凭证
-        if ("cloud_credentials" !in ignoreList) {
-            backup.alipanConfig?.let { restoreAlipanConfig(it) }
-            backup.cloud189Config?.let { restoreCloud189Config(it) }
-            backup.pan123Config?.let { restorePan123Config(it) }
-            backup.quarkConfig?.let { restoreQuarkConfig(it) }
-            backup.yun139Config?.let { restoreYun139Config(it) }
-        }
-
-        // 5. 恢复备份设置（WebDAV 配置、路径等）
-        if ("backup_settings" !in ignoreList) {
-            backup.backupWebDavConfig?.let { config ->
-                backupWebDavDataSource.update { config }
+            if ("player_preferences" !in ignoreList) {
+                playerPreferencesDataSource.updateOrThrow { backup.playerPreferences.copy(danmakuCacheMap = emptyMap()) }
             }
-        }
-    }
-
-    // ==================== 打包工具 ====================
-
-    /** 将备份数据打包为 ZIP 字节数组 */
-    private suspend fun zipBackupData(backup: BackupData): ByteArray {
-        val jsonString = json.encodeToString(BackupData.serializer(), backup)
-        return ByteArrayOutputStream().use { baos ->
-            BufferedOutputStream(baos).use { bos ->
-                ZipOutputStream(bos).use { zip ->
-                    zip.putNextEntry(ZipEntry("backup.json"))
-                    zip.write(jsonString.toByteArray(Charsets.UTF_8))
-                    zip.closeEntry()
-
-                    val dataDir = context.filesDir.resolve("openlist_data")
-                    if (dataDir.exists()) {
-                        dataDir.listFiles()?.forEach { file ->
-                            if (file.isFile && file.length() > 0) {
-                                zip.putNextEntry(ZipEntry("openlist_data/${file.name}"))
-                                file.inputStream().use { it.copyTo(zip) }
-                                zip.closeEntry()
-                            }
-                        }
-                    }
-                }
+            if ("webdav_servers" !in ignoreList) webDavServersDataSource.updateOrThrow { backup.webDavServers }
+            if ("openlist_config" !in ignoreList) {
+                restoreOpenListFiles(archive.openListFiles)
+                backup.openListConfig?.let(::restoreOpenListConfig)
             }
-            baos.toByteArray()
-        }
-    }
-
-    // ==================== WebDAV 云备份 ====================
-
-    /** 上传备份到 WebDAV 服务器（使用配置中的子文件夹路径，文件名带时间戳） */
-    suspend fun uploadToCloud(
-        config: BackupWebDavConfig,
-    ): Result<Unit> {
-        val backup = createBackup()
-        val zipBytes = zipBackupData(backup)
-        val fileName = config.generateBackupFileName()
-        val path = config.remoteBackupPath(fileName)
-        return webDavRepository.uploadFile(
-            baseUrl = config.url,
-            path = path,
-            authHeader = config.basicAuthHeader,
-            data = zipBytes,
-        ).also { result ->
-            // 上传成功后，如果启用 keepOnlyLatestBackup，删除旧备份
-            if (result.isSuccess && config.keepOnlyLatestBackup) {
-                val listResult = listRemoteBackupFiles(config)
-                listResult.onSuccess { files ->
-                    files.filter { it.path != path }
-                        .forEach { oldFile ->
-                            webDavRepository.delete(
-                                baseUrl = config.url,
-                                path = oldFile.path,
-                                authHeader = config.basicAuthHeader,
-                            )
-                        }
-                }
+            if ("cloud_credentials" !in ignoreList) {
+                backup.alipanConfig?.let(::restoreAlipanConfig)
+                backup.cloud189Config?.let(::restoreCloud189Config)
+                backup.pan123Config?.let(::restorePan123Config)
+                backup.quarkConfig?.let(::restoreQuarkConfig)
+                backup.yun139Config?.let(::restoreYun139Config)
             }
-        }
-    }
-
-    /** 从 WebDAV 服务器下载并恢复备份（指定远程路径） */
-    suspend fun downloadFromCloud(
-        config: BackupWebDavConfig,
-        path: String,
-    ): Result<BackupData> {
-        val result = webDavRepository.downloadFile(
-            baseUrl = config.url,
-            path = path,
-            authHeader = config.basicAuthHeader,
-        )
-        return result.map { zipBytes ->
-            BufferedInputStream(ByteArrayInputStream(zipBytes)).use { bis ->
-                parseFromZip(bis)
-            }
-        }
-    }
-
-    /** 清理本地旧备份文件，仅保留最新的一个 */
-    fun cleanupLocalBackups(config: BackupWebDavConfig) {
-        if (!config.keepOnlyLatestBackup || config.backupPath.isBlank()) return
-        val dir = File(config.backupPath)
-        if (!dir.isDirectory) return
-        val backupFiles = dir.listFiles { file ->
-            file.isFile && file.name.startsWith("fluxplayer_backup") && file.name.endsWith(".zip")
-        }?.sortedByDescending { it.lastModified() } ?: return
-        if (backupFiles.size <= 1) return
-        backupFiles.drop(1).forEach { it.delete() }
-    }
-
-    /** 列出 WebDAV 服务器上的备份文件（仅 .zip 文件） */
-    suspend fun listRemoteBackupFiles(config: BackupWebDavConfig): Result<List<WebDavResource>> {
-        val dir = config.remoteBackupDir()
-        return webDavRepository.listDirectory(
-            baseUrl = config.url,
-            path = dir,
-            authHeader = config.basicAuthHeader,
-        ).map { resources ->
-            resources.filter { !it.isDirectory && it.name.endsWith(".zip", ignoreCase = true) }
-                .sortedByDescending { it.lastModified }
-        }
-    }
-
-    // ==================== ZIP 导出/导入 ====================
-
-    /** 将备份数据 + OpenList 数据打包为 ZIP 并写入 URI */
-    suspend fun exportToUri(backup: BackupData, uri: Uri) {
-        val zipBytes = zipBackupData(backup)
-        context.contentResolver.openOutputStream(uri)?.use { os ->
-            BufferedOutputStream(os).use { bos ->
-                bos.write(zipBytes)
-            }
-        }
-    }
-
-    /** 从 ZIP 或旧 JSON 文件导入：解析 backup.json，提取 openlist_data 文件 */
-    suspend fun importFromUri(uri: Uri): Result<BackupData> = runCatching {
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            BufferedInputStream(input).use { bis ->
-                // 先尝试按 ZIP 格式解析
-                try {
-                    parseFromZip(bis)
-                } catch (e: Exception) {
-                    // ZIP 失败则回退到旧版 JSON 文件读取
-                    val jsonBytes = bis.readBytes()
-                    json.decodeFromString(
-                        BackupData.serializer(),
-                        String(jsonBytes, Charsets.UTF_8),
-                    )
-                }
-            }
-        } ?: throw IllegalStateException("无法打开备份文件")
-    }
-
-    private fun parseFromZip(bis: BufferedInputStream): BackupData {
-        var backupData: BackupData? = null
-
-        ZipInputStream(bis).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                when {
-                    entry.name == "backup.json" -> {
-                        val jsonBytes = ByteArrayOutputStream().use { baos ->
-                            zip.copyTo(baos)
-                            baos.toByteArray()
-                        }
-                        backupData = json.decodeFromString(
-                            BackupData.serializer(),
-                            String(jsonBytes, Charsets.UTF_8),
+            if ("backup_settings" !in ignoreList) {
+                backup.backupWebDavConfig?.let { restored ->
+                    backupWebDavDataSource.updateOrThrow { current ->
+                        restored.copy(
+                            backupPath = "",
+                            autoBackupSyncMode = "off",
+                            hasPendingNewBackup = false,
+                            lastSeenRemoteBackup = "",
+                            deviceName = current.deviceName,
                         )
                     }
-                    entry.name.startsWith("openlist_data/") -> {
-                        val fileName = entry.name.removePrefix("openlist_data/").trim('/')
-                        // Zip Slip 防护：拒绝路径分隔符与 ".."，并用 canonicalPath 兜底
-                        if (fileName.isNotBlank() &&
-                            !fileName.contains("..") &&
-                            !fileName.contains('\\') &&
-                            !fileName.startsWith('/')
-                        ) {
-                            val destDir = context.filesDir.resolve("openlist_data")
-                                .apply { mkdirs() }
-                            val destFile = File(destDir, fileName)
-                            // 解析后路径必须仍位于目标目录内，防 "....//" 等变体绕过
-                            val canonicalDest = destFile.canonicalPath
-                            val canonicalDir = destDir.canonicalPath
-                            if (canonicalDest == canonicalDir ||
-                                canonicalDest.startsWith(canonicalDir + File.separator)
-                            ) {
-                                destFile.outputStream().use { zip.copyTo(it) }
-                            }
-                        }
-                    }
                 }
-                zip.closeEntry()
-                entry = zip.nextEntry
             }
         }
+    }
 
-        return backupData ?: throw IllegalStateException("无法在备份文件中找到 backup.json")
+    private fun restoreOpenListFiles(files: Map<String, ByteArray>) {
+        if (files.isEmpty()) return
+        val directory = context.filesDir.resolve("openlist_data")
+        check(directory.isDirectory || directory.mkdirs()) { "无法创建 OpenList 数据目录" }
+        // 旧数据库的旁路日志不能应用到恢复后的数据库上。
+        files.keys.filter { it.endsWith(".db") }.forEach { database ->
+            listOf("$database-wal", "$database-shm").filter { it !in files }.forEach { name ->
+                val sidecar = File(directory, name)
+                check(!sidecar.exists() || sidecar.delete()) { "无法清理旧的 OpenList 数据库日志" }
+            }
+        }
+        files.forEach { (name, bytes) ->
+            BackupArchiveCodec.validateFileName(name)
+            val target = File(directory, name)
+            check(target.canonicalFile.parentFile == directory.canonicalFile) { "无效的 OpenList 文件路径" }
+            val temporary = File.createTempFile("restore-", ".tmp", directory)
+            try {
+                temporary.outputStream().use { it.write(bytes) }
+                check(temporary.renameTo(target)) { "写入 OpenList 数据失败" }
+            } finally {
+                temporary.delete()
+            }
+        }
+    }
+
+    suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
+        operationMutex.withLock {
+            val bytes = BackupArchiveCodec.encode(createArchive())
+            val output = checkNotNull(context.contentResolver.openOutputStream(uri, "wt")) { "无法写入备份文件" }
+            output.use {
+                it.write(bytes)
+                it.flush()
+            }
+        }
+    }
+
+    suspend fun importFromUri(uri: Uri): Result<BackupArchive> = withContext(Dispatchers.IO) {
+        backupResult {
+            val input = checkNotNull(context.contentResolver.openInputStream(uri)) { "无法打开备份文件" }
+            input.use(BackupArchiveCodec::decode)
+        }
+    }
+
+    /** 新建子目录后上传，旧备份始终保留，返回本次实际创建的文件名。 */
+    suspend fun uploadToCloud(config: BackupWebDavConfig): Result<String> = withContext(Dispatchers.IO) {
+        backupResult {
+            operationMutex.withLock {
+                require(config.isConfigured) { "请先配置有效的 WebDAV 地址" }
+                val bytes = BackupArchiveCodec.encode(createArchive())
+                var folder = ""
+                config.subfolder.trim('/').split('/').filter { it.isNotBlank() }.forEach { part ->
+                    require(part != "." && part != ".." && !part.contains('\\')) { "无效的 WebDAV 子文件夹" }
+                    folder += "/$part"
+                    if (webDavRepository.listDirectory(config.url, "$folder/", config.basicAuthHeader).isFailure) {
+                        webDavRepository.createFolder(config.url, folder, config.basicAuthHeader).getOrThrow()
+                    }
+                }
+                val name = config.generateBackupFileName()
+                webDavRepository.uploadFile(config.url, config.remoteBackupPath(name), config.basicAuthHeader, bytes).getOrThrow()
+                backupWebDavDataSource.updateOrThrow {
+                    it.copy(lastSeenRemoteBackup = name, hasPendingNewBackup = false)
+                }
+                name
+            }
+        }
+    }
+
+    suspend fun downloadFromCloud(config: BackupWebDavConfig, path: String): Result<BackupArchive> = withContext(Dispatchers.IO) {
+        backupResult {
+            val bytes = webDavRepository.downloadFile(config.url, path, config.basicAuthHeader).getOrThrow()
+            ByteArrayInputStream(bytes).use(BackupArchiveCodec::decode)
+        }
+    }
+
+    suspend fun listRemoteBackupFiles(config: BackupWebDavConfig): Result<List<WebDavResource>> = withContext(Dispatchers.IO) {
+        backupResult {
+            require(config.isConfigured) { "请先配置有效的 WebDAV 地址" }
+            webDavRepository.listDirectory(config.url, config.remoteBackupDir(), config.basicAuthHeader).getOrThrow()
+                .filter { !it.isDirectory && isBackupFileName(it.name) }
+                .sortedWith(
+                    compareByDescending<WebDavResource> {
+                        runCatching { ZonedDateTime.parse(it.lastModified, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() }.getOrDefault(0)
+                    }.thenByDescending { it.name },
+                )
+        }
     }
 
     // ==================== OpenList 配置 ====================
@@ -300,7 +213,7 @@ class BackupManager @Inject constructor(
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val autoStart = prefs.getBoolean(PREF_AUTO_START, false)
         val password = prefs.getString(PREF_PASSWORD, null)
-        return if (password != null || autoStart) {
+        return if (prefs.contains(PREF_AUTO_START) || password != null) {
             OpenListBackupConfig(
                 autoStart = autoStart,
                 adminPassword = password,
@@ -312,14 +225,12 @@ class BackupManager @Inject constructor(
 
     private fun restoreOpenListConfig(config: OpenListBackupConfig) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean(PREF_AUTO_START, config.autoStart)
-            .apply()
-        if (config.adminPassword != null) {
+        check(
             prefs.edit()
+                .putBoolean(PREF_AUTO_START, config.autoStart)
                 .putString(PREF_PASSWORD, config.adminPassword)
-                .apply()
-        }
+                .commit(),
+        ) { "保存 OpenList 配置失败" }
     }
 
     // ==================== 阿里云盘 ====================
@@ -345,28 +256,28 @@ class BackupManager @Inject constructor(
     }
 
     private fun restoreAlipanConfig(config: AlipanBackupConfig) {
-        val prefs = context.getSharedPreferences(ALIPAN_PREFS, Context.MODE_PRIVATE)
-        prefs.edit().apply {
-            config.authorization?.let { putString("authorization", it) }
-            config.driveId?.let { putString("drive_id", it) }
-            config.refreshToken?.let { putString("refresh_token", it) }
-            config.deviceId?.let { putString("device_id", it) }
-            config.signature?.let { putString("signature", it) }
-            config.cookies?.let { putString("cookies", it) }
-        }.apply()
+        saveCredentials(
+            ALIPAN_PREFS,
+            mapOf(
+                "authorization" to config.authorization,
+                "drive_id" to config.driveId,
+                "refresh_token" to config.refreshToken,
+                "device_id" to config.deviceId,
+                "signature" to config.signature,
+                "cookies" to config.cookies,
+            ),
+        )
         // 恢复 WebView Cookie，以便 token 过期时通过 WebView 会话自动续期获取全权限 token
         if (!config.cookies.isNullOrBlank()) {
             try {
                 val cookieManager = android.webkit.CookieManager.getInstance()
-                cookieManager.setCookie("https://www.alipan.com", config.cookies)
+                config.cookies.orEmpty().split(';').map(String::trim).filter { it.isNotBlank() }.forEach { cookieManager.setCookie("https://www.alipan.com", it) }
                 cookieManager.flush()
             } catch (_: Exception) {}
         }
         // 同步内存中的 AuthProvider
-        if (!config.authorization.isNullOrBlank()) {
-            AliyunAuthProvider.authorization = config.authorization ?: ""
-            AliyunAuthProvider.isActive = true
-        }
+        AliyunAuthProvider.authorization = config.authorization.orEmpty()
+        AliyunAuthProvider.isActive = !config.authorization.isNullOrBlank()
     }
 
     // ==================== 天翼云盘 ====================
@@ -374,7 +285,7 @@ class BackupManager @Inject constructor(
     private fun readCloud189Config(): Cloud189BackupConfig? {
         val prefs = context.getSharedPreferences(CLOUD189_PREFS, Context.MODE_PRIVATE)
         val accessToken = prefs.getString("accessToken", null)
-        if (accessToken.isNullOrBlank()) return null
+        if (accessToken.isNullOrBlank() && prefs.getString("refreshToken", null).isNullOrBlank()) return null
         return Cloud189BackupConfig(
             accessToken = accessToken,
             sessionKey = prefs.getString("sessionKey", null),
@@ -386,23 +297,28 @@ class BackupManager @Inject constructor(
     }
 
     private fun restoreCloud189Config(config: Cloud189BackupConfig) {
-        val prefs = context.getSharedPreferences(CLOUD189_PREFS, Context.MODE_PRIVATE)
-        prefs.edit().apply {
-            config.accessToken?.let { putString("accessToken", it) }
-            config.sessionKey?.let { putString("sessionKey", it) }
-            config.sessionSecret?.let { putString("sessionSecret", it) }
-            config.refreshToken?.let { putString("refreshToken", it) }
-            putLong("expiresIn", config.expiresIn)
-            config.cookies?.let { putString("cookies", it) }
-        }.apply()
-        if (!config.accessToken.isNullOrBlank()) {
-            C189AuthProvider.accessToken = config.accessToken ?: ""
-            C189AuthProvider.sessionKey = config.sessionKey ?: ""
-            C189AuthProvider.sessionSecret = config.sessionSecret ?: ""
-            C189AuthProvider.refreshToken = config.refreshToken ?: ""
-            C189AuthProvider.expiresIn = config.expiresIn
-            C189AuthProvider.isActive = true
-        }
+        saveCredentials(
+            CLOUD189_PREFS,
+            mapOf(
+                "accessToken" to config.accessToken,
+                "sessionKey" to config.sessionKey,
+                "sessionSecret" to config.sessionSecret,
+                "refreshToken" to config.refreshToken,
+                "expiresIn" to config.expiresIn,
+                "cookies" to config.cookies,
+            ),
+        )
+        C189AuthProvider.familySessionKey = ""
+        C189AuthProvider.familySessionSecret = ""
+        com.fluxplayer.app.core.data.cloud189.C189ApiClient().restoreCookies(config.cookies.orEmpty())
+        C189AuthProvider.setTokens(
+            config.accessToken.orEmpty(),
+            config.sessionKey.orEmpty(),
+            config.sessionSecret.orEmpty(),
+            config.refreshToken.orEmpty(),
+            config.expiresIn,
+        )
+        C189AuthProvider.isActive = !config.accessToken.isNullOrBlank() || !config.refreshToken.isNullOrBlank()
     }
 
     // ==================== 123 云盘 ====================
@@ -419,12 +335,7 @@ class BackupManager @Inject constructor(
     }
 
     private fun restorePan123Config(config: Pan123BackupConfig) {
-        val prefs = context.getSharedPreferences(PAN123_PREFS, Context.MODE_PRIVATE)
-        prefs.edit().apply {
-            config.passport?.let { putString("passport", it) }
-            config.password?.let { putString("password", it) }
-            config.token?.let { putString("token", it) }
-        }.apply()
+        saveCredentials(PAN123_PREFS, mapOf("passport" to config.passport, "password" to config.password, "token" to config.token))
     }
 
     // ==================== 夸克网盘（含 UC） ====================
@@ -439,14 +350,8 @@ class BackupManager @Inject constructor(
     }
 
     private fun restoreQuarkConfig(config: QuarkBackupConfig) {
-        config.quarkCookie?.let { cookie ->
-            context.getSharedPreferences(QUARK_PREFS, Context.MODE_PRIVATE)
-                .edit().putString("cookie", cookie).apply()
-        }
-        config.ucCookie?.let { cookie ->
-            context.getSharedPreferences(UC_PREFS, Context.MODE_PRIVATE)
-                .edit().putString("cookie", cookie).apply()
-        }
+        config.quarkCookie?.let { saveCredentials(QUARK_PREFS, mapOf("cookie" to it)) }
+        config.ucCookie?.let { saveCredentials(UC_PREFS, mapOf("cookie" to it)) }
     }
 
     // ==================== Yun139 ====================
@@ -464,19 +369,32 @@ class BackupManager @Inject constructor(
     }
 
     private fun restoreYun139Config(config: Yun139BackupConfig) {
-        val prefs = context.getSharedPreferences(YUN139_PREFS, Context.MODE_PRIVATE)
-        prefs.edit().apply {
-            config.authorization?.let { putString("authorization", it) }
-            config.phoneNumber?.let { putString("phoneNumber", it) }
-            config.userDomainId?.let { putString("userDomainId", it) }
-            putLong("lastRefresh", config.lastRefresh)
-        }.apply()
-        if (!config.authorization.isNullOrBlank()) {
-            Yun139AuthProvider.authorization = config.authorization ?: ""
-            Yun139AuthProvider.phoneNumber = config.phoneNumber ?: ""
-            Yun139AuthProvider.userDomainId = config.userDomainId ?: ""
-            Yun139AuthProvider.isActive = true
+        saveCredentials(
+            YUN139_PREFS,
+            mapOf(
+                "authorization" to config.authorization,
+                "phoneNumber" to config.phoneNumber,
+                "userDomainId" to config.userDomainId,
+                "lastRefresh" to config.lastRefresh,
+            ),
+        )
+        Yun139AuthProvider.authorization = config.authorization.orEmpty()
+        Yun139AuthProvider.phoneNumber = config.phoneNumber.orEmpty()
+        Yun139AuthProvider.userDomainId = config.userDomainId.orEmpty()
+        Yun139AuthProvider.isActive = !config.authorization.isNullOrBlank()
+    }
+
+    /** 使用同步提交报告磁盘写入失败，并移除备份中缺失的旧账号字段。 */
+    private fun saveCredentials(name: String, values: Map<String, Any?>) {
+        val editor = context.getSharedPreferences(name, Context.MODE_PRIVATE).edit()
+        values.forEach { (key, value) ->
+            when (value) {
+                null -> editor.remove(key)
+                is String -> editor.putString(key, value)
+                is Long -> editor.putLong(key, value)
+            }
         }
+        check(editor.commit()) { "保存账号配置失败" }
     }
 
     companion object {

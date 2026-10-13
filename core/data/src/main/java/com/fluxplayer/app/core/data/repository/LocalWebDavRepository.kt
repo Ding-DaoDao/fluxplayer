@@ -88,6 +88,6 @@ class LocalWebDavRepository @Inject constructor(
     }
 
     override suspend fun downloadFile(baseUrl: String, path: String, authHeader: String): Result<ByteArray> {
-        return webDavClient.get(baseUrl, path, authHeader)
+        return webDavClient.get(baseUrl, path, authHeader, maxBytes = 32L * 1024 * 1024)
     }
 }

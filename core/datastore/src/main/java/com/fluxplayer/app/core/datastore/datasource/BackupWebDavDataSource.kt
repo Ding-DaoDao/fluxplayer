@@ -16,6 +16,11 @@ class BackupWebDavDataSource @Inject constructor(
 
     val config: Flow<BackupWebDavConfig> = backupWebDavDataStore.data
 
+    /** 备份恢复必须向调用方报告写入失败，避免显示虚假的成功结果。 */
+    suspend fun updateOrThrow(transform: suspend (BackupWebDavConfig) -> BackupWebDavConfig) {
+        backupWebDavDataStore.updateData(transform)
+    }
+
     suspend fun update(
         transform: suspend (BackupWebDavConfig) -> BackupWebDavConfig,
     ) {

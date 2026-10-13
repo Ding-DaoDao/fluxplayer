@@ -1,7 +1,5 @@
 package com.fluxplayer.app.settings.screens.player
 
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,19 +11,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -34,28 +31,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.extensions.isPipFeatureSupported
-import com.fluxplayer.app.core.common.extensions.round
 import com.fluxplayer.app.core.model.CacheMaxSize
+import com.fluxplayer.app.core.model.DanmakuSource
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.model.Resume
 import com.fluxplayer.app.core.model.ScreenOrientation
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.components.NextDialogWithDoneAndCancelButtons
-import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
-import com.fluxplayer.app.core.model.DanmakuSource
-import com.fluxplayer.app.settings.screens.player.DanmakuSourceManagerDialog
 import com.fluxplayer.app.core.ui.components.PreferenceSlider
 import com.fluxplayer.app.core.ui.components.PreferenceSwitch
-import com.fluxplayer.app.core.ui.components.PreferenceSwitchWithDivider
 import com.fluxplayer.app.core.ui.components.RadioTextButton
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.preview.DayNightPreview
@@ -105,16 +98,18 @@ private fun PlayerPreferencesContent(
                     icon = NextIcons.Appearance,
                     isChecked = uiState.preferences.useMaterialYouControls,
                     onClick = { onEvent(PlayerPreferencesUiEvent.ToggleUseMaterialYouControls) },
-                    isFirstItem = true
+                    isFirstItem = true,
                 )
                 HorizontalDivider()
                 PreferenceSlider(
                     title = stringResource(R.string.controller_timeout),
-                    description = stringResource(R.string.seconds, uiState.preferences.controllerAutoHideTimeout),
+                    valueDescription = { value -> stringResource(R.string.seconds, value.roundToInt()) },
+                    saveOnRelease = true,
+                    steps = 58,
                     icon = NextIcons.Timer,
                     value = uiState.preferences.controllerAutoHideTimeout.toFloat(),
                     valueRange = 1.0f..60.0f,
-                    onValueChange = { onEvent(PlayerPreferencesUiEvent.UpdateControlAutoHideTimeout(it.toInt())) },
+                    onValueChange = { onEvent(PlayerPreferencesUiEvent.UpdateControlAutoHideTimeout(it.roundToInt())) },
                     isLastItem = true,
                     trailingContent = {
                         FilledIconButton(onClick = { onEvent(PlayerPreferencesUiEvent.UpdateControlAutoHideTimeout(PlayerPreferences.DEFAULT_CONTROLLER_AUTO_HIDE_TIMEOUT)) }) {
@@ -131,7 +126,7 @@ private fun PlayerPreferencesContent(
             Column {
                 ClickablePreferenceItem(
                     title = stringResource(id = R.string.resume),
-                    description = stringResource(id = R.string.resume_description),
+                    description = stringResource(if (uiState.preferences.resume == Resume.YES) R.string.resume_enabled_summary else R.string.resume_disabled_summary),
                     icon = NextIcons.Resume,
                     onClick = { onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.ResumeDialog)) },
                     isFirstItem = true,
@@ -139,7 +134,9 @@ private fun PlayerPreferencesContent(
                 HorizontalDivider()
                 PreferenceSlider(
                     title = stringResource(id = R.string.default_playback_speed),
-                    description = uiState.preferences.defaultPlaybackSpeed.toString(),
+                    valueDescription = { value -> stringResource(R.string.playback_speed_value, value) },
+                    saveOnRelease = true,
+                    steps = 37,
                     icon = NextIcons.Speed,
                     value = uiState.preferences.defaultPlaybackSpeed,
                     valueRange = 0.2f..4.0f,
@@ -154,44 +151,12 @@ private fun PlayerPreferencesContent(
                     },
                 )
                 HorizontalDivider()
-                PreferenceSlider(
-                    title = stringResource(R.string.long_press_gesture),
-                    description = stringResource(R.string.long_press_gesture_desc, uiState.preferences.longPressControlsSpeed),
-                    icon = NextIcons.Speed,
-                    enabled = !uiState.preferences.useDynamicLongPressSpeed,
-                    value = uiState.preferences.longPressControlsSpeed,
-                    valueRange = 1.5f..4.0f,
-                    onValueChange = { onEvent(PlayerPreferencesUiEvent.UpdateLongPressControlsSpeed(it)) },
-                    trailingContent = {
-                        FilledIconButton(
-                            enabled = !uiState.preferences.useDynamicLongPressSpeed,
-                            onClick = { onEvent(PlayerPreferencesUiEvent.UpdateLongPressControlsSpeed(2.0f)) },
-                        ) {
-                            Icon(
-                                imageVector = NextIcons.History,
-                                contentDescription = stringResource(id = R.string.reset_long_press_speed),
-                            )
-                        }
-                    },
-                )
-                HorizontalDivider()
                 ClickablePreferenceItem(
                     title = stringResource(R.string.speed_presets),
                     description = uiState.preferences.speedPresets.joinToString(", ") { "${it}x" },
                     icon = NextIcons.Speed,
                     onClick = {
                         onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.SpeedPresetsDialog))
-                    },
-                )
-                HorizontalDivider()
-                PreferenceSwitchWithDivider(
-                    title = stringResource(id = R.string.dynamic_long_press_speed),
-                    description = stringResource(id = R.string.dynamic_long_press_speed_desc),
-                    icon = NextIcons.Tap,
-                    isChecked = uiState.preferences.useDynamicLongPressSpeed,
-                    onChecked = { onEvent(PlayerPreferencesUiEvent.ToggleUseDynamicLongPressSpeed) },
-                    onClick = {
-                        onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.DynamicLongPressMultiplierDialog))
                     },
                 )
                 HorizontalDivider()
@@ -248,14 +213,19 @@ private fun PlayerPreferencesContent(
                 ClickablePreferenceItem(
                     title = stringResource(id = R.string.player_screen_orientation),
                     description = uiState.preferences.playerScreenOrientation.name(),
+                    isLastItem = true,
                     icon = NextIcons.Rotation,
                     onClick = {
                         onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.PlayerScreenOrientationDialog))
                     },
                 )
-                HorizontalDivider()
+            }
+
+            ListSectionTitle(text = stringResource(R.string.danmaku_settings_section))
+            Column {
                 ClickablePreferenceItem(
                     title = stringResource(R.string.danmaku_sources),
+                    isFirstItem = true,
                     description = "${DanmakuSource.filterValid(uiState.preferences.danmakuSources).size} ${stringResource(R.string.danmaku_source_count)}",
                     icon = NextIcons.Caption,
                     onClick = {
@@ -265,12 +235,12 @@ private fun PlayerPreferencesContent(
                 HorizontalDivider()
                 ClickablePreferenceItem(
                     title = stringResource(R.string.local_danmaku_path),
-                    description = uiState.preferences.localDanmakuPath,
+                    description = uiState.preferences.localDanmakuPath.ifBlank { stringResource(R.string.not_set) },
                     icon = NextIcons.Folder,
                     onClick = {
                         onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.LocalDanmakuPathDialog))
                     },
-                    isLastItem = true
+                    isLastItem = true,
                 )
             }
 
@@ -284,27 +254,30 @@ private fun PlayerPreferencesContent(
                     onClick = { onEvent(PlayerPreferencesUiEvent.TogglePlaybackCacheEnabled) },
                     isFirstItem = true,
                 )
-                if (uiState.preferences.playbackCacheEnabled) {
-                    HorizontalDivider()
-                    ClickablePreferenceItem(
-                        title = stringResource(id = R.string.cache_size),
-                        description = uiState.preferences.playbackCacheMaxSize.name(),
-                        icon = NextIcons.Settings,
-                        onClick = {
-                            onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.CacheMaxSizeDialog))
-                        },
-                    )
-                    HorizontalDivider()
-                    ClickablePreferenceItem(
-                        title = stringResource(id = R.string.clear_cache),
-                        description = stringResource(id = R.string.clear_cache_description, formatBytes(uiState.cacheSizeBytes)),
-                        icon = NextIcons.DeleteSweep,
-                        onClick = {
-                            onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.ClearCacheConfirmDialog))
-                        },
-                        isLastItem = true,
-                    )
-                }
+                HorizontalDivider()
+                ClickablePreferenceItem(
+                    title = stringResource(id = R.string.cache_size),
+                    description = if (uiState.preferences.playbackCacheEnabled) {
+                        uiState.preferences.playbackCacheMaxSize.name()
+                    } else {
+                        stringResource(R.string.cache_size_disabled)
+                    },
+                    enabled = uiState.preferences.playbackCacheEnabled,
+                    icon = NextIcons.Settings,
+                    onClick = {
+                        onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.CacheMaxSizeDialog))
+                    },
+                )
+                HorizontalDivider()
+                ClickablePreferenceItem(
+                    title = stringResource(id = R.string.clear_cache),
+                    description = stringResource(id = R.string.clear_cache_description, formatBytes(uiState.cacheSizeBytes)),
+                    icon = NextIcons.DeleteSweep,
+                    onClick = {
+                        onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.ClearCacheConfirmDialog))
+                    },
+                    isLastItem = true,
+                )
             }
         }
 
@@ -416,62 +389,6 @@ private fun PlayerPreferencesContent(
                             )
                         },
                     )
-                }
-
-                PlayerPreferenceDialog.DynamicLongPressMultiplierDialog -> {
-                    var showCustomDialog by remember { mutableStateOf(false) }
-                    if (showCustomDialog) {
-                        var customMultiplier by remember {
-                            mutableFloatStateOf(uiState.preferences.dynamicLongPressMultiplier)
-                        }
-
-                        NextDialogWithDoneAndCancelButtons(
-                            title = stringResource(R.string.custom_speed_multiplier),
-                            onDoneClick = {
-                                onEvent(PlayerPreferencesUiEvent.UpdateDynamicLongPressMultiplier(customMultiplier))
-                                onEvent(PlayerPreferencesUiEvent.ShowDialog(null))
-                            },
-                            onDismissClick = { onEvent(PlayerPreferencesUiEvent.ShowDialog(null)) },
-                            content = {
-                                Text(
-                                    text = "x$customMultiplier",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 20.dp),
-                                    textAlign = TextAlign.Center,
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                                Slider(
-                                    value = customMultiplier,
-                                    onValueChange = { customMultiplier = it.round(1) },
-                                    valueRange = 1.1f..5.0f,
-                                )
-                            },
-                        )
-                    } else {
-                        OptionsDialog(
-                            text = stringResource(id = R.string.dynamic_speed_multiplier),
-                            onDismissClick = { onEvent(PlayerPreferencesUiEvent.ShowDialog(null)) },
-                        ) {
-                            items(listOf(1.5f, 2.0f, 3.0f).toTypedArray()) { multiplier ->
-                                RadioTextButton(
-                                    text = "x$multiplier",
-                                    selected = (multiplier == uiState.preferences.dynamicLongPressMultiplier),
-                                    onClick = {
-                                        onEvent(PlayerPreferencesUiEvent.UpdateDynamicLongPressMultiplier(multiplier))
-                                        onEvent(PlayerPreferencesUiEvent.ShowDialog(null))
-                                    },
-                                )
-                            }
-                            items(arrayOf("custom")) {
-                                RadioTextButton(
-                                    text = stringResource(id = R.string.custom_speed),
-                                    selected = (uiState.preferences.dynamicLongPressMultiplier !in listOf(1.5f, 2.0f, 3.0f)),
-                                    onClick = { showCustomDialog = true },
-                                )
-                            }
-                        }
-                    }
                 }
 
                 PlayerPreferenceDialog.SpeedPresetsDialog -> {

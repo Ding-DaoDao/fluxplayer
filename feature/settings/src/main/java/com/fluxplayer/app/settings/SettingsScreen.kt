@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
+import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -29,7 +30,14 @@ fun SettingsScreen(
         title = stringResource(id = R.string.settings),
         onNavigateUp = onNavigateUp,
     ) { innerPadding ->
-        val settingRows = remember { SettingRow.entries }
+        val settingGroups = remember {
+            listOf(
+                R.string.settings_group_interface to listOf(SettingRow.APPEARANCE, SettingRow.MEDIA_LIBRARY),
+                R.string.settings_group_playback to listOf(SettingRow.PLAYER, SettingRow.GESTURES, SettingRow.AUDIO, SettingRow.SUBTITLE),
+                R.string.settings_group_content to listOf(SettingRow.AUDIOBOOK, SettingRow.WEBDAV, SettingRow.OPENLIST),
+                R.string.settings_group_data to listOf(SettingRow.GENERAL, SettingRow.DECODER, SettingRow.ABOUT),
+            )
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -37,17 +45,20 @@ fun SettingsScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
         ) {
-            settingRows.forEachIndexed { index, row ->
-                ClickablePreferenceItem(
-                    title = stringResource(id = row.titleResId),
-                    description = stringResource(id = row.descriptionResId),
-                    icon = row.icon,
-                    onClick = { onItemClick(row.setting) },
-                    isFirstItem = index == 0,
-                    isLastItem = index == settingRows.lastIndex,
-                )
-                if (index < settingRows.lastIndex) {
-                    HorizontalDivider()
+            settingGroups.forEach { (titleResId, rows) ->
+                ListSectionTitle(text = stringResource(titleResId))
+                Column {
+                    rows.forEachIndexed { index, row ->
+                        ClickablePreferenceItem(
+                            title = stringResource(id = row.titleResId),
+                            description = stringResource(id = row.descriptionResId),
+                            icon = row.icon,
+                            onClick = { onItemClick(row.setting) },
+                            isFirstItem = index == 0,
+                            isLastItem = index == rows.lastIndex,
+                        )
+                        if (index < rows.lastIndex) HorizontalDivider()
+                    }
                 }
             }
         }

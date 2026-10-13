@@ -3,6 +3,8 @@ package com.fluxplayer.app.core.data.webdav
 import android.net.Uri
 import android.util.Log
 import com.fluxplayer.app.core.model.WebDavResource
+import java.io.StringReader
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -11,8 +13,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
-import java.io.StringReader
-import java.util.concurrent.TimeUnit
 
 /**
  * WebDAV 客户端 —— 使用 PROPFIND 协议列出目录。
@@ -76,7 +76,7 @@ class WebDavClient(
             if (!response.isSuccessful) {
                 Log.w(TAG, "PROPFIND failed: HTTP ${response.code} for $url")
                 return@withContext Result.failure(
-                    WebDavException("HTTP ${response.code}: ${response.message}")
+                    WebDavException("HTTP ${response.code}: ${response.message}"),
                 )
             }
 
@@ -100,7 +100,7 @@ class WebDavClient(
         try {
             val normalizedBase = baseUrl.trimEnd('/')
             val auth = "Basic " + java.util.Base64.getEncoder().encodeToString(
-                "$username:$password".toByteArray()
+                "$username:$password".toByteArray(),
             )
             val request = Request.Builder()
                 .url(normalizedBase)
@@ -245,7 +245,7 @@ class WebDavClient(
                                 if (relativePath != "/" && relativePath != normalizedQuery) {
                                     val name = currentName
                                         ?: relativePath.trimEnd('/').substringAfterLast('/')
-                                        .ifEmpty { relativePath }
+                                            .ifEmpty { relativePath }
 
                                     results.add(
                                         WebDavResource(
@@ -255,7 +255,7 @@ class WebDavClient(
                                             size = currentSize,
                                             lastModified = currentLastModified,
                                             createdAt = currentCreatedAt,
-                                        )
+                                        ),
                                     )
                                 }
                             }
@@ -459,6 +459,7 @@ class WebDavClient(
         baseUrl: String,
         path: String,
         authHeader: String,
+        maxBytes: Long = Long.MAX_VALUE,
     ): Result<ByteArray> = withContext(Dispatchers.IO) {
         try {
             val normalizedBase = baseUrl.trimEnd('/')
@@ -473,7 +474,22 @@ class WebDavClient(
             val response = client.newCall(request).execute()
             response.use { resp ->
                 if (resp.isSuccessful) {
-                    Result.success(resp.body?.bytes() ?: ByteArray(0))
+                    val body = checkNotNull(resp.body) { "服务器没有返回备份内容" }
+                    require(body.contentLength() <= maxBytes) { "备份文件过大" }
+                    val bytes = body.byteStream().use { input ->
+                        val output = java.io.ByteArrayOutputStream()
+                        val buffer = ByteArray(8192)
+                        var total = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            require(total <= maxBytes) { "备份文件过大" }
+                            output.write(buffer, 0, count)
+                        }
+                        output.toByteArray()
+                    }
+                    Result.success(bytes)
                 } else {
                     Result.failure(WebDavException("HTTP ${resp.code}: ${resp.message}"))
                 }

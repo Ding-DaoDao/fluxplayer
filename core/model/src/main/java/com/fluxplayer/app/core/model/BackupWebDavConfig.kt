@@ -1,7 +1,9 @@
 package com.fluxplayer.app.core.model
 
+import java.net.URI
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 import kotlinx.serialization.Serializable
 
 /**
@@ -19,19 +21,24 @@ data class BackupWebDavConfig(
     val deviceName: String = "",
     /** 打开软件时自动检查是否有新备份 */
     val autoCheckNewBackup: Boolean = false,
-    /** 自动备份同步模式：\"both\" / \"local\" / \"remote\" */
-    val autoBackupSyncMode: String = "both",
-    /** 本地备份路径 */
+    /** 自动备份模式：off 关闭，remote 在应用退到后台时上传至 WebDAV。 */
+    val autoBackupSyncMode: String = "off",
+    /** 兼容旧备份格式，本地导出不再依赖原始文件路径。 */
     val backupPath: String = "",
-    /** 仅保留最新备份文件 */
-    val keepOnlyLatestBackup: Boolean = true,
+    /** 兼容旧备份格式，不再自动删除旧备份。 */
+    val keepOnlyLatestBackup: Boolean = false,
     /** 恢复时忽略的配置项列表 */
     val restoreIgnoreList: List<String> = emptyList(),
     /** 标记：服务器上检测到新备份，需要提示用户恢复 */
     val hasPendingNewBackup: Boolean = false,
+    /** 最近已经检查或上传过的远程备份，用于避免重复提示。 */
+    val lastSeenRemoteBackup: String = "",
 ) {
     val isConfigured: Boolean
-        get() = url.isNotBlank()
+        get() = runCatching {
+            val uri = URI(url)
+            uri.scheme in listOf("http", "https") && !uri.host.isNullOrBlank() && uri.query == null && uri.fragment == null
+        }.getOrDefault(false)
 
     val basicAuthHeader: String
         get() = "Basic " + java.util.Base64.getEncoder().encodeToString(
@@ -41,8 +48,8 @@ data class BackupWebDavConfig(
     /** 生成带时间戳的备份文件名，格式：fluxplayer_backup_2025-06-14_09-44-30.zip */
     fun generateBackupFileName(): String {
         val timestamp = LocalDateTime.now()
-            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))
-        val device = deviceName.trim()
+            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss_SSS")) + "_" + UUID.randomUUID().toString().take(8)
+        val device = deviceName.trim().replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").take(40)
         return if (device.isEmpty()) {
             "fluxplayer_backup_$timestamp.zip"
         } else {
@@ -71,6 +78,6 @@ data class BackupWebDavConfig(
     )
 
     companion object {
-        val AUTO_SYNC_MODES = listOf("both", "local", "remote")
+        val AUTO_SYNC_MODES = listOf("off", "remote")
     }
 }

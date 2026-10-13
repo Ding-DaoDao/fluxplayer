@@ -15,6 +15,11 @@ class AppPreferencesDataSource @Inject constructor(
 
     override val preferences = appPreferences.data
 
+    /** 备份恢复必须向调用方报告写入失败，避免显示虚假的成功结果。 */
+    suspend fun updateOrThrow(transform: suspend (ApplicationPreferences) -> ApplicationPreferences) {
+        appPreferences.updateData(transform)
+    }
+
     override suspend fun update(
         transform: suspend (ApplicationPreferences) -> ApplicationPreferences,
     ) {

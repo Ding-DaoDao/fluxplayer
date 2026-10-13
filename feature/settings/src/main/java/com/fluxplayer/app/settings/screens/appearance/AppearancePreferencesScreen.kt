@@ -1,7 +1,5 @@
 package com.fluxplayer.app.settings.screens.appearance
 
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,25 +7,19 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,20 +27,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.model.AccentPreset
+import com.fluxplayer.app.core.model.NavStyle
 import com.fluxplayer.app.core.model.StartupPage
 import com.fluxplayer.app.core.model.ThemeConfig
-import com.fluxplayer.app.core.model.NavStyle
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.PreferenceItem
-import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.components.PreferenceSlider
 import com.fluxplayer.app.core.ui.components.PreferenceSwitch
 import com.fluxplayer.app.core.ui.components.PreferenceSwitchWithDivider
@@ -114,17 +105,17 @@ private fun AppearancePreferencesContent(
                     icon = NextIcons.DarkMode,
                     onClick = { onEvent(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.Theme)) },
                     isFirstItem = false,
-                    isLastItem = false
+                    isLastItem = false,
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(R.string.high_contrast_dark_theme),
-                    description = stringResource(R.string.high_contrast_dark_theme_desc),
+                    description = stringResource(if (isDarkNow) R.string.high_contrast_dark_theme_desc else R.string.high_contrast_disabled),
                     icon = NextIcons.Contrast,
                     enabled = isDarkNow,
                     isChecked = uiState.preferences.useHighContrastDarkTheme,
                     onClick = { onEvent(AppearancePreferencesEvent.ToggleUseHighContrastDarkTheme) },
-                    isLastItem = false
+                    isLastItem = false,
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
@@ -133,12 +124,12 @@ private fun AppearancePreferencesContent(
                     icon = NextIcons.Appearance,
                     isChecked = uiState.preferences.useFloatingBottomBar,
                     onClick = { onEvent(AppearancePreferencesEvent.ToggleUseFloatingBottomBar) },
-                    isLastItem = false
+                    isLastItem = false,
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(R.string.liquid_glass),
-                    description = stringResource(R.string.liquid_glass_description),
+                    description = stringResource(if (uiState.preferences.useFloatingBottomBar) R.string.liquid_glass_description else R.string.floating_bar_required),
                     icon = NextIcons.Appearance,
                     isChecked = uiState.preferences.useLiquidGlass,
                     onClick = { onEvent(AppearancePreferencesEvent.ToggleUseLiquidGlass) },
@@ -148,14 +139,18 @@ private fun AppearancePreferencesContent(
                 HorizontalDivider()
                 PreferenceItem(
                     title = stringResource(R.string.nav_style),
-                    description = when (uiState.preferences.navStyle) {
-                        NavStyle.DOCK -> stringResource(R.string.nav_style_dock)
-                        NavStyle.FULL_BAR -> stringResource(R.string.nav_style_full_bar)
+                    description = if (!uiState.preferences.useFloatingBottomBar) {
+                        stringResource(R.string.floating_bar_required)
+                    } else {
+                        when (uiState.preferences.navStyle) {
+                            NavStyle.DOCK -> stringResource(R.string.nav_style_dock)
+                            NavStyle.FULL_BAR -> stringResource(R.string.nav_style_full_bar)
+                        }
                     },
                     icon = NextIcons.Appearance,
                     enabled = uiState.preferences.useFloatingBottomBar,
                     onClick = { onEvent(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.NavStyle)) },
-                    isLastItem = false
+                    isLastItem = false,
                 )
                 HorizontalDivider()
                 PreferenceItem(
@@ -164,7 +159,7 @@ private fun AppearancePreferencesContent(
                     icon = NextIcons.Appearance,
                     enabled = true,
                     onClick = { onEvent(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.StartupPage)) },
-                    isLastItem = false
+                    isLastItem = false,
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
@@ -172,7 +167,7 @@ private fun AppearancePreferencesContent(
                     icon = NextIcons.Appearance,
                     isChecked = uiState.preferences.showVideosTab,
                     onClick = { onEvent(AppearancePreferencesEvent.ToggleShowVideosTab) },
-                    isLastItem = false
+                    isLastItem = false,
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
@@ -180,7 +175,7 @@ private fun AppearancePreferencesContent(
                     icon = NextIcons.Appearance,
                     isChecked = uiState.preferences.showBrowseTab,
                     onClick = { onEvent(AppearancePreferencesEvent.ToggleShowBrowseTab) },
-                    isLastItem = false
+                    isLastItem = false,
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
@@ -188,7 +183,7 @@ private fun AppearancePreferencesContent(
                     icon = NextIcons.Appearance,
                     isChecked = uiState.preferences.showHistoryTab,
                     onClick = { onEvent(AppearancePreferencesEvent.ToggleShowHistoryTab) },
-                    isLastItem = false
+                    isLastItem = false,
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
@@ -196,7 +191,7 @@ private fun AppearancePreferencesContent(
                     icon = NextIcons.Appearance,
                     isChecked = uiState.preferences.showAudiobookTab,
                     onClick = { onEvent(AppearancePreferencesEvent.ToggleShowAudiobookTab) },
-                    isLastItem = true
+                    isLastItem = true,
                 )
             }
 
@@ -212,7 +207,7 @@ private fun AppearancePreferencesContent(
                     isChecked = uiState.preferences.enableBlur,
                     onClick = { onEvent(AppearancePreferencesEvent.ToggleEnableBlur) },
                     isFirstItem = true,
-                    isLastItem = !uiState.preferences.enableBlur
+                    isLastItem = !uiState.preferences.enableBlur,
                 )
                 if (uiState.preferences.enableBlur) {
                     PreferenceSwitch(
@@ -221,7 +216,7 @@ private fun AppearancePreferencesContent(
                         icon = NextIcons.Appearance,
                         isChecked = uiState.preferences.enableProgressiveBlur,
                         onClick = { onEvent(AppearancePreferencesEvent.ToggleEnableProgressiveBlur) },
-                        isLastItem = false
+                        isLastItem = false,
                     )
                     PreferenceSlider(
                         title = stringResource(R.string.blur_radius) + " · " + stringResource(R.string.top_bar),
@@ -229,7 +224,7 @@ private fun AppearancePreferencesContent(
                         valueRange = 0f..50f,
                         onValueChange = { onEvent(AppearancePreferencesEvent.UpdateTopBarBlurRadius(it.toInt())) },
                         isFirstItem = false,
-                        isLastItem = false
+                        isLastItem = false,
                     )
                     PreferenceSlider(
                         title = stringResource(R.string.blur_alpha) + " · " + stringResource(R.string.top_bar),
@@ -237,7 +232,7 @@ private fun AppearancePreferencesContent(
                         valueRange = 0f..100f,
                         onValueChange = { onEvent(AppearancePreferencesEvent.UpdateTopBarBlurAlpha(it.toInt())) },
                         isFirstItem = false,
-                        isLastItem = false
+                        isLastItem = false,
                     )
                     PreferenceSlider(
                         title = stringResource(R.string.blur_radius) + " · " + stringResource(R.string.bottom_bar),
@@ -245,7 +240,7 @@ private fun AppearancePreferencesContent(
                         valueRange = 0f..50f,
                         onValueChange = { onEvent(AppearancePreferencesEvent.UpdateBottomBarBlurRadius(it.toInt())) },
                         isFirstItem = false,
-                        isLastItem = false
+                        isLastItem = false,
                     )
                     PreferenceSlider(
                         title = stringResource(R.string.blur_alpha) + " · " + stringResource(R.string.bottom_bar),
@@ -253,7 +248,7 @@ private fun AppearancePreferencesContent(
                         valueRange = 0f..100f,
                         onValueChange = { onEvent(AppearancePreferencesEvent.UpdateBottomBarBlurAlpha(it.toInt())) },
                         isFirstItem = false,
-                        isLastItem = true
+                        isLastItem = true,
                     )
                 }
             }
@@ -267,7 +262,7 @@ private fun AppearancePreferencesContent(
                     valueRange = 0f..100f,
                     onValueChange = { onEvent(AppearancePreferencesEvent.UpdateTopBarOpacity(it.toInt())) },
                     isFirstItem = true,
-                    isLastItem = false
+                    isLastItem = false,
                 )
                 PreferenceSlider(
                     title = stringResource(R.string.bottom_bar_opacity),
@@ -275,7 +270,7 @@ private fun AppearancePreferencesContent(
                     valueRange = 0f..100f,
                     onValueChange = { onEvent(AppearancePreferencesEvent.UpdateBottomBarOpacity(it.toInt())) },
                     isFirstItem = false,
-                    isLastItem = false
+                    isLastItem = false,
                 )
                 PreferenceSlider(
                     title = stringResource(R.string.container_opacity),
@@ -283,7 +278,7 @@ private fun AppearancePreferencesContent(
                     valueRange = 0f..100f,
                     onValueChange = { onEvent(AppearancePreferencesEvent.UpdateContainerOpacity(it.toInt())) },
                     isFirstItem = false,
-                    isLastItem = true
+                    isLastItem = true,
                 )
             }
         }

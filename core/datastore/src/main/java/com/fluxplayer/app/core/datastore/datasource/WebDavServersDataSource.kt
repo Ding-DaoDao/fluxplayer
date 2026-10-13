@@ -16,6 +16,11 @@ class WebDavServersDataSource @Inject constructor(
 
     val webDavServers: Flow<WebDavServers> = webDavServersDataStore.data
 
+    /** 备份恢复必须向调用方报告写入失败，避免显示虚假的成功结果。 */
+    suspend fun updateOrThrow(transform: suspend (WebDavServers) -> WebDavServers) {
+        webDavServersDataStore.updateData(transform)
+    }
+
     suspend fun update(
         transform: suspend (WebDavServers) -> WebDavServers,
     ) {

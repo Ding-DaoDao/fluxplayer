@@ -3,11 +3,11 @@ package com.fluxplayer.app.settings.screens.gesture
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.common.extensions.round
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.DoubleTapGesture
 import com.fluxplayer.app.core.model.PlayerPreferences
+import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,6 +44,8 @@ class GesturePreferencesViewModel @Inject constructor(
             GesturePreferencesUiEvent.ToggleUseSeekControls -> toggleUseSeekControls()
             GesturePreferencesUiEvent.ToggleUseZoomControls -> toggleUseZoomControls()
             GesturePreferencesUiEvent.ToggleEnablePanGesture -> toggleEnablePanGesture()
+            GesturePreferencesUiEvent.ToggleUseDynamicLongPressSpeed -> toggleUseDynamicLongPressSpeed()
+            is GesturePreferencesUiEvent.UpdateDynamicLongPressMultiplier -> updateDynamicLongPressMultiplier(event.value)
             is GesturePreferencesUiEvent.UpdateLongPressControlsSpeed -> updateLongPressControlsSpeed(event.value)
             is GesturePreferencesUiEvent.UpdateSeekIncrement -> updateSeekIncrement(event.value)
             is GesturePreferencesUiEvent.UpdateSeekSensitivity -> updateSeekSensitivity(event.value)
@@ -121,9 +123,25 @@ class GesturePreferencesViewModel @Inject constructor(
         }
     }
 
+    private fun toggleUseDynamicLongPressSpeed() {
+        viewModelScope.launch {
+            preferencesRepository.updatePlayerPreferences {
+                it.copy(useDynamicLongPressSpeed = !it.useDynamicLongPressSpeed)
+            }
+        }
+    }
+
+    private fun updateDynamicLongPressMultiplier(value: Float) {
+        viewModelScope.launch {
+            preferencesRepository.updatePlayerPreferences {
+                it.copy(dynamicLongPressMultiplier = value.coerceIn(1.1f, 5.0f).round(1))
+            }
+        }
+    }
+
     private fun updateLongPressControlsSpeed(value: Float) {
         viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences { it.copy(longPressControlsSpeed = value) }
+            preferencesRepository.updatePlayerPreferences { it.copy(longPressControlsSpeed = value.coerceIn(1.5f, 4.0f).round(1)) }
         }
     }
 
@@ -175,6 +193,7 @@ data class GesturePreferencesUiState(
 )
 
 sealed interface GesturePreferenceDialog {
+    data object DynamicLongPressMultiplierDialog : GesturePreferenceDialog
     data object DoubleTapDialog : GesturePreferenceDialog
 }
 
@@ -187,6 +206,8 @@ sealed interface GesturePreferencesUiEvent {
     data object ToggleUseSeekControls : GesturePreferencesUiEvent
     data object ToggleUseZoomControls : GesturePreferencesUiEvent
     data object ToggleEnablePanGesture : GesturePreferencesUiEvent
+    data object ToggleUseDynamicLongPressSpeed : GesturePreferencesUiEvent
+    data class UpdateDynamicLongPressMultiplier(val value: Float) : GesturePreferencesUiEvent
     data class UpdateLongPressControlsSpeed(val value: Float) : GesturePreferencesUiEvent
     data class UpdateSeekIncrement(val value: Int) : GesturePreferencesUiEvent
     data class UpdateSeekSensitivity(val value: Float) : GesturePreferencesUiEvent

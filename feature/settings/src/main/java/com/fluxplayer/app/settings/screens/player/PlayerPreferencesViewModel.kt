@@ -3,9 +3,8 @@ package com.fluxplayer.app.settings.screens.player
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
-import com.fluxplayer.app.core.common.extensions.round
 import com.fluxplayer.app.core.common.CloudAwareCacheKeyRegistry
+import com.fluxplayer.app.core.common.extensions.round
 import com.fluxplayer.app.core.data.cache.PlaybackCacheManager
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.CacheMaxSize
@@ -13,6 +12,7 @@ import com.fluxplayer.app.core.model.DanmakuSource
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.model.Resume
 import com.fluxplayer.app.core.model.ScreenOrientation
+import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -60,9 +60,6 @@ class PlayerPreferencesViewModel @Inject constructor(
             PlayerPreferencesUiEvent.TogglePlaybackCacheEnabled -> togglePlaybackCacheEnabled()
             is PlayerPreferencesUiEvent.UpdatePlaybackCacheMaxSize -> updatePlaybackCacheMaxSize(event.value)
             PlayerPreferencesUiEvent.ClearPlaybackCache -> clearPlaybackCache()
-            PlayerPreferencesUiEvent.ToggleUseDynamicLongPressSpeed -> toggleUseDynamicLongPressSpeed()
-            is PlayerPreferencesUiEvent.UpdateDynamicLongPressMultiplier -> updateDynamicLongPressMultiplier(event.value)
-            is PlayerPreferencesUiEvent.UpdateLongPressControlsSpeed -> updateLongPressControlsSpeed(event.value)
             is PlayerPreferencesUiEvent.UpdateSpeedPresets -> updateSpeedPresets(event.presets)
         }
     }
@@ -172,16 +169,10 @@ class PlayerPreferencesViewModel @Inject constructor(
     }
 
     private fun togglePlaybackCacheEnabled() {
-        val currentlyEnabled = uiStateInternal.value.preferences.playbackCacheEnabled
         viewModelScope.launch {
             preferencesRepository.updatePlayerPreferences {
                 it.copy(playbackCacheEnabled = !it.playbackCacheEnabled)
             }
-        }
-        if (currentlyEnabled) {
-            playbackCacheManager.clearCache()
-            cacheKeyRegistry.clear()
-            uiStateInternal.update { it.copy(cacheSizeBytes = 0) }
         }
     }
 
@@ -197,28 +188,6 @@ class PlayerPreferencesViewModel @Inject constructor(
         playbackCacheManager.clearCache()
         cacheKeyRegistry.clear()
         uiStateInternal.update { it.copy(cacheSizeBytes = 0) }
-    }
-
-    private fun toggleUseDynamicLongPressSpeed() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(useDynamicLongPressSpeed = !it.useDynamicLongPressSpeed)
-            }
-        }
-    }
-
-    private fun updateDynamicLongPressMultiplier(value: Float) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences { it.copy(dynamicLongPressMultiplier = value) }
-        }
-    }
-
-    private fun updateLongPressControlsSpeed(value: Float) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(longPressControlsSpeed = value.round(1))
-            }
-        }
     }
 
     fun updateSpeedPresets(presets: List<Float>) {
@@ -244,7 +213,6 @@ sealed interface PlayerPreferenceDialog {
     data object LocalDanmakuPathDialog : PlayerPreferenceDialog
     data object CacheMaxSizeDialog : PlayerPreferenceDialog
     data object ClearCacheConfirmDialog : PlayerPreferenceDialog
-    data object DynamicLongPressMultiplierDialog : PlayerPreferenceDialog
     data object SpeedPresetsDialog : PlayerPreferenceDialog
 }
 
@@ -265,8 +233,5 @@ sealed interface PlayerPreferencesUiEvent {
     data object TogglePlaybackCacheEnabled : PlayerPreferencesUiEvent
     data class UpdatePlaybackCacheMaxSize(val value: CacheMaxSize) : PlayerPreferencesUiEvent
     data object ClearPlaybackCache : PlayerPreferencesUiEvent
-    data object ToggleUseDynamicLongPressSpeed : PlayerPreferencesUiEvent
-    data class UpdateDynamicLongPressMultiplier(val value: Float) : PlayerPreferencesUiEvent
-    data class UpdateLongPressControlsSpeed(val value: Float) : PlayerPreferencesUiEvent
     data class UpdateSpeedPresets(val presets: List<Float>) : PlayerPreferencesUiEvent
 }

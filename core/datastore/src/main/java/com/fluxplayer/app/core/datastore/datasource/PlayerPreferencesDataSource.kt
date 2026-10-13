@@ -15,6 +15,11 @@ class PlayerPreferencesDataSource @Inject constructor(
 
     override val preferences = preferencesDataStore.data
 
+    /** 备份恢复必须向调用方报告写入失败，避免显示虚假的成功结果。 */
+    suspend fun updateOrThrow(transform: suspend (PlayerPreferences) -> PlayerPreferences) {
+        preferencesDataStore.updateData(transform)
+    }
+
     override suspend fun update(transform: suspend (PlayerPreferences) -> PlayerPreferences) {
         try {
             preferencesDataStore.updateData(transform)

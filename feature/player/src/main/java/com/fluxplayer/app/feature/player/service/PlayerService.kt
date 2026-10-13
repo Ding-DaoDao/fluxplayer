@@ -858,8 +858,6 @@ class PlayerService : MediaSessionService() {
                         )
                     } else {
                         mediaSourceFactory.disableCache()
-                        playbackCacheManager.clearCache()
-                        cacheKeyRegistry.clear()
                     }
                 }
         }
