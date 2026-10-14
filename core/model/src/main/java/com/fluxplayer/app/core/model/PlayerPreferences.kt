@@ -7,7 +7,6 @@ data class PlayerPreferences(
     val resume: Resume = Resume.YES,
     val rememberPlayerBrightness: Boolean = false,
     val playerBrightness: Float = 0.5f,
-    val minDurationForFastSeek: Long = 120000L,
     val rememberSelections: Boolean = true,
     val playerScreenOrientation: ScreenOrientation = ScreenOrientation.VIDEO_ORIENTATION,
     val playerVideoZoom: VideoContentScale = VideoContentScale.BEST_FIT,
@@ -18,8 +17,6 @@ data class PlayerPreferences(
     val loopMode: LoopMode = LoopMode.OFF,
 
     // Controls (Gestures)
-    @Deprecated(message = "Use individual enableVolumeSwipeGesture and enableBrightnessSwipeGesture instead")
-    val useSwipeControls: Boolean = true,
     val enableVolumeSwipeGesture: Boolean = true,
     val enableBrightnessSwipeGesture: Boolean = true,
     val useSeekControls: Boolean = true,
@@ -37,7 +34,6 @@ data class PlayerPreferences(
     // Player Interface
     val controllerAutoHideTimeout: Int = DEFAULT_CONTROLLER_AUTO_HIDE_TIMEOUT,
     val controlButtonsPosition: ControlButtonsPosition = ControlButtonsPosition.LEFT,
-    val hidePlayerButtonsBackground: Boolean = false,
     val useMaterialYouControls: Boolean = false,
 
     // Audio Preferences

@@ -50,9 +50,11 @@ import androidx.compose.ui.unit.sp
 import com.fluxplayer.app.core.common.extensions.appIcon
 import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
 import com.fluxplayer.app.core.ui.components.FluxNotificationState
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
+import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 private const val GITHUB_URL = "https://github.com/Ding-DaoDao/fluxplayer"
 
@@ -60,6 +62,7 @@ private const val GITHUB_URL = "https://github.com/Ding-DaoDao/fluxplayer"
 @Composable
 fun AboutPreferencesScreen(
     onNavigateUp: () -> Unit,
+    onLibrariesClick: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
@@ -90,8 +93,27 @@ fun AboutPreferencesScreen(
                     )
                 },
             )
+            AboutEntry(
+                title = stringResource(R.string.open_source_licenses),
+                onClick = onLibrariesClick,
+            )
         }
     }
+}
+
+@Composable
+private fun AboutEntry(
+    title: String,
+    onClick: () -> Unit,
+) {
+    ClickablePreferenceItem(
+        title = title,
+        icon = NextIcons.Info,
+        onClick = onClick,
+        isFirstItem = true,
+        isLastItem = true,
+        modifier = Modifier.padding(top = 8.dp),
+    )
 }
 
 @Composable

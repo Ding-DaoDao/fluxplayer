@@ -24,6 +24,7 @@ import com.fluxplayer.app.settings.navigation.navigateToDecoderPreferences
 import com.fluxplayer.app.settings.navigation.navigateToFolderPreferencesScreen
 import com.fluxplayer.app.settings.navigation.navigateToGeneralPreferences
 import com.fluxplayer.app.settings.navigation.navigateToGesturePreferences
+import com.fluxplayer.app.settings.navigation.navigateToLibraries
 import com.fluxplayer.app.settings.navigation.navigateToMediaLibraryPreferencesScreen
 import com.fluxplayer.app.settings.navigation.navigateToOpenListSettings
 import com.fluxplayer.app.settings.navigation.navigateToPlayerPreferences
@@ -89,6 +90,7 @@ fun NavGraphBuilder.settingsNavGraph(
         backupSettingsScreen(onNavigateUp = navController::navigateUp)
         aboutPreferencesScreen(
             onNavigateUp = navController::navigateUp,
+            onLibrariesClick = navController::navigateToLibraries,
         )
         librariesScreen(onNavigateUp = navController::navigateUp)
     }

@@ -27,8 +27,6 @@ data class ApplicationPreferences(
     val historyLimit: Int = 200,
     // 零表示自动适配宽度，显式列数同时用于视频与书架网格。
     val mediaGridColumns: Int = 0,
-    // 仅保留旧设置与备份兼容，无效的设置入口已移除。
-    val markLastPlayedMedia: Boolean = true,
     val excludeFolders: List<String> = emptyList(),
     val mediaViewMode: MediaViewMode = MediaViewMode.FOLDERS,
     val mediaLayoutMode: MediaLayoutMode = MediaLayoutMode.LIST,
@@ -88,19 +86,6 @@ data class ApplicationPreferences(
 
     // 液态玻璃效果（仅在悬浮底栏开启时生效）
     val useLiquidGlass: Boolean = true,
-
-    // 模糊效果
-    val enableBlur: Boolean = true,
-    val enableProgressiveBlur: Boolean = false,
-    val topBarBlurRadius: Int = 24,
-    val topBarBlurAlpha: Int = 73,
-    val bottomBarBlurRadius: Int = 25,
-    val bottomBarBlurAlpha: Int = 73,
-
-    // 不透明度（独立于模糊效果，0-100，100=完全不透明）
-    val topBarOpacity: Int = 100,
-    val bottomBarOpacity: Int = 100,
-    val containerOpacity: Int = 100,
 
     // 下载存储路径
     val downloadPath: String = "/storage/emulated/0/Download/",

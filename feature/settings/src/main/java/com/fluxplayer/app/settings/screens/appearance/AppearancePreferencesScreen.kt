@@ -147,7 +147,7 @@ private fun AppearanceContent(state: AppearancePreferencesUiState, event: (Appea
             }
             ListSectionTitle(text = "导航与布局")
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                PreferenceSwitch(stringResource(R.string.floating_bottom_bar), isChecked = p.useFloatingBottomBar, onClick = { event(AppearancePreferencesEvent.ToggleUseFloatingBottomBar) }, isFirstItem = true)
+                PreferenceSwitch(stringResource(R.string.floating_bottom_bar), isChecked = p.useFloatingBottomBar, onClick = { update { it.copy(useFloatingBottomBar = !it.useFloatingBottomBar) } }, isFirstItem = true)
                 ClickablePreferenceItem(stringResource(R.string.nav_style), description = p.navStyle.label, onClick = { event(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.NavStyle)) })
                 PreferenceSwitch("导航切换动画", isChecked = p.navAnimationsEnabled, onClick = { update { it.copy(navAnimationsEnabled = !it.navAnimationsEnabled) } })
                 PreferenceSwitch("底栏拖动切换", description = "仅在悬浮胶囊底栏生效", enabled = p.useFloatingBottomBar && p.navStyle == NavStyle.DOCK, isChecked = p.navGesturesEnabled, onClick = { update { it.copy(navGesturesEnabled = !it.navGesturesEnabled) } })
