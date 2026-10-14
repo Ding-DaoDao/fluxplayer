@@ -1,5 +1,9 @@
 package com.fluxplayer.app.settings.screens.openlist
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,16 +16,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,24 +32,21 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import android.Manifest
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import com.fluxplayer.app.core.data.openlist.OpenListServerState
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.CancelButton
-import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
+import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
+import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
-import org.json.JSONObject
 
 @Composable
 fun OpenListSettingsScreen(
@@ -143,8 +140,6 @@ fun OpenListSettingsScreen(
             },
         )
     }
-
-
 }
 
 @Composable
@@ -312,5 +307,3 @@ internal fun ChangePasswordDialog(
         dismissButton = { CancelButton(onClick = onDismiss) },
     )
 }
-
-

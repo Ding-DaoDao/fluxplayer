@@ -13,7 +13,17 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -24,7 +34,12 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -34,19 +49,20 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.fluxplayer.app.core.ui.components.FluxIcon
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.WebDavServer
+import com.fluxplayer.app.core.ui.R as UiR
+import com.fluxplayer.app.core.ui.components.FluxIcon
+import com.fluxplayer.app.core.ui.theme.LocalMediaScrollBottomPadding
 import com.fluxplayer.app.feature.videopicker.aliyun.AliyunBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.cloud189.C189BrowserTabContent
 import com.fluxplayer.app.feature.videopicker.openlist.OpenListBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.pan123.Pan123BrowserTabContent
-import androidx.hilt.navigation.compose.hiltViewModel
 import com.fluxplayer.app.feature.videopicker.quark.QuarkBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.quark.QuarkBrowserViewModel
 import com.fluxplayer.app.feature.videopicker.screens.webdav.WebDavBrowserTabContent
 import com.fluxplayer.app.feature.videopicker.yun139.Yun139BrowserTabContent
-import com.fluxplayer.app.core.ui.R as UiR
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -120,8 +136,9 @@ fun BrowseTabs(
         onProviderSelected(null)
     }
 
-    val animTween = tween<IntOffset>(280, easing = EaseOutCubic)
-    val alphaTween = tween<Float>(280, easing = EaseOutCubic)
+    val duration = if (preferences.navAnimationsEnabled) 280 else 0
+    val animTween = tween<IntOffset>(duration, easing = EaseOutCubic)
+    val alphaTween = tween<Float>(duration, easing = EaseOutCubic)
 
     AnimatedContent(
         targetState = selectedProvider,
@@ -153,8 +170,8 @@ fun BrowseTabs(
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 state = lazyListState,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 16.dp + LocalMediaScrollBottomPadding.current),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(items = items, key = { it.id }) { item ->
                     ReorderableItem(state = reorderableState, key = item.id) {
@@ -162,21 +179,21 @@ fun BrowseTabs(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .longPressDraggableHandle(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                            shape = RoundedCornerShape(28.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onProviderSelected(item.id) }
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    .padding(horizontal = 20.dp, vertical = 20.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Image(
                                     painter = painterResource(item.iconRes),
                                     contentDescription = item.name,
-                                    modifier = Modifier.size(48.dp),
+                                    modifier = Modifier.size(52.dp),
                                     contentScale = ContentScale.Fit,
                                 )
                                 Spacer(Modifier.width(14.dp))
@@ -184,7 +201,7 @@ fun BrowseTabs(
                                     Text(
                                         text = item.name,
                                         style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Medium,
+                                        fontWeight = FontWeight.SemiBold,
                                     )
                                     Text(
                                         text = item.desc,

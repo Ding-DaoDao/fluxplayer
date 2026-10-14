@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -43,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.fluxplayer.app.core.tingshu.SourceHost
+import com.fluxplayer.app.core.ui.components.MediaLoadingRow
 
 /**
  * 书源 WebView 登录页。
@@ -162,7 +162,7 @@ class SourceLoginActivity : ComponentActivity() {
             pageError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
 
             if (loading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                MediaLoadingRow(modifier = Modifier.fillMaxWidth())
             }
 
             LoginWebView(

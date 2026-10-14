@@ -3,6 +3,7 @@ package com.fluxplayer.app.core.data.backup
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import android.provider.DocumentsContract
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.openlist.OpenListManagerProvider
@@ -71,7 +72,9 @@ class BackupManager @Inject constructor(
         val files = dataDir.listFiles().orEmpty().filter { it.isFile }
         if (files.isNotEmpty()) requireOpenListStopped()
         require(files.sumOf { it.length() } <= 24L * 1024 * 1024) { "OpenList 数据过大，无法导出备份" }
-        return BackupArchive(createBackup(), files.associate { it.name to it.readBytes() })
+        val data = createBackup()
+        val covers = com.fluxplayer.app.core.tingshu.ListeningCoverStore.export(context, data.onlineListeningLibrary, TingshuRepository.get(context))
+        return BackupArchive(data, files.associate { it.name to it.readBytes() }, covers.files, covers.warnings)
     }
 
     private fun requireOpenListStopped() {
@@ -88,6 +91,7 @@ class BackupManager @Inject constructor(
             BackupArchiveCodec.validate(backup)
             if ("openlist_config" !in ignoreList && archive.openListFiles.isNotEmpty()) requireOpenListStopped()
             if ("app_preferences" !in ignoreList) {
+                com.fluxplayer.app.core.tingshu.ListeningCoverStore.restore(context, archive.coverFiles)
                 backup.onlineListeningLibrary?.let { TingshuRepository.get(context).restoreLibrary(it) }
                 audiobookProgressRepository.restore(backup.appPreferences)
                 appPreferencesDataSource.updateOrThrow { AudiobookProgressRepository.withoutLegacyProgress(backup.appPreferences) }
@@ -112,12 +116,11 @@ class BackupManager @Inject constructor(
                     backupWebDavDataSource.updateOrThrow { current ->
                         restored.copy(
                             backupPath = "",
+                            localDirectoryUri = current.localDirectoryUri,
                             autoBackupSyncMode = "off",
                             hasPendingNewBackup = false,
                             lastSeenRemoteBackup = "",
                             deviceName = current.deviceName,
-                            // 旧归档（明文 ZIP 时代）没有密码字段，别把本机已设的备份密码清空
-                            backupPassphrase = restored.backupPassphrase.ifBlank { current.backupPassphrase },
                         )
                     }
                 }
@@ -150,42 +153,46 @@ class BackupManager @Inject constructor(
         }
     }
 
-    /** 导出到用户选定的文件；归档始终加密，[passphrase] 由调用方从用户输入取。 */
-    suspend fun exportToUri(uri: Uri, passphrase: CharArray) = withContext(Dispatchers.IO) {
+    /** 导出普通 ZIP 到用户选择的目录，无需备份密码。 */
+    suspend fun exportToDirectory(directory: Uri, fileName: String): BackupExportResult = withContext(Dispatchers.IO) {
+        val parent = DocumentsContract.buildDocumentUriUsingTree(directory, DocumentsContract.getTreeDocumentId(directory))
+        val target = checkNotNull(DocumentsContract.createDocument(context.contentResolver, parent, "application/zip", fileName)) { "无法在所选目录创建备份，请重新选择目录" }
+        try {
+            exportToUri(target).copy(fileName = fileName)
+        } catch (error: Exception) {
+            runCatching { DocumentsContract.deleteDocument(context.contentResolver, target) }
+            throw error
+        }
+    }
+
+    suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
         operationMutex.withLock {
-            val bytes = BackupArchiveCodec.encodeEncrypted(createArchive(), passphrase)
+            val archive = createArchive()
+            val bytes = BackupArchiveCodec.encode(archive)
             val output = checkNotNull(context.contentResolver.openOutputStream(uri, "wt")) { "无法写入备份文件" }
             output.use {
                 it.write(bytes)
                 it.flush()
             }
+            BackupExportResult(coverWarnings = archive.coverWarnings)
         }
     }
 
-    /**
-     * 读取备份文件。[passphrase] 为空且文件是加密归档时，抛
-     * [BackupPassphraseRequiredException]；密码错误抛 [BackupDecryptException]。
-     * 未加密的旧备份文件不需要密码。
-     */
-    suspend fun importFromUri(uri: Uri, passphrase: CharArray? = null): Result<BackupArchive> = withContext(Dispatchers.IO) {
+    /** 读取普通 ZIP 或 JSON 备份，不支持加密归档。 */
+    suspend fun importFromUri(uri: Uri): Result<BackupArchive> = withContext(Dispatchers.IO) {
         backupResult {
             val input = checkNotNull(context.contentResolver.openInputStream(uri)) { "无法打开备份文件" }
-            input.use { BackupArchiveCodec.decode(it, passphrase) }
+            input.use { BackupArchiveCodec.decode(it) }
         }
     }
 
     /** 新建子目录后上传，旧备份始终保留，返回本次实际创建的文件名。 */
-    suspend fun uploadToCloud(config: BackupWebDavConfig): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun uploadToCloud(config: BackupWebDavConfig): Result<BackupExportResult> = withContext(Dispatchers.IO) {
         backupResult {
             operationMutex.withLock {
                 require(config.isConfigured) { "请先配置有效的 WebDAV 地址" }
-                require(config.backupPassphrase.isNotBlank()) { "请先设置备份密码，再上传到云端" }
-                val passphrase = config.backupPassphrase.toCharArray()
-                val bytes = try {
-                    BackupArchiveCodec.encodeEncrypted(createArchive(), passphrase)
-                } finally {
-                    passphrase.fill('\u0000')
-                }
+                val archive = createArchive()
+                val bytes = BackupArchiveCodec.encode(archive)
                 var folder = ""
                 config.subfolder.trim('/').split('/').filter { it.isNotBlank() }.forEach { part ->
                     require(part != "." && part != ".." && !part.contains('\\')) { "无效的 WebDAV 子文件夹" }
@@ -199,30 +206,19 @@ class BackupManager @Inject constructor(
                 backupWebDavDataSource.updateOrThrow {
                     it.copy(lastSeenRemoteBackup = name, hasPendingNewBackup = false)
                 }
-                name
+                BackupExportResult(name, archive.coverWarnings)
             }
         }
     }
 
-    /**
-     * 从云端下载并解析备份。
-     * [passphrase] 为空时用配置里保存的密码；远程备份若来自其他设备（密码不同），
-     * 调用方应捕获 [BackupDecryptException]／[BackupPassphraseRequiredException] 后让用户重输。
-     */
+    /** 从云端下载并解析普通备份。 */
     suspend fun downloadFromCloud(
         config: BackupWebDavConfig,
         path: String,
-        passphrase: CharArray? = null,
     ): Result<BackupArchive> = withContext(Dispatchers.IO) {
         backupResult {
             val bytes = webDavRepository.downloadFile(config.url, path, config.basicAuthHeader).getOrThrow()
-            val effective = passphrase ?: config.backupPassphrase.takeIf { it.isNotBlank() }?.toCharArray()
-            try {
-                ByteArrayInputStream(bytes).use { BackupArchiveCodec.decode(it, effective) }
-            } finally {
-                // 只有本函数自己从配置派生的那份才清零；调用方传进来的由调用方负责
-                if (passphrase == null) effective?.fill('\u0000')
-            }
+            ByteArrayInputStream(bytes).use { BackupArchiveCodec.decode(it) }
         }
     }
 
@@ -419,7 +415,7 @@ class BackupManager @Inject constructor(
     /**
      * 读取某个凭证字段。
      *
-     * 归档里必须放**明文**（归档本身由用户口令加密，见 [BackupArchiveCodec.encodeEncrypted]），
+     * 归档使用可恢复的凭证原值，不保存仅当前设备可解开的密文，
      * 所以这里要把落盘的密文解出来；恢复时再由 [saveCredentials] 重新加密写回。
      * 未迁移的 scope（目前只有天翼 `cloud189`）按明文读。
      */
@@ -466,7 +462,12 @@ class BackupManager @Inject constructor(
          * 必须先把它的读写也迁移掉**，否则两边读法不一致会直接读不到凭证。
          */
         private val ENCRYPTED_SCOPES = setOf(
-            ALIPAN_PREFS, PAN123_PREFS, QUARK_PREFS, UC_PREFS, YUN139_PREFS, PREFS_NAME,
+            ALIPAN_PREFS,
+            PAN123_PREFS,
+            QUARK_PREFS,
+            UC_PREFS,
+            YUN139_PREFS,
+            PREFS_NAME,
         )
 
         /** 非机密字段：多处按明文读写，保持原样，避免与既有读法不一致。 */

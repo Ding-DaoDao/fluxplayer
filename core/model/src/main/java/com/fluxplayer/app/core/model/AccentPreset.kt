@@ -3,7 +3,7 @@ package com.fluxplayer.app.core.model
 import kotlinx.serialization.Serializable
 
 /**
- * 墨 · 极简风格下的强调色预设（界面唯一的彩色来源）。
+ * 媒体主题的强调色预设，同时用于派生柔和的背景和卡片颜色。
  *
  * 日夜各给一个 ARGB 值：深色底上需要更亮的强调色才够对比。
  * 颜色以 Int ARGB 存储（不依赖 Compose），由 core:ui 转成 [androidx.compose.ui.graphics.Color]。
@@ -23,6 +23,6 @@ enum class AccentPreset(
     ;
 
     companion object {
-        val Default = INK
+        val Default = AZURE
     }
 }

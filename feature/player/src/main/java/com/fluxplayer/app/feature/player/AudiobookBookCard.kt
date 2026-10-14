@@ -49,14 +49,14 @@ fun AudiobookBookCard(
     Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.surfaceContainer),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.surfaceContainerLow),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp, pressedElevation = 2.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // ── 封面缩略图 ──
@@ -97,9 +97,9 @@ fun AudiobookBookCard(
                     style = FluxTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = colors.onSurface,
-                    modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE),
-                    maxLines = 1,
-                    overflow = TextOverflow.Clip,
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Column(

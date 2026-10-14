@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 /**
@@ -112,8 +113,8 @@ fun FolderPickerDialog(
                 // 内容区域
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.align(Alignment.Center)
+                        MediaLoadingIndicator(
+                            modifier = Modifier.align(Alignment.Center),
                         )
                     } else if (folders.isEmpty()) {
                         Text(
@@ -154,7 +155,7 @@ fun FolderPickerDialog(
                                         onClick = {
                                             breadcrumbs = breadcrumbs + PickerBreadcrumb(folder.name, folder.path)
                                             onNavigateToFolder(folder.path)
-                                        }
+                                        },
                                     ),
                                 )
                             }
@@ -182,7 +183,7 @@ fun FolderPickerDialog(
                 onCreate = { name ->
                     onCreateFolder(currentFolderId, name)
                     showCreateDialog = false
-                }
+                },
             )
         }
     }
@@ -214,10 +215,11 @@ private fun BreadcrumbRow(
                     fontWeight = if (index == breadcrumbs.lastIndex) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = if (index == breadcrumbs.lastIndex)
+                    color = if (index == breadcrumbs.lastIndex) {
                         MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant,
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
             if (index < breadcrumbs.lastIndex) {

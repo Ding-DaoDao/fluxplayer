@@ -45,6 +45,15 @@ android {
             isDebuggable = true
         }
 
+        // UI 测试版使用独立包名，可与正式版同时安装。
+        create("uiPreview") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".uipreview"
+            versionNameSuffix = "-ui-preview7-avbox"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks.add("debug")
+        }
+
         create("release-with-debug-signing") {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")

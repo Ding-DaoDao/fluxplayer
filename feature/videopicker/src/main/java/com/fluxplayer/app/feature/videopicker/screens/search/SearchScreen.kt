@@ -25,12 +25,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -49,7 +47,6 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
@@ -66,6 +63,8 @@ import com.fluxplayer.app.core.ui.components.FluxIcon
 import com.fluxplayer.app.core.ui.components.FluxIconButton
 import com.fluxplayer.app.core.ui.components.FluxText
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
+import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
 import com.fluxplayer.app.core.ui.components.NextSegmentedListItem
 import com.fluxplayer.app.core.ui.components.NextTopAppBar
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
@@ -138,7 +137,7 @@ internal fun SearchScreen(
                                     )
                                 }
                             } else if (uiState.isSearching) {
-                                CircularProgressIndicator(
+                                MediaLoadingIndicator(
                                     modifier = Modifier.size(24.dp),
                                     strokeWidth = 2.dp,
                                 )
@@ -171,7 +170,7 @@ internal fun SearchScreen(
                 },
             )
         },
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = MaterialTheme.colorScheme.background,
     ) { scaffoldPadding ->
         Column(
             modifier = Modifier
@@ -242,7 +241,7 @@ private fun SuggestionsContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -386,7 +385,7 @@ private fun SearchResultsContent(
             modifier = Modifier.fillMaxSize().padding(top = 100.dp),
             contentAlignment = Alignment.TopCenter,
         ) {
-            CircularProgressIndicator()
+            MediaLoadingIndicator()
         }
     }
 

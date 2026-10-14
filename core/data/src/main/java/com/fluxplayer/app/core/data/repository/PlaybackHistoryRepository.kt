@@ -8,6 +8,9 @@ interface PlaybackHistoryRepository {
 
     fun getHistoryFlow(): Flow<List<PlaybackHistory>>
 
+    /** 足迹和已播放标记使用完整历史，不受显示上限和同名合并影响。 */
+    fun getAllHistoryFlow(): Flow<List<PlaybackHistory>> = getHistoryFlow()
+
     suspend fun recordPlayback(
         uriString: String,
         title: String,

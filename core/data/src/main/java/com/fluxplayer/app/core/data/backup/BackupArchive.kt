@@ -14,12 +14,22 @@ import kotlinx.serialization.json.Json
 data class BackupArchive(
     val data: BackupData,
     val openListFiles: Map<String, ByteArray> = emptyMap(),
+    val coverFiles: Map<String, ByteArray> = emptyMap(),
+    val coverWarnings: List<String> = emptyList(),
 )
 
+data class BackupExportResult(
+    val fileName: String = "",
+    val coverWarnings: List<String> = emptyList(),
+) {
+    fun successMessage(message: String): String =
+        if (coverWarnings.isEmpty()) message else "$message；${coverWarnings.size} 张封面未能备份"
+}
+
 internal object BackupArchiveCodec {
-    private const val MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
+    private const val MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
     private const val MAX_JSON_BYTES = 16 * 1024 * 1024
-    private const val MAX_ENTRIES = 256
+    private const val MAX_ENTRIES = 2048
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -27,10 +37,10 @@ internal object BackupArchiveCodec {
 
     fun encode(archive: BackupArchive): ByteArray {
         validate(archive.data)
-        require(archive.openListFiles.size < MAX_ENTRIES) { "备份文件条目过多" }
+        require(archive.openListFiles.size + archive.coverFiles.size < MAX_ENTRIES) { "备份文件条目过多" }
         val configBytes = json.encodeToString(BackupData.serializer(), archive.data).toByteArray(Charsets.UTF_8)
         require(configBytes.size <= MAX_JSON_BYTES) { "备份配置过大" }
-        require(configBytes.size.toLong() + archive.openListFiles.values.sumOf { it.size.toLong() } <= MAX_ARCHIVE_BYTES) { "备份文件过大" }
+        require(configBytes.size.toLong() + archive.openListFiles.values.sumOf { it.size.toLong() } + archive.coverFiles.values.sumOf { it.size.toLong() } <= MAX_ARCHIVE_BYTES) { "备份文件过大" }
         return ByteArrayOutputStream().use { output ->
             ZipOutputStream(output).use { zip ->
                 zip.putNextEntry(ZipEntry("backup.json"))
@@ -42,40 +52,28 @@ internal object BackupArchiveCodec {
                     zip.write(bytes)
                     zip.closeEntry()
                 }
+                archive.coverFiles.forEach { (name, bytes) ->
+                    com.fluxplayer.app.core.tingshu.ListeningCoverStore.validateName(name)
+                    zip.putNextEntry(ZipEntry("listening_covers/$name"))
+                    zip.write(bytes)
+                    zip.closeEntry()
+                }
             }
             output.toByteArray()
         }
     }
 
-    /**
-     * 归档载荷的密码信封版本：ZIP 外再包一层 [BackupCrypto]，
-     * 避免 123 明文账号密码与各平台 Cookie 以裸 ZIP 落盘或传 WebDAV。
-     */
-    fun encodeEncrypted(archive: BackupArchive, passphrase: CharArray): ByteArray =
-        BackupCrypto.encrypt(encode(archive), passphrase)
-
-    /**
-     * 解析归档。
-     *
-     * 加密归档（[BackupCrypto.isEncrypted]）必须提供 [passphrase]，否则抛
-     * [BackupPassphraseRequiredException] 让上层去要密码；密码错误抛 [BackupDecryptException]。
-     * **未加密的旧归档**（裸 ZIP / 裸 JSON）仍可直接读取，保证老备份文件能恢复。
-     */
-    fun decode(input: InputStream, passphrase: CharArray? = null): BackupArchive {
-        val bytes = readLimited(input, MAX_ARCHIVE_BYTES)
-        if (BackupCrypto.isEncrypted(bytes)) {
-            if (passphrase == null || passphrase.isEmpty()) throw BackupPassphraseRequiredException()
-            return decodePlain(BackupCrypto.decrypt(bytes, passphrase))
-        }
-        return decodePlain(bytes)
-    }
+    /** 仅解析普通 ZIP 或 JSON 备份，不读取旧加密格式。 */
+    fun decode(input: InputStream): BackupArchive = decodePlain(readLimited(input, MAX_ARCHIVE_BYTES))
 
     private fun decodePlain(bytes: ByteArray): BackupArchive {
         if (bytes.size < 4 || bytes[0] != 'P'.code.toByte() || bytes[1] != 'K'.code.toByte()) {
+            require(bytes.toString(Charsets.UTF_8).trimStart().startsWith("{")) { "不支持该备份格式，请选择未加密的 ZIP 或 JSON 备份" }
             return BackupArchive(decodeJson(bytes))
         }
         var data: BackupData? = null
         val files = linkedMapOf<String, ByteArray>()
+        val covers = linkedMapOf<String, ByteArray>()
         var totalBytes = 0
         var count = 0
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
@@ -89,6 +87,12 @@ internal object BackupArchiveCodec {
                         require(data == null) { "备份文件包含重复的 backup.json" }
                         data = decodeJson(content)
                     }
+                    !entry.isDirectory && entry.name.startsWith("listening_covers/") -> {
+                        val name = entry.name.removePrefix("listening_covers/")
+                        com.fluxplayer.app.core.tingshu.ListeningCoverStore.validateName(name)
+                        require(name !in covers) { "备份包含重复的封面" }
+                        covers[name] = content
+                    }
                     !entry.isDirectory && entry.name.startsWith("openlist_data/") -> {
                         val name = entry.name.removePrefix("openlist_data/")
                         validateFileName(name)
@@ -100,7 +104,7 @@ internal object BackupArchiveCodec {
                 entry = zip.nextEntry
             }
         }
-        return BackupArchive(requireNotNull(data) { "备份文件中没有 backup.json" }, files)
+        return BackupArchive(requireNotNull(data) { "备份文件中没有 backup.json" }, files, covers)
     }
 
     fun validate(data: BackupData) {

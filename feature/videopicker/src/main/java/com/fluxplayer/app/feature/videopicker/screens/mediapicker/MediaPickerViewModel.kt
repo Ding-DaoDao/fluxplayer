@@ -6,7 +6,6 @@ import androidx.core.net.toUri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.common.extensions.prettyName
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
@@ -17,9 +16,10 @@ import com.fluxplayer.app.core.media.sync.MediaInfoSynchronizer
 import com.fluxplayer.app.core.media.sync.MediaSynchronizer
 import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.Folder
-import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.model.WebDavServer
+import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.feature.videopicker.navigation.FolderArgs
+import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,7 +61,7 @@ class MediaPickerViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            playbackHistoryRepository.getHistoryFlow().collect { history ->
+            playbackHistoryRepository.getAllHistoryFlow().collect { history ->
                 // 按 parentPath 分组，每组只保留最新一条
                 val latestPerDir = history
                     .filter { it.parentPath != null }
@@ -77,8 +77,11 @@ class MediaPickerViewModel @Inject constructor(
                     val cleaned = prefs.latestFootprintPerDir.filterValues { value ->
                         !value.startsWith("http") || value in allUris
                     }
-                    if (cleaned.size == prefs.latestFootprintPerDir.size) prefs
-                    else prefs.copy(latestFootprintPerDir = cleaned)
+                    if (cleaned.size == prefs.latestFootprintPerDir.size) {
+                        prefs
+                    } else {
+                        prefs.copy(latestFootprintPerDir = cleaned)
+                    }
                 }
             }
         }
@@ -93,10 +96,11 @@ class MediaPickerViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            preferencesRepository.applicationPreferences.collect {
+            preferencesRepository.persistedApplicationPreferences.collect {
                 uiStateInternal.update { currentState ->
                     currentState.copy(
                         preferences = it,
+                        preferencesLoaded = true,
                     )
                 }
             }
@@ -108,7 +112,7 @@ class MediaPickerViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences { prefs ->
                 prefs.copy(
-                    latestFootprintPerDir = prefs.latestFootprintPerDir + (parentDir to itemPath),
+                    latestFootprintPerDir = if (prefs.videoIncognito) prefs.latestFootprintPerDir else prefs.latestFootprintPerDir + (parentDir to itemPath),
                 )
             }
         }
@@ -190,6 +194,7 @@ data class MediaPickerUiState(
     val folderName: String?,
     val mediaDataState: DataState<Folder?> = DataState.Loading,
     val refreshing: Boolean = false,
+    val preferencesLoaded: Boolean = false,
     val preferences: ApplicationPreferences = ApplicationPreferences(),
     val playedUriSet: Set<String> = emptySet(),
 )

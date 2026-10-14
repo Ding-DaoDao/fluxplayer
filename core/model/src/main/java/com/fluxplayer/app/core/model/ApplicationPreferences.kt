@@ -9,6 +9,25 @@ data class ApplicationPreferences(
     val themeConfig: ThemeConfig = ThemeConfig.SYSTEM,
     val useHighContrastDarkTheme: Boolean = false,
     val accentPreset: AccentPreset = AccentPreset.Default,
+    val themeColorSource: ThemeColorSource = ThemeColorSource.SYSTEM,
+    val themeSeedArgb: Int = 0xFFD02020.toInt(),
+    val themePaletteStyle: ThemePaletteStyle = ThemePaletteStyle.TONAL_SPOT,
+    // 液态玻璃参数与导航、顶栏共同使用。
+    val glassControlsEnabled: Boolean = true,
+    val glassBlurDp: Float = 20f,
+    val glassDistortionDp: Float = 30f,
+    val glassTranslucency: Float = 0.5f,
+    val glassDispersion: Boolean = true,
+    val glassSettingsVersion: Int = 0,
+    val navAnimationsEnabled: Boolean = true,
+    val navGesturesEnabled: Boolean = true,
+    val hideStatusBar: Boolean = false,
+    val historyMergeEnabled: Boolean = false,
+    val videoIncognito: Boolean = false,
+    val historyLimit: Int = 200,
+    // 零表示自动适配宽度，显式列数同时用于视频与书架网格。
+    val mediaGridColumns: Int = 0,
+    // 仅保留旧设置与备份兼容，无效的设置入口已移除。
     val markLastPlayedMedia: Boolean = true,
     val excludeFolders: List<String> = emptyList(),
     val mediaViewMode: MediaViewMode = MediaViewMode.FOLDERS,
@@ -59,7 +78,7 @@ data class ApplicationPreferences(
     val providerOrder: List<String> = emptyList(),
 
     // 悬浮底栏
-    val useFloatingBottomBar: Boolean = false,
+    val useFloatingBottomBar: Boolean = true,
 
     // 底栏样式（悬浮舱 / 通栏）。useFloatingBottomBar=false 时此值不生效
     val navStyle: NavStyle = NavStyle.Default,
@@ -68,7 +87,7 @@ data class ApplicationPreferences(
     val surfaceStyle: SurfaceStyle = SurfaceStyle.Default,
 
     // 液态玻璃效果（仅在悬浮底栏开启时生效）
-    val useLiquidGlass: Boolean = false,
+    val useLiquidGlass: Boolean = true,
 
     // 模糊效果
     val enableBlur: Boolean = true,
@@ -82,10 +101,6 @@ data class ApplicationPreferences(
     val topBarOpacity: Int = 100,
     val bottomBarOpacity: Int = 100,
     val containerOpacity: Int = 100,
-
-    // 自定义主题色（0 = 使用默认/动态取色）
-
-    // 主题引擎
 
     // 下载存储路径
     val downloadPath: String = "/storage/emulated/0/Download/",

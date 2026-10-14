@@ -1,5 +1,6 @@
 package com.fluxplayer.app.core.ui.components
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -16,6 +17,9 @@ import androidx.compose.ui.res.stringResource
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.LocalHazeState
+import com.fluxplayer.app.core.ui.theme.LocalMediaBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import dev.chrisbanes.haze.HazeState
 
 /**
@@ -27,14 +31,16 @@ fun FluxSettingsScaffold(
     title: String,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
-    containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
+    containerColor: Color = MaterialTheme.colorScheme.background,
     enableBlur: Boolean = true,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val hazeState = remember { HazeState() }
+    val backdrop = rememberLayerBackdrop()
 
     CompositionLocalProvider(
         LocalHazeState provides if (enableBlur) hazeState else null,
+        LocalMediaBackdrop provides backdrop,
     ) {
         Scaffold(
             modifier = modifier,
@@ -52,7 +58,14 @@ fun FluxSettingsScaffold(
                 )
             },
             containerColor = containerColor,
-            content = content,
+            content = { padding ->
+                Box(Modifier.layerBackdrop(backdrop)) {
+                    // 被录入的内容不能再采样同一背景，否则绘图层会循环引用。
+                    CompositionLocalProvider(LocalMediaBackdrop provides null) {
+                        content(padding)
+                    }
+                }
+            },
         )
     }
 }

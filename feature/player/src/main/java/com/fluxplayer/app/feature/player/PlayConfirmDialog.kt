@@ -51,11 +51,11 @@ fun PlayConfirmDialog(
     onRefresh: (() -> Unit)? = null,
 ) {
     val colors = FluxTheme.colorScheme
-    androidx.compose.material3.AlertDialog(
+    com.fluxplayer.app.core.ui.components.MediaAlertDialog(
         onDismissRequest = onDismiss,
         modifier = modifier,
-        containerColor = colors.surfaceContainerHigh,
-        shape = RoundedCornerShape(28.dp),
+        containerColor = colors.surfaceContainerLow,
+        shape = RoundedCornerShape(32.dp),
         title = null,
         text = {
             Column(
@@ -126,7 +126,7 @@ fun PlayConfirmDialog(
                 }
                 if (loading) {
                     Spacer(Modifier.height(12.dp))
-                    AudiobookLoadingIndicator("正在加载章节…")
+                    com.fluxplayer.app.core.ui.components.MediaPageLoading("正在加载章节…")
                 }
                 errorContent?.let {
                     Spacer(Modifier.height(12.dp))
@@ -141,7 +141,7 @@ fun PlayConfirmDialog(
             ) {
                 Surface(
                     onClick = onDismiss,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(28.dp),
                     color = colors.surfaceContainerHighest,
                     modifier = Modifier.weight(1f),
                 ) {
@@ -159,7 +159,7 @@ fun PlayConfirmDialog(
                 Surface(
                     onClick = onPlay,
                     enabled = playEnabled,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(28.dp),
                     color = if (playEnabled) colors.primary else colors.surfaceContainerHighest,
                     modifier = Modifier.weight(1.4f),
                 ) {

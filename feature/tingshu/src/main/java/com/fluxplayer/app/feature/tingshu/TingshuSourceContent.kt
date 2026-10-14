@@ -24,10 +24,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -49,10 +47,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.request.ImageRequest
 import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.tingshu.TingshuRepository
+import com.fluxplayer.app.core.ui.components.MediaPageLoading as AudiobookLoadingIndicator
+import com.fluxplayer.app.core.ui.components.MediaPullToRefreshBox as PullToRefreshBox
+import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.AudiobookBookCard
-import com.fluxplayer.app.feature.player.AudiobookLoadingIndicator
 import com.fluxplayer.app.feature.player.PlayConfirmDialog
 import com.fluxplayer.app.feature.player.model.AudioBook
 import com.github.eprendre.tingshu.utils.Book
@@ -321,9 +321,10 @@ private fun playBook(context: android.content.Context, repository: TingshuReposi
 internal fun rememberSourceCover(sourceId: String, url: String, repository: TingshuRepository, refreshRevision: Long = 0): ImageRequest? {
     val context = LocalContext.current
     val cacheEnabled by com.fluxplayer.app.core.ui.cache.BookCoverCache.enabled(context).collectAsStateWithLifecycle()
-    return remember(context, sourceId, url, repository, refreshRevision, cacheEnabled) {
+    val coverRevision by com.fluxplayer.app.core.tingshu.ListeningCoverStore.revision.collectAsStateWithLifecycle()
+    return remember(context, sourceId, url, repository, refreshRevision, cacheEnabled, coverRevision) {
         if (url.isBlank()) return@remember null
-        ImageRequest.Builder(context).data(SourceCover(url, refreshRevision > 0))
+        ImageRequest.Builder(context).data(SourceCover(url, refreshRevision > 0, sourceId))
             .placeholderMemoryCacheKey("$sourceId:$url")
             .apply {
                 if (refreshRevision > 0) {
@@ -331,7 +332,7 @@ internal fun rememberSourceCover(sourceId: String, url: String, repository: Ting
                     diskCachePolicy(if (cacheEnabled) coil3.request.CachePolicy.WRITE_ONLY else coil3.request.CachePolicy.DISABLED)
                 }
             }
-            .diskCacheKey("$sourceId:$url").memoryCacheKey("$sourceId:$url")
+            .diskCacheKey("$sourceId:$url").memoryCacheKey("$sourceId:$url:$coverRevision")
             .fetcherFactory(SourceCoverFetcher { repository.resolveCover(sourceId, url, forceRefresh = refreshRevision > 0) }).build()
     }
 }

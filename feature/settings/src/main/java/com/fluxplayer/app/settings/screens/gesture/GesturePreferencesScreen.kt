@@ -10,7 +10,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -34,6 +33,7 @@ import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
 import com.fluxplayer.app.core.ui.components.NextDialogWithDoneAndCancelButtons
 import com.fluxplayer.app.core.ui.components.PreferenceSlider
 import com.fluxplayer.app.core.ui.components.PreferenceSwitch

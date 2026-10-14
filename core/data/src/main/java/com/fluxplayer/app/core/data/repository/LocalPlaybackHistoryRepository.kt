@@ -1,11 +1,13 @@
 package com.fluxplayer.app.core.data.repository
 
 import androidx.core.net.toUri
+import androidx.datastore.core.DataStore
 import com.fluxplayer.app.core.common.extensions.fromUri
 import com.fluxplayer.app.core.data.extractor.ThumbnailExtractor
 import com.fluxplayer.app.core.database.dao.MediumStateDao
 import com.fluxplayer.app.core.database.dao.PlaybackHistoryDao
 import com.fluxplayer.app.core.database.entities.PlaybackHistoryEntity
+import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.PlaybackHistory
 import com.fluxplayer.app.core.model.VideoSource
 import javax.inject.Inject
@@ -14,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -23,6 +26,7 @@ class LocalPlaybackHistoryRepository @Inject constructor(
     private val playbackHistoryDao: PlaybackHistoryDao,
     private val mediumStateDao: MediumStateDao,
     private val thumbnailExtractor: ThumbnailExtractor,
+    private val preferences: DataStore<ApplicationPreferences>,
 ) : PlaybackHistoryRepository {
 
     private val migrationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -70,9 +74,15 @@ class LocalPlaybackHistoryRepository @Inject constructor(
         return playbackHistoryDao.countByUri(uriString) > 0
     }
 
+    override fun getAllHistoryFlow(): Flow<List<PlaybackHistory>> {
+        return playbackHistoryDao.getAllAsFlow().map { entities -> entities.map { it.toPlaybackHistory() } }
+    }
+
     override fun getHistoryFlow(): Flow<List<PlaybackHistory>> {
-        return playbackHistoryDao.getAllAsFlow().map { entities ->
-            entities.map { it.toPlaybackHistory() }
+        return combine(playbackHistoryDao.getAllAsFlow(), preferences.data) { entities, prefs ->
+            val history = entities.map { it.toPlaybackHistory() }
+            val visible = if (prefs.historyMergeEnabled) history.distinctBy { it.title.trim().lowercase(java.util.Locale.ROOT).ifBlank { it.uriString } } else history
+            visible.take(prefs.historyLimit.coerceIn(50, 1000))
         }
     }
 
@@ -86,6 +96,7 @@ class LocalPlaybackHistoryRepository @Inject constructor(
         thumbnailPath: String?,
         parentPath: String?,
     ) {
+        if (preferences.data.first().videoIncognito) return
         // 原子写入：thumbnailPath 为 null 时由 SQL 层保留现有值，
         // 避免退出时多次 recordHistory 并发读-改-写把缩略图覆盖成 null
         playbackHistoryDao.upsertPreservingThumbnail(

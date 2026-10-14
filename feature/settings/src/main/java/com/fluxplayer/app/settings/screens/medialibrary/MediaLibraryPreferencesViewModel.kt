@@ -2,9 +2,9 @@ package com.fluxplayer.app.settings.screens.medialibrary
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.ApplicationPreferences
+import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,26 +29,8 @@ class MediaLibraryPreferencesViewModel @Inject constructor(
             }
         }
     }
-
-    fun onEvent(event: MediaLibraryPreferencesUiEvent) {
-        when (event) {
-            MediaLibraryPreferencesUiEvent.ToggleMarkLastPlayedMedia -> toggleMarkLastPlayedMedia()
-        }
-    }
-
-    private fun toggleMarkLastPlayedMedia() {
-        viewModelScope.launch {
-            preferencesRepository.updateApplicationPreferences {
-                it.copy(markLastPlayedMedia = !it.markLastPlayedMedia)
-            }
-        }
-    }
 }
 
 data class MediaLibraryPreferencesUiState(
     val preferences: ApplicationPreferences = ApplicationPreferences(),
 )
-
-sealed interface MediaLibraryPreferencesUiEvent {
-    data object ToggleMarkLastPlayedMedia : MediaLibraryPreferencesUiEvent
-}

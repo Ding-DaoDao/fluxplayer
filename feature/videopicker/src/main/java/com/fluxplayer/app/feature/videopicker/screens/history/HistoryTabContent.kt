@@ -2,14 +2,14 @@ package com.fluxplayer.app.feature.videopicker.screens.history
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,11 +20,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import com.fluxplayer.app.core.ui.components.NextDialog
-import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,11 +33,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -45,13 +45,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
-import com.fluxplayer.app.core.ui.components.FluxIcon
-import com.fluxplayer.app.core.ui.components.FluxText
 import com.fluxplayer.app.core.model.PlaybackHistory
 import com.fluxplayer.app.core.model.VideoSource
-import com.fluxplayer.app.core.ui.components.NextSegmentedListItem
+import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.FluxIcon
+import com.fluxplayer.app.core.ui.components.FluxText
+import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
-import com.fluxplayer.app.feature.videopicker.composables.CenterCircularProgressBar
+import com.fluxplayer.app.core.ui.theme.LocalMediaScrollBottomPadding
 import java.util.concurrent.TimeUnit
 
 /** 云盘 Source → BrowseTabs provider ID 映射 */
@@ -81,9 +82,14 @@ private fun extractParentDirFromUri(uriString: String, providerId: String): Stri
 }
 
 private val cloudSources = setOf(
-    VideoSource.ALIYUN, VideoSource.PAN123, VideoSource.QUARK,
-    VideoSource.UC, VideoSource.CLOUD189, VideoSource.YUN139,
-    VideoSource.WEBDAV, VideoSource.OPENLIST
+    VideoSource.ALIYUN,
+    VideoSource.PAN123,
+    VideoSource.QUARK,
+    VideoSource.UC,
+    VideoSource.CLOUD189,
+    VideoSource.YUN139,
+    VideoSource.WEBDAV,
+    VideoSource.OPENLIST,
 )
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -104,192 +110,99 @@ fun HistoryTabContent(
             modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
-            CenterCircularProgressBar()
+            com.fluxplayer.app.core.ui.components.MediaListSkeleton()
         }
         return
     }
 
     Column(modifier = modifier.fillMaxSize()) {
         if (uiState.historyList.isEmpty()) {
-            Box(
+            com.fluxplayer.app.core.ui.components.MediaEmptyState(
+                icon = NextIcons.History,
+                title = "暂无播放记录",
+                description = "播放过的视频会显示在这里，方便继续观看。",
+            )
+        } else {
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center,
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp + LocalMediaScrollBottomPadding.current),
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    FluxIcon(
-                        imageVector = NextIcons.History,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    FluxText(
-                        text = "暂无播放记录",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    TextButton(onClick = { showClearDialog = true }) {
-                        FluxIcon(
-                            imageVector = NextIcons.Delete,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        FluxText("清除全部")
+                // 一键清除按钮
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = { showClearDialog = true },
+                        ) {
+                            FluxIcon(
+                                imageVector = NextIcons.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            FluxText("清除全部")
+                        }
                     }
                 }
-            }
-        } else {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
-            contentPadding = PaddingValues(vertical = 8.dp),
-        ) {
-        // 一键清除按钮
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(
-                    onClick = { showClearDialog = true },
-                ) {
-                    FluxIcon(
-                        imageVector = NextIcons.Delete,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    FluxText("清除全部")
-                }
-            }
-        }
-        itemsIndexed(
-            items = uiState.historyList,
-            key = { _, item -> item.uriString },
-        ) { index, historyItem ->
-            val isFirst = index == 0
-            val isLast = index == uiState.historyList.lastIndex
-
-            NextSegmentedListItem(
-                isFirstItem = isFirst,
-                isLastItem = isLast,
-                contentPadding = PaddingValues(8.dp),
-                onClick = {
-                    // 解析 parentPath：新格式 "fileId|label"，旧格式为纯 label（无 "|"）
-                    val hasParentFileId = historyItem.parentPath?.contains("|") == true
-                    val parentFileId: String?
-                    val displayLabel: String?
-                    if (hasParentFileId) {
-                        val parts = historyItem.parentPath!!.split("|", limit = 2)
-                        parentFileId = parts[0].takeIf { it.isNotBlank() }
-                        displayLabel = parts.getOrNull(1)
-                    } else {
-                        parentFileId = null
-                        displayLabel = historyItem.parentPath
-                    }
-
-                    val providerId = cloudSourceToProvider(historyItem.source)
-                    if (providerId != null) {
-                        if (parentFileId != null) {
-                            // 云盘播放记录（新格式）→ 跳转到所在目录
-                            onNavigateToCloudDir(providerId, parentFileId, displayLabel ?: "目录")
-                        } else {
-                            // 旧格式/无缓存记录 → 从 URI 提取父目录路径再跳转
-                            val dirPath = extractParentDirFromUri(historyItem.uriString, providerId)
-                            if (dirPath != null) {
-                                onNavigateToCloudDir(providerId, dirPath, displayLabel ?: "目录")
+                itemsIndexed(
+                    items = uiState.historyList,
+                    key = { _, item -> item.uriString },
+                ) { _, historyItem ->
+                    HistoryCard(
+                        history = historyItem,
+                        onClick = {
+                            // 解析 parentPath：新格式 "fileId|label"，旧格式为纯 label（无 "|"）
+                            val hasParentFileId = historyItem.parentPath?.contains("|") == true
+                            val parentFileId: String?
+                            val displayLabel: String?
+                            if (hasParentFileId) {
+                                val parts = historyItem.parentPath!!.split("|", limit = 2)
+                                parentFileId = parts[0].takeIf { it.isNotBlank() }
+                                displayLabel = parts.getOrNull(1)
                             } else {
-                                // 无法提取路径，fallback 直接播放
+                                parentFileId = null
+                                displayLabel = historyItem.parentPath
+                            }
+
+                            val providerId = cloudSourceToProvider(historyItem.source)
+                            if (providerId != null) {
+                                if (parentFileId != null) {
+                                    // 云盘播放记录（新格式）→ 跳转到所在目录
+                                    onNavigateToCloudDir(providerId, parentFileId, displayLabel ?: "目录")
+                                } else {
+                                    // 旧格式/无缓存记录 → 从 URI 提取父目录路径再跳转
+                                    val dirPath = extractParentDirFromUri(historyItem.uriString, providerId)
+                                    if (dirPath != null) {
+                                        onNavigateToCloudDir(providerId, dirPath, displayLabel ?: "目录")
+                                    } else {
+                                        // 无法提取路径，fallback 直接播放
+                                        val uri = historyItem.originalUriString?.let { Uri.parse(it) }
+                                            ?: Uri.parse(historyItem.uriString)
+                                        onPlayVideo(uri, null)
+                                    }
+                                }
+                            } else {
+                                // 本地/其他 → 直接播放
                                 val uri = historyItem.originalUriString?.let { Uri.parse(it) }
                                     ?: Uri.parse(historyItem.uriString)
                                 onPlayVideo(uri, null)
                             }
-                        }
-                    } else {
-                        // 本地/其他 → 直接播放
-                        val uri = historyItem.originalUriString?.let { Uri.parse(it) }
-                            ?: Uri.parse(historyItem.uriString)
-                        onPlayVideo(uri, null)
-                    }
-                },
-                onLongClick = {
-                    itemToDelete = historyItem
-                },
-                leadingContent = {
-                    HistoryThumbnail(
-                        thumbnailPath = historyItem.thumbnailPath,
-                        source = historyItem.source,
+                        },
+                        onLongClick = {
+                            itemToDelete = historyItem
+                        },
+
                     )
-                },
-                content = {
-                    Text(
-                        text = historyItem.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                supportingContent = {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            FluxText(
-                                text = sourceLabel(historyItem.source),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            )
-                            FluxText(
-                                text = " · ",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            )
-                            FluxText(
-                                text = formatRelativeTime(historyItem.lastPlayedTime),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            )
-                            historyItem.parentPath?.let { parentPath ->
-                                val displayLabel: String = if (parentPath.contains("|")) {
-                                    // 新格式 "fileId|根目录|root/动漫|123/盗妖行|456" → 提取最后一级目录名
-                                    val fullPath = parentPath.split("|", limit = 2).getOrNull(1) ?: parentPath
-                                    fullPath.split("/").lastOrNull()?.split("|")?.firstOrNull() ?: fullPath
-                                } else {
-                                    // 旧格式 — 纯标签
-                                    parentPath
-                                }
-                                FluxText(
-                                    text = " · ",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                )
-                                FluxText(
-                                    text = "${displayLabel}/",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                )
-                            }
-                        }
-                        if (historyItem.duration > 0) {
-                            PlaybackProgressBar(
-                                percentage = historyItem.playedPercentage,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(3.dp),
-                            )
-                        }
-                    }
-                },
-            )
+                }
+            }
         }
-    }
-    }
     }
 
     if (showClearDialog) {
@@ -335,6 +248,49 @@ fun HistoryTabContent(
     }
 }
 
+/** 历史记录采用完整卡片布局，进度跨整张卡片，避免挤在缩略图旁边。 */
+@Composable
+private fun HistoryCard(history: PlaybackHistory, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        shape = RoundedCornerShape(28.dp),
+        color = colors.surfaceContainerLow,
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                HistoryThumbnail(history.thumbnailPath, history.source)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(sourceLabel(history.source), style = MaterialTheme.typography.labelMedium, color = colors.primary)
+                    Text(history.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        stringResource(R.string.last_playback_position, formatPlaybackPosition(history.playbackPosition)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+            }
+            if (history.duration > 0) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    PlaybackProgressBar(history.playedPercentage, Modifier.weight(1f))
+                    Text(
+                        stringResource(R.string.playback_progress_percent, (history.playedPercentage * 100).toInt()),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.primary,
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                val path = history.parentPath?.substringAfter('|', history.parentPath.orEmpty())
+                    ?.substringAfterLast('/')?.substringBefore('|').orEmpty()
+                Text(path, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                Text(formatRelativeTime(history.lastPlayedTime), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            }
+        }
+    }
+}
+
 @Composable
 private fun PlaybackProgressBar(
     percentage: Float,
@@ -343,14 +299,14 @@ private fun PlaybackProgressBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(3.dp)
-            .clip(RoundedCornerShape(2.dp))
+            .height(6.dp)
+            .clip(RoundedCornerShape(3.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(percentage.coerceIn(0f, 1f))
-                .height(3.dp)
+                .height(6.dp)
                 .background(MaterialTheme.colorScheme.primary),
         )
     }
@@ -366,7 +322,8 @@ private fun sourceIcon(source: VideoSource) = when (source) {
     VideoSource.QUARK,
     VideoSource.UC,
     VideoSource.CLOUD189,
-    VideoSource.YUN139 -> NextIcons.Storage
+    VideoSource.YUN139,
+    -> NextIcons.Storage
     VideoSource.OTHER -> NextIcons.Play
 }
 
@@ -380,7 +337,8 @@ private fun sourceColor(source: VideoSource) = when (source) {
     VideoSource.QUARK,
     VideoSource.UC,
     VideoSource.CLOUD189,
-    VideoSource.YUN139 -> MaterialTheme.colorScheme.primaryContainer
+    VideoSource.YUN139,
+    -> MaterialTheme.colorScheme.primaryContainer
     VideoSource.OTHER -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
@@ -395,6 +353,14 @@ private fun sourceLabel(source: VideoSource) = when (source) {
     VideoSource.CLOUD189 -> "天翼云盘"
     VideoSource.YUN139 -> "移动云盘"
     VideoSource.OTHER -> "其他"
+}
+
+private fun formatPlaybackPosition(position: Long): String {
+    val seconds = (position.coerceAtLeast(0L) / 1000L)
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    val remainder = (seconds % 60).toString().padStart(2, '0')
+    return if (hours > 0) "$hours:${minutes.toString().padStart(2, '0')}:$remainder" else "$minutes:$remainder"
 }
 
 private fun formatRelativeTime(timestamp: Long): String {
@@ -430,7 +396,7 @@ private fun HistoryThumbnail(
     val context = LocalContext.current
     Box(
         modifier = Modifier
-            .width(min(150.dp, LocalConfiguration.current.screenWidthDp.dp * 0.35f))
+            .width(min(112.dp, LocalConfiguration.current.screenWidthDp.dp * 0.28f))
             .clip(MaterialTheme.shapes.small)
             .background(MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp))
             .aspectRatio(16f / 10f),

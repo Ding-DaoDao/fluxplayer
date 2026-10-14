@@ -32,6 +32,9 @@ class LocalPreferencesRepository @Inject constructor(
             initialValue = PlayerPreferences(),
         )
 
+    override val persistedApplicationPreferences = appPreferencesDataSource.preferences
+    override val persistedPlayerPreferences = playerPreferencesDataSource.preferences
+
     override suspend fun updateApplicationPreferences(
         transform: suspend (ApplicationPreferences) -> ApplicationPreferences,
     ) {

@@ -1,18 +1,24 @@
 package com.fluxplayer.app.core.data.backup
 
+import android.content.Context
 import android.util.Log
+import android.widget.Toast
 import com.fluxplayer.app.core.datastore.datasource.BackupWebDavDataSource
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
-/** 仅在用户启用后自动上传，并按远程文件名识别尚未检查过的备份。 */
+/** 仅在用户启用后自动备份，并按远程文件名识别尚未检查过的备份。 */
 @Singleton
 class AutoBackupHelper @Inject constructor(
     private val backupManager: BackupManager,
     private val backupWebDavDataSource: BackupWebDavDataSource,
+    @ApplicationContext private val context: Context,
 ) {
     private var lastAutoBackupAtMs = 0L
     private val backupMutex = Mutex()
@@ -20,17 +26,27 @@ class AutoBackupHelper @Inject constructor(
     suspend fun performAutoBackup(force: Boolean = false) {
         backupMutex.withLock {
             val config = backupWebDavDataSource.config.first()
-            if (!config.isConfigured || config.autoBackupSyncMode != "remote") return
-            // 归档一律加密：没设备份密码就不上传，避免把凭证以明文推到 WebDAV。
-            // 不静默降级为明文——那正是这次要堵的窟窿。
-            if (config.backupPassphrase.isBlank()) {
-                Log.w(TAG, "未设置备份密码，跳过自动备份（请在备份设置中配置）")
-                return
-            }
+            if (config.autoBackupSyncMode == "off") return
+            if (config.autoBackupSyncMode == "remote" && !config.isConfigured) return
+            if (config.autoBackupSyncMode == "local" && config.localDirectoryUri.isBlank()) return
             val now = System.currentTimeMillis()
             if (!force && now - lastAutoBackupAtMs < MIN_AUTO_BACKUP_INTERVAL_MS) return
             lastAutoBackupAtMs = now
-            backupManager.uploadToCloud(config).onFailure { Log.e(TAG, "WebDAV 自动备份失败", it) }
+            if (config.autoBackupSyncMode == "local") {
+                backupResult { backupManager.exportToDirectory(android.net.Uri.parse(config.localDirectoryUri), config.generateBackupFileName()) }
+                    .onSuccess { showSuccess(it.successMessage("本地自动备份成功")) }
+                    .onFailure { Log.e(TAG, "本地自动备份失败", it) }
+            } else {
+                backupManager.uploadToCloud(config)
+                    .onSuccess { showSuccess(it.successMessage("在线自动备份成功：${it.fileName}")) }
+                    .onFailure { Log.e(TAG, "WebDAV 自动备份失败", it) }
+            }
+        }
+    }
+
+    private suspend fun showSuccess(message: String) {
+        withContext(Dispatchers.Main) {
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
         }
     }
 

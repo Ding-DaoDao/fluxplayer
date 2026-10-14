@@ -19,20 +19,14 @@ data class BackupWebDavConfig(
     val subfolder: String = "",
     /** 设备名称，用于在备份文件名中标识来源（留空则不添加） */
     val deviceName: String = "",
-    /**
-     * 备份归档的加密密码（PBKDF2 + AES-GCM，见 core:data 的 BackupCrypto）。
-     *
-     * 归档里含 123 明文账号密码与各平台 Cookie，因此导出/上传一律加密，恢复时需要同一密码。
-     * 自动备份（[autoBackupSyncMode]）与远程恢复在后台运行、无法弹窗，所以密码必须随配置保存；
-     * 这是"可用性"与"不落盘"之间取的折中——配置本身只在应用私有目录，仍显著优于明文 ZIP。
-     */
-    val backupPassphrase: String = "",
     /** 打开软件时自动检查是否有新备份 */
     val autoCheckNewBackup: Boolean = false,
-    /** 自动备份模式：off 关闭，remote 在应用退到后台时上传至 WebDAV。 */
+    /** 自动备份模式：off 关闭，local 保存到授权目录，remote 上传至 WebDAV。 */
     val autoBackupSyncMode: String = "off",
     /** 兼容旧备份格式，本地导出不再依赖原始文件路径。 */
     val backupPath: String = "",
+    /** 本机通过系统目录选择器授予读写权限的持久目录。 */
+    val localDirectoryUri: String = "",
     /** 兼容旧备份格式，不再自动删除旧备份。 */
     val keepOnlyLatestBackup: Boolean = false,
     /** 恢复时忽略的配置项列表 */
@@ -86,6 +80,6 @@ data class BackupWebDavConfig(
     )
 
     companion object {
-        val AUTO_SYNC_MODES = listOf("off", "remote")
+        val AUTO_SYNC_MODES = listOf("off", "local", "remote")
     }
 }

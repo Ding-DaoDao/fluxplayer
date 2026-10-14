@@ -11,14 +11,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,6 +42,9 @@ import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
+import com.fluxplayer.app.core.ui.components.MediaAlertDialog as AlertDialog
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
+import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
 import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.components.NextDialogWithDoneAndCancelButtons
 import com.fluxplayer.app.core.ui.components.PreferenceSlider
@@ -90,6 +90,29 @@ private fun PlayerPreferencesContent(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
         ) {
+            ListSectionTitle(text = "播放引擎")
+            Column {
+                PreferenceSwitch(
+                    title = "隧道播放",
+                    description = "交给设备硬件协调音视频同步；需设备和媒体支持",
+                    icon = NextIcons.Play,
+                    isChecked = uiState.preferences.tunneledPlayback,
+                    onClick = { onEvent(PlayerPreferencesUiEvent.UpdatePreferences { it.copy(tunneledPlayback = !it.tunneledPlayback) }) },
+                    isFirstItem = true,
+                )
+                PreferenceSwitch(
+                    title = "优先 AAC 音轨",
+                    description = "自动选轨时优先 AAC；手动指定的音轨优先",
+                    icon = NextIcons.Play,
+                    isChecked = uiState.preferences.preferAacAudio,
+                    onClick = { onEvent(PlayerPreferencesUiEvent.UpdatePreferences { it.copy(preferAacAudio = !it.preferAacAudio) }) },
+                )
+                PreferenceSlider(
+                    title = "缓冲时长", description = "最多预缓冲 ${uiState.preferences.bufferDurationSeconds} 秒；受原有 64 MB 内存上限约束，重启应用后生效", icon = NextIcons.Timer,
+                    value = uiState.preferences.bufferDurationSeconds.toFloat(), valueRange = 10f..120f, steps = 21, saveOnRelease = true,
+                    onValueChange = { seconds -> onEvent(PlayerPreferencesUiEvent.UpdatePreferences { it.copy(bufferDurationSeconds = seconds.roundToInt().coerceIn(10, 120)) }) }, isLastItem = true,
+                )
+            }
             ListSectionTitle(text = stringResource(id = R.string.interface_name))
             Column {
                 PreferenceSwitch(

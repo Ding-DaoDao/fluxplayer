@@ -43,17 +43,17 @@ fun PreferenceSlider(
         isLastItem = isLastItem,
         leadingContent = icon?.let {
             {
-                FluxIcon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                )
+                if (com.fluxplayer.app.core.ui.theme.LocalMediaShell.current) {
+                    MediaIconBadge(icon, enabled)
+                } else {
+                    FluxIcon(icon, null, Modifier.size(24.dp))
+                }
             }
         },
         supportingContent = {
             Column {
                 (valueDescription?.invoke(displayedValue) ?: description)?.let {
-                    FluxText(text = it)
+                    FluxText(text = it, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 FluxSlider(
                     modifier = Modifier.fillMaxWidth(),
@@ -72,7 +72,7 @@ fun PreferenceSlider(
             }
         },
         content = {
-            FluxText(text = title)
+            FluxText(text = title, style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
         },
         trailingContent = trailingContent,
     )

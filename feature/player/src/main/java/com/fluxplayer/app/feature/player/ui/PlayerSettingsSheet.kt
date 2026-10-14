@@ -25,7 +25,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -50,15 +48,16 @@ import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.fluxplayer.app.core.ui.R
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.feature.player.R as PlayerR
 import com.fluxplayer.app.feature.player.extensions.getName
 import com.fluxplayer.app.feature.player.state.SubtitleOptionsEvent
 import com.fluxplayer.app.feature.player.state.rememberSubtitleOptionsState
 import com.fluxplayer.app.feature.player.state.rememberTracksState
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.regex.Pattern
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 // ── Theme colors（跟随当前 ColorScheme） ──
 private val SurfaceVariantColor: Color
@@ -375,7 +374,7 @@ private fun BoxScope.SubtitleFileBrowser(
                         modifier = Modifier.fillMaxWidth().padding(32.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        CircularProgressIndicator(color = AccentColor)
+                        MediaLoadingIndicator(color = AccentColor)
                     }
                 }
                 fileList.isEmpty() -> {
@@ -405,8 +404,11 @@ private fun BoxScope.SubtitleFileBrowser(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable {
-                                        if (item.isDirectory) onEnterDir(item.file)
-                                        else onFileSelected(item.file)
+                                        if (item.isDirectory) {
+                                            onEnterDir(item.file)
+                                        } else {
+                                            onFileSelected(item.file)
+                                        }
                                     }
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,

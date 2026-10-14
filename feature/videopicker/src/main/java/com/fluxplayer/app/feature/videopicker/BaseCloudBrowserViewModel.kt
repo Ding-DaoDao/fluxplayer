@@ -472,7 +472,7 @@ abstract class BaseCloudBrowserViewModel<TBreadcrumb>(
     protected fun initFootprint(repo: PlaybackHistoryRepository) {
         this.playbackHistoryRepository = repo
         viewModelScope.launch {
-            repo.getHistoryFlow().collect { history ->
+            repo.getAllHistoryFlow().collect { history ->
                 // 按 parentPath 分组，每组只保留最新一条
                 val latestHistory = history
                     .filter { it.parentPath != null }

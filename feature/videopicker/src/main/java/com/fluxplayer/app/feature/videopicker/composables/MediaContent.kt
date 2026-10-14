@@ -21,9 +21,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.ui.R
-import com.fluxplayer.app.core.ui.components.FluxCircularProgressIndicator
 import com.fluxplayer.app.core.ui.components.FluxIcon
 import com.fluxplayer.app.core.ui.components.FluxText
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 const val CIRCULAR_PROGRESS_INDICATOR_TEST_TAG = "circularProgressIndicator"
@@ -35,7 +35,7 @@ fun CenterCircularProgressBar(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        FluxCircularProgressIndicator(
+        MediaLoadingIndicator(
             modifier = Modifier.testTag(CIRCULAR_PROGRESS_INDICATOR_TEST_TAG),
         )
     }

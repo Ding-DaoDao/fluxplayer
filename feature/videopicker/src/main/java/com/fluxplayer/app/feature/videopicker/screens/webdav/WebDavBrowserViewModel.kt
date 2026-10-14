@@ -132,7 +132,7 @@ class WebDavBrowserViewModel @Inject constructor(
         // 观察播放历史 + 当前选中服务器，两者任一变化时重新计算 playedUriStrings
         viewModelScope.launch {
             combine(
-                playbackHistoryRepository.getHistoryFlow(),
+                playbackHistoryRepository.getAllHistoryFlow(),
                 _extraState.map { it.selectedServer }.distinctUntilChanged(),
             ) { history, server ->
                 Pair(history, server)

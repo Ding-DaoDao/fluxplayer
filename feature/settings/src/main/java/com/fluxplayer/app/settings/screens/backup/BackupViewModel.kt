@@ -6,9 +6,8 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fluxplayer.app.core.data.backup.BackupArchive
-import com.fluxplayer.app.core.data.backup.BackupDecryptException
+import com.fluxplayer.app.core.data.backup.BackupExportResult
 import com.fluxplayer.app.core.data.backup.BackupManager
-import com.fluxplayer.app.core.data.backup.BackupPassphraseRequiredException
 import com.fluxplayer.app.core.data.webdav.WebDavClient
 import com.fluxplayer.app.core.datastore.datasource.BackupWebDavDataSource
 import com.fluxplayer.app.core.datastore.datasource.WebDavServersDataSource
@@ -47,7 +46,7 @@ class BackupViewModel @Inject constructor(
     /** 所有页面操作串行执行，消息清理不会覆盖正在运行的状态。 */
     private fun execute(block: suspend () -> Unit) {
         if (operation?.isActive == true) return
-        state.update { it.copy(isLoading = true, successMessage = null, errorMessage = null, operationError = null) }
+        state.update { it.copy(isLoading = true, successMessage = null, errorMessage = null, operationError = null, coverWarnings = emptyList()) }
         operation = viewModelScope.launch {
             try {
                 block()
@@ -110,105 +109,55 @@ class BackupViewModel @Inject constructor(
         }
     }
 
+    fun setLocalDirectory(uri: Uri) {
+        execute {
+            appContext.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            backupWebDavDataSource.updateOrThrow { it.copy(localDirectoryUri = uri.toString()) }
+            state.update { it.copy(successMessage = "本地备份目录已保存") }
+        }
+    }
+
+    fun exportToLocalDirectory() {
+        execute {
+            val current = backupWebDavDataSource.config.first()
+            require(current.localDirectoryUri.isNotBlank()) { "请先选择本地备份目录" }
+            val result = backupManager.exportToDirectory(Uri.parse(current.localDirectoryUri), current.generateBackupFileName())
+            showBackupSuccess(result, appContext.getString(R.string.backup_export_success))
+        }
+    }
+
     fun createBackup(uri: Uri) {
         execute {
-            val passphrase = currentPassphrase()
-                ?: throw IllegalStateException(appContext.getString(R.string.backup_passphrase_required))
-            try {
-                backupManager.exportToUri(uri, passphrase)
-            } finally {
-                passphrase.fill('\u0000')
-            }
-            state.update { it.copy(successMessage = appContext.getString(R.string.backup_export_success)) }
+            val result = backupManager.exportToUri(uri)
+            showBackupSuccess(result, appContext.getString(R.string.backup_export_success))
         }
     }
 
     fun uploadToCloud() {
         execute {
             val current = backupWebDavDataSource.config.first()
-            require(current.backupPassphrase.isNotBlank()) { appContext.getString(R.string.backup_passphrase_required) }
-            val name = backupManager.uploadToCloud(current).getOrThrow()
-            state.update { it.copy(successMessage = appContext.getString(R.string.backup_upload_success, name)) }
+            val result = backupManager.uploadToCloud(current).getOrThrow()
+            showBackupSuccess(result, appContext.getString(R.string.backup_upload_success, result.fileName))
         }
+    }
+
+    private fun showBackupSuccess(result: BackupExportResult, message: String) {
+        state.update { it.copy(successMessage = result.successMessage(message), coverWarnings = result.coverWarnings) }
+    }
+
+    fun dismissCoverWarnings() {
+        state.update { it.copy(coverWarnings = emptyList()) }
     }
 
     fun restoreBackup(uri: Uri) {
-        execute { runImport(PassphraseTarget.LocalFile(uri), currentPassphrase(), isRetry = false) }
+        execute { prepareRestore(backupManager.importFromUri(uri).getOrThrow()) }
     }
 
     fun restoreFromRemoteFile(path: String) {
-        execute { runImport(PassphraseTarget.RemoteFile(path), currentPassphrase(), isRetry = false) }
-    }
-
-    /** 用户在导入密码框中提交密码后重试；密码错误时保留弹窗并就地提示。 */
-    fun submitPassphrase(passphrase: String) {
-        val target = state.value.pendingPassphrase ?: return
-        if (passphrase.isBlank()) {
-            state.update { it.copy(passphraseError = appContext.getString(R.string.backup_passphrase_required)) }
-            return
-        }
         execute {
-            val chars = passphrase.toCharArray()
-            try {
-                runImport(target, chars, isRetry = true)
-            } finally {
-                chars.fill('\u0000')
-            }
+            prepareRestore(backupManager.downloadFromCloud(backupWebDavDataSource.config.first(), path).getOrThrow())
         }
     }
-
-    fun cancelPassphrase() {
-        if (state.value.isLoading) return
-        state.update { it.copy(pendingPassphrase = null, passphraseError = null) }
-    }
-
-    fun savePassphrase(value: String) {
-        execute { backupWebDavDataSource.updateOrThrow { it.copy(backupPassphrase = value) } }
-    }
-
-    /** 未设置密码就点了导出/上传：直接提示，不启动文件选择器。 */
-    fun reportMissingPassphrase() {
-        state.update { it.copy(errorMessage = appContext.getString(R.string.backup_passphrase_required)) }
-    }
-
-    /**
-     * 读取并解析备份。加密归档需要密码：
-     * - 缺密码 → 弹密码框（[BackupPassphraseRequiredException]）
-     * - 密码不对 → 弹密码框并显示错误（[BackupDecryptException]）
-     * - 未加密的旧备份 → 直接解析
-     */
-    private suspend fun runImport(target: PassphraseTarget, passphrase: CharArray?, isRetry: Boolean) {
-        val result = when (target) {
-            is PassphraseTarget.LocalFile -> backupManager.importFromUri(target.uri, passphrase)
-            is PassphraseTarget.RemoteFile ->
-                backupManager.downloadFromCloud(backupWebDavDataSource.config.first(), target.path, passphrase)
-        }
-        result.fold(
-            onSuccess = { archive ->
-                state.update { it.copy(pendingPassphrase = null, passphraseError = null) }
-                prepareRestore(archive)
-            },
-            onFailure = { error ->
-                when (error) {
-                    is BackupPassphraseRequiredException ->
-                        state.update { it.copy(pendingPassphrase = target, passphraseError = null) }
-                    // 首次用配置里的密码就失败，不报错（可能来自另一台设备）；只有用户自己输入的才算"密码错误"
-                    is BackupDecryptException ->
-                        state.update {
-                            it.copy(
-                                pendingPassphrase = target,
-                                passphraseError = if (isRetry) appContext.getString(R.string.backup_passphrase_wrong) else null,
-                            )
-                        }
-                    else -> throw error
-                }
-            },
-        )
-    }
-
-    /** 配置里保存的备份密码；未设置返回 null。调用方负责用完清零。 */
-    private fun currentPassphrase(): CharArray? =
-        config.value.backupPassphrase.takeIf { it.isNotBlank() }?.toCharArray()
 
     private fun prepareRestore(archive: BackupArchive) {
         pendingArchive = archive
@@ -281,13 +230,5 @@ data class BackupUiState(
     val hasOpenListFiles: Boolean = false,
     val ignoredItems: Set<String> = emptySet(),
     val restoreCompleted: Boolean = false,
-    /** 非空表示正在等用户输入导入密码；[passphraseError] 为就地错误提示。 */
-    val pendingPassphrase: PassphraseTarget? = null,
-    val passphraseError: String? = null,
+    val coverWarnings: List<String> = emptyList(),
 )
-
-/** 需要密码才能继续的导入目标。 */
-sealed interface PassphraseTarget {
-    data class LocalFile(val uri: Uri) : PassphraseTarget
-    data class RemoteFile(val path: String) : PassphraseTarget
-}

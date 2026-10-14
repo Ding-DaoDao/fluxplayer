@@ -6,20 +6,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOutCubic
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -32,17 +27,15 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.ZeroCornerSize
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalIconButton
@@ -51,16 +44,12 @@ import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleFloatingActionButton
 import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -73,10 +62,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
@@ -93,18 +79,23 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.storagePermission
 import com.fluxplayer.app.core.media.services.MediaService
 import com.fluxplayer.app.core.model.ApplicationPreferences
-import com.fluxplayer.app.core.model.NavStyle
-import com.fluxplayer.app.core.model.SurfaceStyle
 import com.fluxplayer.app.core.model.Folder
 import com.fluxplayer.app.core.model.MediaLayoutMode
 import com.fluxplayer.app.core.model.MediaViewMode
+import com.fluxplayer.app.core.model.NavStyle
 import com.fluxplayer.app.core.model.StartupPage
+import com.fluxplayer.app.core.model.SurfaceStyle
 import com.fluxplayer.app.core.model.Video
 import com.fluxplayer.app.core.model.WebDavServer
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.components.CancelButton
+import com.fluxplayer.app.core.ui.components.CapsuleDockBar
 import com.fluxplayer.app.core.ui.components.DoneButton
+import com.fluxplayer.app.core.ui.components.FullWidthNavBar
+import com.fluxplayer.app.core.ui.components.MediaPullToRefreshBox as PullToRefreshBox
+import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
+import com.fluxplayer.app.core.ui.components.NavBarItem
 import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.components.NextTopAppBar
 import com.fluxplayer.app.core.ui.composables.PermissionMissingView
@@ -112,23 +103,20 @@ import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.extensions.copy
 import com.fluxplayer.app.core.ui.preview.DayNightPreview
 import com.fluxplayer.app.core.ui.preview.VideoPickerPreviewParameterProvider
-import com.fluxplayer.app.core.ui.theme.FluxHazeStyle
-import com.fluxplayer.app.core.ui.components.CapsuleDockBar
-import com.fluxplayer.app.core.ui.components.FullWidthNavBar
-import com.fluxplayer.app.core.ui.components.NavBarItem
-import com.fluxplayer.app.core.ui.theme.FluxRadius
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.core.ui.theme.LocalHazeState
+import com.fluxplayer.app.core.ui.theme.LocalMediaBackdrop
+import com.fluxplayer.app.core.ui.theme.LocalMediaPreferences
+import com.fluxplayer.app.core.ui.theme.LocalMediaScrollBottomPadding
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
-import com.fluxplayer.app.feature.videopicker.composables.CenterCircularProgressBar
 import com.fluxplayer.app.feature.videopicker.composables.MediaView
 import com.fluxplayer.app.feature.videopicker.composables.NoVideosFound
 import com.fluxplayer.app.feature.videopicker.composables.QuickSettingsDialog
 import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
 import com.fluxplayer.app.feature.videopicker.composables.TextIconToggleButton
 import com.fluxplayer.app.feature.videopicker.composables.VideoInfoDialog
-import com.fluxplayer.app.feature.videopicker.screens.audiobook.AudiobookTabContent
 import com.fluxplayer.app.feature.videopicker.screens.audiobook.AudiobookNavigation
+import com.fluxplayer.app.feature.videopicker.screens.audiobook.AudiobookTabContent
 import com.fluxplayer.app.feature.videopicker.screens.history.HistoryTabContent
 import com.fluxplayer.app.feature.videopicker.state.SelectedFolder
 import com.fluxplayer.app.feature.videopicker.state.SelectedVideo
@@ -139,17 +127,9 @@ import com.google.accompanist.permissions.rememberPermissionState
 import com.google.accompanist.permissions.shouldShowRationale
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
 
 @Composable
 fun MediaPickerRoute(
@@ -165,6 +145,7 @@ fun MediaPickerRoute(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val activeWebDavServers by viewModel.activeWebDavServers.collectAsStateWithLifecycle()
+    if (!uiState.preferencesLoaded) return
 
     val visibleTabs = remember(uiState.preferences) {
         buildList {
@@ -276,9 +257,13 @@ internal fun MediaPickerScreen(
     val useLiquidGlass = useFloatingBottomBar &&
         uiState.preferences.useLiquidGlass &&
         android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
-    val backdrop = if (useLiquidGlass) rememberLayerBackdrop() else null
+    val backdrop = rememberLayerBackdrop()
 
-    CompositionLocalProvider(LocalHazeState provides hazeState) {
+    CompositionLocalProvider(
+        LocalHazeState provides hazeState,
+        LocalMediaBackdrop provides backdrop,
+        LocalMediaScrollBottomPadding provides if (useFloatingBottomBar) 88.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp,
+    ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
                 topBar = {
@@ -287,7 +272,6 @@ internal fun MediaPickerScreen(
                     } else if (audiobookInDetail && selectedTab == 3 && !selectionManager.isInSelectionMode) {
                         // 听书详情页 → 不显示 Scaffold 顶栏，由 AudiobookDetailContent 内部顶栏接管
                     } else if ((selectedTab == 1 || selectedTab == 2 || selectedTab == 3) && !selectionManager.isInSelectionMode) {
-                        
                         NextTopAppBar(
                             title = when (selectedTab) {
                                 1 -> stringResource(R.string.browse)
@@ -316,9 +300,7 @@ internal fun MediaPickerScreen(
                                 }
                             },
                         )
-                    
                     } else {
-                        
                         NextTopAppBar(
                             title = (uiState.folderName ?: stringResource(R.string.app_name)).takeIf { !selectionManager.isInSelectionMode } ?: "",
                             fontWeight = FontWeight.Bold.takeIf { uiState.folderName == null },
@@ -401,7 +383,6 @@ internal fun MediaPickerScreen(
                                 }
                             },
                         )
-                    
                     }
                 },
                 bottomBar = {
@@ -441,63 +422,15 @@ internal fun MediaPickerScreen(
                             },
                         )
                     } else if (!useFloatingBottomBar && !audiobookInDetail) {
-                        // 标准 NavigationBar
-                        NavigationBar(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        ) {
-                            if (0 in visibleTabs) {
-                                NavigationBarItem(
-                                    selected = selectedTab == 0,
-                                    onClick = { onTabSelected(0) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = NextIcons.Video,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    label = { Text(stringResource(R.string.videos)) },
-                                )
-                            }
-                            if (1 in visibleTabs) {
-                                NavigationBarItem(
-                                    selected = selectedTab == 1,
-                                    onClick = { onTabSelected(1) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = NextIcons.Folder,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    label = { Text(stringResource(R.string.browse)) },
-                                )
-                            }
-                            if (2 in visibleTabs) {
-                                NavigationBarItem(
-                                    selected = selectedTab == 2,
-                                    onClick = { onTabSelected(2) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = NextIcons.History,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    label = { Text(stringResource(R.string.history)) },
-                                )
-                            }
-                            if (3 in visibleTabs) {
-                                NavigationBarItem(
-                                    selected = selectedTab == 3,
-                                    onClick = { onTabSelected(3) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = NextIcons.Audio,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    label = { Text(stringResource(R.string.audiobook)) },
-                                )
-                            }
-                        }
+                        FloatingBottomBar(
+                            selectedTab = selectedTab,
+                            onTabSelected = onTabSelected,
+                            backdrop = null,
+                            hazeState = hazeState,
+                            navStyle = NavStyle.FULL_BAR,
+                            surfaceStyle = surfaceStyle,
+                            visibleTabs = visibleTabs,
+                        )
                     }
                 },
                 floatingActionButton = {
@@ -575,10 +508,17 @@ internal fun MediaPickerScreen(
                         )
                     }
                 },
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                containerColor = MaterialTheme.colorScheme.background,
             ) { scaffoldPadding ->
                 val contentPadding = if (useFloatingBottomBar) {
-                    PaddingValues(top = scaffoldPadding.calculateTopPadding())
+                    PaddingValues(
+                        top = scaffoldPadding.calculateTopPadding(),
+                        bottom = if (audiobookInDetail) {
+                            scaffoldPadding.calculateBottomPadding()
+                        } else {
+                            88.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                        },
+                    )
                 } else {
                     scaffoldPadding
                 }
@@ -586,116 +526,109 @@ internal fun MediaPickerScreen(
                 val tabStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
                 Crossfade(
                     targetState = selectedTab,
-                    modifier = Modifier.fillMaxSize(),
-                    animationSpec = tween(280, easing = EaseOutCubic),
+                    modifier = Modifier.fillMaxSize()
+                        .hazeSource(hazeState)
+                        .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+                    animationSpec = tween(if (uiState.preferences.navAnimationsEnabled) 280 else 0, easing = EaseOutCubic),
                     label = "TabTransition",
                 ) { tab ->
-                    tabStateHolder.SaveableStateProvider(key = "picker_tab_$tab") {
-                        when (tab) {
-                            0 -> {
-                                when (uiState.mediaDataState) {
-                                    is DataState.Error -> {
-                                    }
-
-                                    is DataState.Loading -> {
-                                        CenterCircularProgressBar(modifier = Modifier.padding(contentPadding))
-                                    }
-
-                                    is DataState.Success -> {
-                                        val successFolder = uiState.mediaDataState.value
-                                        // Quick cards at root level (outside PullToRefreshBox, fixed header)
-                                        if (uiState.folderName == null && successFolder != null &&
-                                            !(successFolder.folderList.isEmpty() && successFolder.mediaList.isEmpty())
-                                        ) {
-                                            QuickCardsRow(
-                                                folderCount = successFolder.folderList.size,
-                                                videoCount = successFolder.mediaList.size,
-                                                onWebDavClick = onWebDavClick,
-                                            )
+                    // 录入区域内屏蔽同一背景，玻璃底栏和外层顶栏在区域外采样。
+                    CompositionLocalProvider(LocalMediaBackdrop provides null) {
+                        tabStateHolder.SaveableStateProvider(key = "picker_tab_$tab") {
+                            when (tab) {
+                                0 -> {
+                                    when (uiState.mediaDataState) {
+                                        is DataState.Error -> {
                                         }
-                                        PullToRefreshBox(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(top = contentPadding.calculateTopPadding())
-                                                .padding(start = contentPadding.calculateStartPadding(LocalLayoutDirection.current))
-                                                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                                                .background(MaterialTheme.colorScheme.background),
-                                            isRefreshing = uiState.refreshing,
-                                            onRefresh = { onEvent(MediaPickerUiEvent.Refresh) },
-                                        ) {
-                                            val updatedScaffoldPadding = contentPadding.copy(top = 0.dp, start = 0.dp)
-                                            PermissionMissingView(
-                                                isGranted = permissionState.status.isGranted,
-                                                showRationale = permissionState.status.shouldShowRationale,
-                                                permission = permissionState.permission,
-                                                launchPermissionRequest = { permissionState.launchPermissionRequest() },
-                                            ) {
-                                                val rootFolder = uiState.mediaDataState.value
-                                                if (rootFolder == null || rootFolder.folderList.isEmpty() && rootFolder.mediaList.isEmpty()) {
-                                                    NoVideosFound(contentPadding = updatedScaffoldPadding)
-                                                    return@PermissionMissingView
-                                                }
 
-                                                MediaView(
-                                                    rootFolder = rootFolder,
-                                                    preferences = uiState.preferences,
-                                                    playedUriSet = uiState.playedUriSet,
-                                                    onFolderClick = onFolderClick,
-                                                    onVideoClick = { onPlayVideo(it, null) },
-                                                    selectionManager = selectionManager,
-                                                    lazyGridState = lazyGridState,
-                                                    contentPadding = updatedScaffoldPadding,
-                                                    onVideoLoaded = { onEvent(MediaPickerUiEvent.AddToSync(it)) },
-                                                )
+                                        is DataState.Loading -> {
+                                            com.fluxplayer.app.core.ui.components.MediaListSkeleton(modifier = Modifier.padding(contentPadding))
+                                        }
+
+                                        is DataState.Success -> {
+                                            PullToRefreshBox(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(top = contentPadding.calculateTopPadding())
+                                                    .padding(start = contentPadding.calculateStartPadding(LocalLayoutDirection.current))
+                                                    .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                                                    .background(MaterialTheme.colorScheme.background),
+                                                isRefreshing = uiState.refreshing,
+                                                onRefresh = { onEvent(MediaPickerUiEvent.Refresh) },
+                                            ) {
+                                                val updatedScaffoldPadding = contentPadding.copy(top = 0.dp, start = 0.dp)
+                                                PermissionMissingView(
+                                                    isGranted = permissionState.status.isGranted,
+                                                    showRationale = permissionState.status.shouldShowRationale,
+                                                    permission = permissionState.permission,
+                                                    launchPermissionRequest = { permissionState.launchPermissionRequest() },
+                                                ) {
+                                                    val rootFolder = uiState.mediaDataState.value
+                                                    if (rootFolder == null || rootFolder.folderList.isEmpty() && rootFolder.mediaList.isEmpty()) {
+                                                        NoVideosFound(contentPadding = updatedScaffoldPadding)
+                                                        return@PermissionMissingView
+                                                    }
+                                                    MediaView(
+                                                        rootFolder = rootFolder,
+                                                        preferences = uiState.preferences,
+                                                        playedUriSet = uiState.playedUriSet,
+                                                        onFolderClick = onFolderClick,
+                                                        onVideoClick = { onPlayVideo(it, null) },
+                                                        selectionManager = selectionManager,
+                                                        lazyGridState = lazyGridState,
+                                                        contentPadding = updatedScaffoldPadding,
+                                                        onVideoLoaded = { onEvent(MediaPickerUiEvent.AddToSync(it)) },
+                                                    )
+                                                }
                                             }
                                         }
                                     }
                                 }
-                            }
 
-                            1 -> {
-                                BrowseTabs(
-                                    onPlayVideo = onPlayVideo,
-                                    onPlayVideos = onPlayVideos,
-                                    onSettingsClick = onSettingsClick,
-                                    selectedProvider = selectedProvider,
-                                    onProviderSelected = { selectedProvider = it },
-                                    onProviderLogoutChanged = { providerLogout = it },
-                                    preferences = uiState.preferences,
-                                    onProviderReordered = { onEvent(MediaPickerUiEvent.ReorderProviders(it)) },
-                                    navigateToDirParam = navigateToDirParam,
-                                    onNavigateToDirConsumed = { navigateToDirParam = null },
-                                    webDavServers = activeWebDavServers,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(contentPadding),
-                                )
-                            }
+                                1 -> {
+                                    BrowseTabs(
+                                        onPlayVideo = onPlayVideo,
+                                        onPlayVideos = onPlayVideos,
+                                        onSettingsClick = onSettingsClick,
+                                        selectedProvider = selectedProvider,
+                                        onProviderSelected = { selectedProvider = it },
+                                        onProviderLogoutChanged = { providerLogout = it },
+                                        preferences = uiState.preferences,
+                                        onProviderReordered = { onEvent(MediaPickerUiEvent.ReorderProviders(it)) },
+                                        navigateToDirParam = navigateToDirParam,
+                                        onNavigateToDirConsumed = { navigateToDirParam = null },
+                                        webDavServers = activeWebDavServers,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(if (selectedProvider == null) contentPadding.copy(bottom = 0.dp) else contentPadding),
+                                    )
+                                }
 
-                            2 -> {
-                                HistoryTabContent(
-                                    onPlayVideo = onPlayVideo,
-                                    onPlayVideos = onPlayVideos,
-                                    onNavigateToCloudDir = { providerId, fileId, label ->
-                                        onTabSelected(1) // 切换到"浏览"Tab
-                                        selectedProvider = providerId
-                                        navigateToDirParam = fileId to label
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(contentPadding),
-                                )
-                            }
+                                2 -> {
+                                    HistoryTabContent(
+                                        onPlayVideo = onPlayVideo,
+                                        onPlayVideos = onPlayVideos,
+                                        onNavigateToCloudDir = { providerId, fileId, label ->
+                                            onTabSelected(1) // 切换到"浏览"Tab
+                                            selectedProvider = providerId
+                                            navigateToDirParam = fileId to label
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(contentPadding.copy(bottom = 0.dp)),
+                                    )
+                                }
 
-                            3 -> {
-                                AudiobookTabContent(
-                                    onPlayChapter = onPlayAudioChapter,
-                                    onShowingDetailChanged = { audiobookInDetail = it },
-                                    onNavigationChanged = { audiobookNavigation = it },
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(contentPadding),
-                                )
+                                3 -> {
+                                    AudiobookTabContent(
+                                        onPlayChapter = onPlayAudioChapter,
+                                        onShowingDetailChanged = { audiobookInDetail = it },
+                                        onNavigationChanged = { audiobookNavigation = it },
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(if (audiobookNavigation == null) contentPadding.copy(bottom = 0.dp) else contentPadding),
+                                    )
+                                }
                             }
                         }
                     }
@@ -710,7 +643,7 @@ internal fun MediaPickerScreen(
                     FloatingBottomBar(
                         selectedTab = selectedTab,
                         onTabSelected = onTabSelected,
-                        backdrop = backdrop,
+                        backdrop = backdrop.takeIf { useLiquidGlass },
                         hazeState = hazeState,
                         navStyle = navStyle,
                         surfaceStyle = surfaceStyle,
@@ -1090,103 +1023,6 @@ private fun MediaPickerNoVideosFoundPreview() {
 }
 
 @Composable
-private fun QuickCardsRow(
-    folderCount: Int,
-    videoCount: Int,
-    onWebDavClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        // Local Videos card
-        Card(
-            modifier = Modifier
-                .weight(1f)
-                .clickable { /* stays on current screen */ },
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-            ),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = NextIcons.Video,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(32.dp),
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = "本地视频",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                    Text(
-                        text = "$folderCount 个文件夹 · $videoCount 个视频",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
-                    )
-                }
-            }
-        }
-
-        // WebDAV card
-        Card(
-            modifier = Modifier
-                .weight(1f)
-                .clickable(onClick = onWebDavClick),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            ),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = NextIcons.Link,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(32.dp),
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = "WebDAV",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                    Text(
-                        text = "浏览远程服务器文件",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
-                    )
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = "›",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun FloatingBottomBar(
     selectedTab: Int,
     onTabSelected: (Int) -> Unit,
@@ -1239,6 +1075,7 @@ private fun FloatingBottomBar(
         }
     }
     if (tabs.isEmpty()) return
+    val preferences = LocalMediaPreferences.current
 
     // 通栏：贴底通宽，图标在上标签在下，选中态是固定 64×32 指示胶囊
     if (navStyle == NavStyle.FULL_BAR) {
@@ -1250,50 +1087,34 @@ private fun FloatingBottomBar(
         return
     }
 
-    // 悬浮舱：整条大胶囊，选中项展开显示文字
+    // 悬浮舱：图标与标签常驻，保持入口位置稳定
     val flat = surfaceStyle == SurfaceStyle.FLAT
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        when {
-            // 液态玻璃：外层 Box 与胶囊等尺寸，backdrop 画胶囊形玻璃；内容层透明透出玻璃。
-            // 玻璃的三层效果挂在容器上，指示胶囊仍是纯色 —— 两者叠在一起会糊。
-            backdrop != null -> Box(
-                modifier = Modifier.drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { FluxRadius.PillShape },
-                    effects = {
-                        vibrancy()
-                        blur(25f.dp.toPx())
-                        lens(24f.dp.toPx(), 24f.dp.toPx())
-                    },
-                    highlight = { Highlight.Ambient },
-                    shadow = { Shadow.Default },
+        val glassBackdrop = LocalMediaBackdrop.current
+        if (glassBackdrop != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            com.fluxplayer.app.core.ui.navbar.FloatingNavBar(
+                modifier = Modifier.fillMaxWidth(),
+                backdrop = glassBackdrop,
+                axis = com.fluxplayer.app.core.ui.navbar.NavAxis.Horizontal,
+                selectedTabIndex = { tabs.indexOfFirst { it.key == selectedTab }.coerceAtLeast(0) },
+                onTabSelected = { index -> tabs.getOrNull(index)?.let { onTabSelected(it.key) } },
+                tabs = tabs.map { com.fluxplayer.app.core.ui.navbar.GlassTabItem(it.icon, it.selectedIcon, it.label) },
+                config = com.fluxplayer.app.core.ui.navbar.NavGlassConfig(
+                    navbarEnabled = backdrop != null,
+                    blurDp = preferences.glassBlurDp,
+                    distortionDp = preferences.glassDistortionDp,
+                    translucency = preferences.glassTranslucency,
+                    dispersion = preferences.glassDispersion,
                 ),
-            ) {
-                CapsuleDockBar(
-                    items = tabs,
-                    selectedKey = selectedTab,
-                    onSelect = onTabSelected,
-                    containerColor = Color.Transparent,
-                    shadowElevation = 0.dp,
-                )
-            }
-            // 玻璃（非液态）：haze 模糊。底色必须半透明，不透明底会把模糊整片盖住。
-            !flat -> CapsuleDockBar(
-                items = tabs,
-                selectedKey = selectedTab,
-                onSelect = onTabSelected,
-                containerColor = FluxTheme.colorScheme.surfaceContainer.copy(alpha = 0.82f),
-                shadowElevation = 6.dp,
-                modifier = Modifier.hazeEffect(state = hazeState, style = FluxHazeStyle.bottomBarStyle()),
             )
-            // 扁平：不透明 tonal 面，不加模糊
-            else -> CapsuleDockBar(
+        } else {
+            CapsuleDockBar(
                 items = tabs,
                 selectedKey = selectedTab,
                 onSelect = onTabSelected,
@@ -1303,6 +1124,7 @@ private fun FloatingBottomBar(
         }
     }
 }
+
 @DayNightPreview
 @Composable
 private fun MediaPickerLoadingPreview() {

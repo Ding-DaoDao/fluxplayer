@@ -59,6 +59,10 @@ data class PlayerPreferences(
 
     // Decoder Preferences
     val decoderPriority: DecoderPriority = DecoderPriority.PREFER_DEVICE,
+    // AVBox 可映射到 Media3 的播放参数，保持默认播放行为。
+    val tunneledPlayback: Boolean = false,
+    val preferAacAudio: Boolean = false,
+    val bufferDurationSeconds: Int = 50,
 
     // Danmaku Preferences
     val danmakuConfig: DanmakuConfig = DanmakuConfig(),

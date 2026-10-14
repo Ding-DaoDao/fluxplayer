@@ -1,0 +1,86 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+<string name="avbox_common_confirm">确定</string>
+
+<string name="avbox_common_cancel">取消</string>
+
+<string name="avbox_theme_brightness_value">亮度 %1$d%%</string>
+
+<string name="avbox_theme_initial_color">初始颜色</string>
+
+<string name="avbox_theme_current_color">当前颜色</string>
+
+<string name="avbox_theme_color">主题颜色</string>
+
+<string name="avbox_theme_app_effects">应用效果</string>
+
+<string name="avbox_theme_liquid_glass">液态玻璃效果</string>
+
+<string name="avbox_theme_liquid_glass_hint">Android 13 及以上支持液态玻璃</string>
+
+<string name="avbox_theme_reset">重置</string>
+
+<string name="avbox_theme_nav_bar">底部导航</string>
+
+<string name="avbox_theme_app_controls">应用控件</string>
+
+<string name="avbox_theme_blur">模糊效果</string>
+
+<string name="avbox_theme_distortion">扭曲效果</string>
+
+<string name="avbox_theme_translucency">通透度</string>
+
+<string name="avbox_theme_dispersion">边缘色散</string>
+
+<string name="avbox_theme_custom_color">自定义颜色</string>
+
+<string name="avbox_theme_custom_theme">自定义主题</string>
+
+<string name="avbox_theme_mode">主题模式</string>
+
+<string name="avbox_theme_mode_auto">自动</string>
+
+<string name="avbox_theme_mode_light">浅色</string>
+
+<string name="avbox_theme_mode_dark">深色</string>
+
+<string name="avbox_theme_pure_black">纯黑模式</string>
+
+<string name="avbox_theme_palette_style">配色风格</string>
+
+<string name="avbox_theme_seed_red">红色</string>
+
+<string name="avbox_theme_seed_orange">橙色</string>
+
+<string name="avbox_theme_seed_yellow">黄色</string>
+
+<string name="avbox_theme_seed_green">绿色</string>
+
+<string name="avbox_theme_seed_cyan">青色</string>
+
+<string name="avbox_theme_seed_blue">蓝色</string>
+
+<string name="avbox_theme_seed_purple">紫色</string>
+
+<string name="avbox_theme_seed_pink">粉色</string>
+
+<string name="avbox_theme_style_tonal_spot">柔和</string>
+
+<string name="avbox_theme_style_vibrant">鲜艳</string>
+
+<string name="avbox_theme_style_expressive">表现力</string>
+
+<string name="avbox_theme_style_neutral">中性</string>
+
+<string name="avbox_theme_style_monochrome">单色</string>
+
+<string name="avbox_theme_style_fidelity">保真</string>
+
+<string name="avbox_theme_style_content">内容</string>
+
+<string name="avbox_theme_style_rainbow">彩虹</string>
+
+<string name="avbox_theme_style_fruit_salad">水果沙拉</string>
+
+
+</resources>

@@ -9,8 +9,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,6 +28,8 @@ import com.fluxplayer.app.core.tingshu.ListeningErrors
 import com.fluxplayer.app.core.tingshu.ListeningSource
 import com.fluxplayer.app.core.tingshu.SourceHost
 import com.fluxplayer.app.core.tingshu.TingshuRepository
+import com.fluxplayer.app.core.ui.components.MediaAlertDialog as AlertDialog
+import com.fluxplayer.app.core.ui.components.MediaLoadingRow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
@@ -238,7 +238,7 @@ private fun JdrDirectoryDialog(sourceId: String, repository: TingshuRepository, 
     AlertDialog(onDismissRequest = onDismiss, title = { Text("选择听书目录") }, text = {
         Column(Modifier.height(360.dp).verticalScroll(rememberScrollState())) {
             Text(path.joinToString(" / ") { it.name })
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (busy) MediaLoadingRow(Modifier.fillMaxWidth())
             error?.let { SourceErrorNotice(it, onRetry = { scope.launch { load(retryPage) } }) }
             if (path.size > 1) TextButton(onClick = { path = path.dropLast(1) }, enabled = !busy) { Text("上一级") }
             folders.forEach { folder -> TextButton(onClick = { path = path + folder }, enabled = !busy) { Text(folder.name) } }

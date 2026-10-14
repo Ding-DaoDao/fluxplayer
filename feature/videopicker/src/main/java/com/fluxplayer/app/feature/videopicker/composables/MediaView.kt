@@ -26,7 +26,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.Folder
 import com.fluxplayer.app.core.model.MediaLayoutMode
@@ -36,6 +35,7 @@ import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.extensions.plus
 import com.fluxplayer.app.feature.videopicker.state.SelectionManager
 import com.fluxplayer.app.feature.videopicker.state.rememberSelectionManager
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalPermissionsApi::class)
@@ -66,8 +66,9 @@ fun MediaView(
             MediaLayoutMode.GRID -> 2.dp
         }
         val maxWidth = this.maxWidth - (contentHorizontalPadding * 2) - itemSpacing
-        val maxFolders = (maxWidth / folderMinWidth).toInt()
-        val maxVideos = (maxWidth / videoMinWidth).toInt()
+        val requestedColumns = preferences.mediaGridColumns.coerceIn(0, 6)
+        val maxFolders = requestedColumns.takeIf { it > 0 } ?: (maxWidth / folderMinWidth).toInt().coerceAtLeast(1)
+        val maxVideos = requestedColumns.takeIf { it > 0 } ?: (maxWidth / videoMinWidth).toInt().coerceAtLeast(1)
         val spans = when (preferences.mediaLayoutMode) {
             MediaLayoutMode.LIST -> 1
             MediaLayoutMode.GRID -> lcm(maxFolders, maxVideos)

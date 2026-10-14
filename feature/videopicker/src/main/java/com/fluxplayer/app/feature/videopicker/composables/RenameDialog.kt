@@ -1,7 +1,6 @@
 package com.fluxplayer.app.feature.videopicker.composables
 
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -19,6 +18,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.components.DoneButton
+import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
 import com.fluxplayer.app.core.ui.components.NextDialog
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay

@@ -28,7 +28,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -69,16 +68,19 @@ import com.fluxplayer.app.core.tingshu.TingshuRepository
 import com.fluxplayer.app.core.tingshu.listeningResumeAction
 import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import com.fluxplayer.app.core.ui.components.FluxLinearProgressIndicator
+import com.fluxplayer.app.core.ui.components.MediaAlertDialog as AlertDialog
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
+import com.fluxplayer.app.core.ui.theme.LocalMediaPreferences
+import com.fluxplayer.app.core.ui.theme.LocalMediaScrollBottomPadding
 import com.fluxplayer.app.feature.player.LocalAudiobookPlayback
 import com.fluxplayer.app.feature.player.PlayerActivity
 import com.fluxplayer.app.feature.player.model.AudioBook
 import com.fluxplayer.app.feature.player.service.PlayerService
 import com.github.eprendre.tingshu.utils.Episode
 
-private val HomeShapeLarge = RoundedCornerShape(24.dp)
-private val HomeShapeMedium = RoundedCornerShape(18.dp)
+private val HomeShapeLarge = RoundedCornerShape(28.dp)
+private val HomeShapeMedium = RoundedCornerShape(20.dp)
 private val HomeShapeSmall = RoundedCornerShape(12.dp)
 
 /**
@@ -242,9 +244,9 @@ fun ListeningLibraryHome(
     // 跨列回调直接读取可变状态会保留旧行索引，导致同一卡片被重复放置。
     val recentGrid = grid
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(150.dp),
+        columns = LocalMediaPreferences.current.mediaGridColumns.coerceIn(0, 6).let { if (it == 0) GridCells.Adaptive(150.dp) else GridCells.Fixed(it) },
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp),
+        contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp + LocalMediaScrollBottomPadding.current),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -496,7 +498,7 @@ private fun NowPlayingBanner(
         color = colors.primaryContainer,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Box(Modifier.background(Brush.horizontalGradient(listOf(colors.primaryContainer, colors.primary.copy(alpha = 0.12f))))) {
+        Box(Modifier.background(Brush.horizontalGradient(listOf(colors.primaryContainer, colors.surfaceContainerLow)))) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,

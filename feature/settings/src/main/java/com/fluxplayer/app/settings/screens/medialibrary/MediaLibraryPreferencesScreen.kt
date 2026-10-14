@@ -1,6 +1,5 @@
 package com.fluxplayer.app.settings.screens.medialibrary
 
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -19,9 +18,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.model.ThumbnailGenerationStrategy
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
-import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
-import com.fluxplayer.app.core.ui.components.PreferenceSwitch
+import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
 
@@ -39,7 +37,6 @@ fun MediaLibraryPreferencesScreen(
         onNavigateUp = onNavigateUp,
         onFolderSettingClick = onFolderSettingClick,
         onThumbnailSettingClick = onThumbnailSettingClick,
-        onEvent = viewModel::onEvent,
     )
 }
 
@@ -50,7 +47,6 @@ private fun MediaLibraryPreferencesContent(
     onNavigateUp: () -> Unit,
     onFolderSettingClick: () -> Unit,
     onThumbnailSettingClick: () -> Unit,
-    onEvent: (MediaLibraryPreferencesUiEvent) -> Unit,
 ) {
     val preferences = uiState.preferences
 
@@ -65,21 +61,6 @@ private fun MediaLibraryPreferencesContent(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
         ) {
-            ListSectionTitle(text = stringResource(id = R.string.media_library))
-            Column {
-                PreferenceSwitch(
-                    title = stringResource(id = R.string.mark_last_played_media),
-                    description = stringResource(
-                        id = R.string.mark_last_played_media_desc,
-                    ),
-                    icon = NextIcons.Check,
-                    isChecked = preferences.markLastPlayedMedia,
-                    onClick = { onEvent(MediaLibraryPreferencesUiEvent.ToggleMarkLastPlayedMedia) },
-                    isFirstItem = true,
-                    isLastItem = true,
-                )
-            }
-
             ListSectionTitle(text = stringResource(id = R.string.scan))
             Column {
                 ClickablePreferenceItem(
@@ -120,7 +101,6 @@ private fun MediaLibraryPreferencesScreenPreview() {
             onNavigateUp = {},
             onFolderSettingClick = {},
             onThumbnailSettingClick = {},
-            onEvent = {},
         )
     }
 }

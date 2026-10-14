@@ -13,6 +13,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.fluxplayer.app.core.ui.theme.LocalMediaBackdrop
+import com.fluxplayer.app.core.ui.theme.LocalMediaPreferences
+import com.fluxplayer.app.core.ui.theme.LocalMediaShell
+import com.fluxplayer.app.core.ui.theme.mediaGlass
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,16 +26,18 @@ fun NextTopAppBar(
     navigationIcon: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
     colors: TopAppBarColors = TopAppBarDefaults.topAppBarColors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = MaterialTheme.colorScheme.background,
     ),
 ) {
+    val glass = LocalMediaShell.current && LocalMediaPreferences.current.glassControlsEnabled && LocalMediaBackdrop.current != null
     TopAppBar(
         title = title,
         navigationIcon = navigationIcon,
         actions = actions,
-        colors = colors,
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 8.dp),
+        colors = if (glass) colors.copy(containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.4f * (2f - LocalMediaPreferences.current.glassTranslucency * 2f))) else colors,
+        modifier = modifier.mediaGlass(),
+        contentPadding = PaddingValues(horizontal = if (LocalMediaShell.current) 12.dp else 8.dp),
+        expandedHeight = TopAppBarDefaults.TopAppBarExpandedHeight,
     )
 }
 
@@ -44,7 +50,7 @@ fun NextTopAppBar(
     navigationIcon: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
     colors: TopAppBarColors = TopAppBarDefaults.topAppBarColors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = MaterialTheme.colorScheme.background,
     ),
 ) {
     NextTopAppBar(
@@ -54,6 +60,7 @@ fun NextTopAppBar(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 fontWeight = fontWeight,
+                style = MaterialTheme.typography.headlineSmall,
             )
         },
         navigationIcon = navigationIcon,

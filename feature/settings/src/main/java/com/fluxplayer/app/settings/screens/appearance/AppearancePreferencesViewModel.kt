@@ -3,13 +3,13 @@ package com.fluxplayer.app.settings.screens.appearance
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.AccentPreset
 import com.fluxplayer.app.core.model.ApplicationPreferences
+import com.fluxplayer.app.core.model.NavStyle
 import com.fluxplayer.app.core.model.StartupPage
 import com.fluxplayer.app.core.model.ThemeConfig
-import com.fluxplayer.app.core.model.NavStyle
+import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +38,10 @@ class AppearancePreferencesViewModel @Inject constructor(
 
     fun onEvent(event: AppearancePreferencesEvent) {
         when (event) {
+            is AppearancePreferencesEvent.UpdatePreferences -> viewModelScope.launch {
+                preferencesRepository.updateApplicationPreferences(event.transform)
+            }
+
             is AppearancePreferencesEvent.ShowDialog -> showDialog(event.value)
             AppearancePreferencesEvent.ToggleDarkTheme -> toggleDarkTheme()
             is AppearancePreferencesEvent.UpdateThemeConfig -> updateThemeConfig(event.themeConfig)
@@ -239,6 +243,7 @@ class AppearancePreferencesViewModel @Inject constructor(
             if (preferences.showHistoryTab) add(StartupPage.HISTORY)
             if (preferences.showAudiobookTab) add(StartupPage.AUDIOBOOK)
         }
+        if (visiblePages.isEmpty()) return preferences.copy(showVideosTab = true, startupPage = StartupPage.VIDEOS)
         val startupPage = preferences.startupPage
             .takeIf { it in visiblePages }
             ?: visiblePages.firstOrNull()
@@ -249,7 +254,12 @@ class AppearancePreferencesViewModel @Inject constructor(
     private fun updateStartupPage(startupPage: StartupPage) {
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences {
-                it.copy(startupPage = startupPage)
+                when (startupPage) {
+                    StartupPage.VIDEOS -> it.copy(startupPage = startupPage, showVideosTab = true)
+                    StartupPage.BROWSE -> it.copy(startupPage = startupPage, showBrowseTab = true)
+                    StartupPage.HISTORY -> it.copy(startupPage = startupPage, showHistoryTab = true)
+                    StartupPage.AUDIOBOOK -> it.copy(startupPage = startupPage, showAudiobookTab = true)
+                }
             }
         }
     }
@@ -262,6 +272,7 @@ data class AppearancePreferencesUiState(
 )
 
 sealed interface AppearancePreferencesEvent {
+    data class UpdatePreferences(val transform: (ApplicationPreferences) -> ApplicationPreferences) : AppearancePreferencesEvent
     data class ShowDialog(val value: AppearancePreferenceDialog?) : AppearancePreferencesEvent
     data object ToggleDarkTheme : AppearancePreferencesEvent
     data class UpdateThemeConfig(val themeConfig: ThemeConfig) : AppearancePreferencesEvent

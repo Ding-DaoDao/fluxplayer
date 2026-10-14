@@ -13,7 +13,7 @@ import javax.crypto.spec.GCMParameterSpec
 /**
  * 基于 Android Keystore 的凭证加解密：AES-256-GCM，密钥不可导出。
  *
- * 与 `BackupCrypto`（备份归档，走用户口令 + PBKDF2）不同，这里的密钥绑设备，用来加密
+ * 这里的密钥绑定设备，用于加密
  * **落盘的登录凭证**（Cookie / access token / 账号密码）。落盘格式见 [SecureValueCodec]。
  *
  * 三个必须守住的点：

@@ -34,6 +34,7 @@ kotlin {
 dependencies {
 
     implementation(project(":core:ui"))
+    implementation(libs.backdrop)
     implementation(project(":feature:tingshu"))
     implementation(libs.androidx.activity.compose)
     implementation(project(":core:data"))

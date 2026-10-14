@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.components.DoneButton
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 
@@ -156,7 +157,7 @@ fun <T> SharedShareBrowseDialog(
                 when {
                     isLoading && items.isEmpty() -> {
                         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
+                            MediaLoadingIndicator()
                         }
                     }
                     else -> {
@@ -319,7 +320,7 @@ fun <T> SharedShareTargetPickerDialog(
 
                 if (isLoading) {
                     Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        MediaLoadingIndicator()
                     }
                 } else if (folders.isEmpty()) {
                     Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {

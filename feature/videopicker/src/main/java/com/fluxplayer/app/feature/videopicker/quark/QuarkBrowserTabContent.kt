@@ -18,7 +18,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.onCloudMediaClick
 import com.fluxplayer.app.core.common.onCloudVideoClick
-import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import com.fluxplayer.app.feature.videopicker.composables.ContextActionMenu
 import com.fluxplayer.app.feature.videopicker.composables.CreateFolderDialog
@@ -26,7 +26,6 @@ import com.fluxplayer.app.feature.videopicker.composables.DownloadNotificationBa
 import com.fluxplayer.app.feature.videopicker.composables.FolderPickerDialog
 import com.fluxplayer.app.feature.videopicker.composables.ImageViewerScreen
 import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
-import com.fluxplayer.app.feature.videopicker.composables.SortOption
 import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuContent
 
 /**
@@ -42,7 +41,7 @@ fun QuarkBrowserTabContent(
     navigateToDirParam: Pair<String, String>? = null,
     onNavigateToDirConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: QuarkBrowserViewModel = hiltViewModel()
+    viewModel: QuarkBrowserViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(Unit) { viewModel.setDriveType(driveType) }
     LaunchedEffect(Unit) { onLogoutReady { viewModel.logout() } }
@@ -88,128 +87,145 @@ fun QuarkBrowserTabContent(
     Box(modifier = modifier.fillMaxSize()) {
         SharedCloudBrowserPanel(
             modifier = Modifier.fillMaxSize(),
-        items = state.items,
-        breadcrumbs = state.breadcrumbs,
-        isLoading = state.isLoading,
-        isConfigured = state.isLoggedIn,
-        error = state.error,
-        isLoadingMore = state.isLoadingMore,
-        reLoginRequired = false,
-        navigationStack = navigationStack,
-        onItemClick = { item ->
-            if (item.isDirectory) {
-                viewModel.navigateToDir(state.items.indexOf(item))
-            } else if (item.isImage) {
-                imageViewerIndex = state.items.indexOf(item)
-            } else if (item.isAudio) {
-                onCloudMediaClick(
-                    item = item,
-                    allItems = state.items,
-                    mediaFilter = { it.isAudio },
-                    resolveUrl = { viewModel.resolveVideoUri(item) },
-                    buildPlaylistUri = { CloudUriScheme.buildCloudUri(if (state.driveType == "uc") "uc" else "quark", it.path, cloudFolderPath) },
-                    onPlayVideos = onPlayVideos,
-                    scope = scope,
+            items = state.items,
+            breadcrumbs = state.breadcrumbs,
+            isLoading = state.isLoading,
+            isConfigured = state.isLoggedIn,
+            error = state.error,
+            isLoadingMore = state.isLoadingMore,
+            reLoginRequired = false,
+            navigationStack = navigationStack,
+            onItemClick = { item ->
+                if (item.isDirectory) {
+                    viewModel.navigateToDir(state.items.indexOf(item))
+                } else if (item.isImage) {
+                    imageViewerIndex = state.items.indexOf(item)
+                } else if (item.isAudio) {
+                    onCloudMediaClick(
+                        item = item,
+                        allItems = state.items,
+                        mediaFilter = { it.isAudio },
+                        resolveUrl = { viewModel.resolveVideoUri(item) },
+                        buildPlaylistUri = { CloudUriScheme.buildCloudUri(if (state.driveType == "uc") "uc" else "quark", it.path, cloudFolderPath) },
+                        onPlayVideos = onPlayVideos,
+                        scope = scope,
+                    )
+                } else if (item.isVideo) {
+                    onCloudVideoClick(
+                        item = item,
+                        allItems = state.items,
+                        resolveUrl = { viewModel.resolveVideoUri(item) },
+                        buildPlaylistUri = { CloudUriScheme.buildCloudUri(if (state.driveType == "uc") "uc" else "quark", it.path, cloudFolderPath) },
+                        onPlayVideos = onPlayVideos,
+                        scope = scope,
+                    )
+                }
+            },
+            onItemMoreClick = { index -> contextMenuIndex = index },
+            expandedMenuIndex = contextMenuIndex,
+            onMenuDismiss = { contextMenuIndex = null },
+            menuContent = { index, onDismiss ->
+                val item = state.items.getOrNull(index)
+                if (item != null) {
+                    ContextActionMenu(
+                        item = item,
+                        onDismiss = onDismiss,
+                        onMove = {
+                            onDismiss()
+                            viewModel.startMove(index)
+                        },
+                        onDelete = {
+                            onDismiss()
+                            viewModel.deleteItem(index)
+                        },
+                        onRename = {
+                            renameIndex = index
+                            onDismiss()
+                        },
+                        onDownload = {
+                            onDismiss()
+                            viewModel.downloadFile(index)
+                        },
+                    )
+                }
+            },
+            onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
+            onRefresh = { viewModel.refresh() },
+            onLoadMore = { viewModel.loadMore() },
+            onSortClick = { showSortMenu = true },
+            showSortMenu = showSortMenu,
+            onSortMenuDismiss = { showSortMenu = false },
+            sortMenuContent = {
+                SortDropdownMenuContent(
+                    currentKey = currentSortKey,
+                    onSelect = { option ->
+                        showSortMenu = false
+                        val providerOrderBy = when (option.key) {
+                            "name:asc" -> "file_name:asc"
+                            "name:desc" -> "file_name:desc"
+                            "time:asc" -> "updated_at:asc"
+                            "time:desc" -> "updated_at:desc"
+                            "size:asc" -> "size:asc"
+                            "size:desc" -> "size:desc"
+                            else -> "file_name:asc"
+                        }
+                        viewModel.setSort(providerOrderBy)
+                    },
+                    onDismiss = { showSortMenu = false },
                 )
-            } else if (item.isVideo) {
-                onCloudVideoClick(
-                    item = item,
-                    allItems = state.items,
-                    resolveUrl = { viewModel.resolveVideoUri(item) },
-                    buildPlaylistUri = { CloudUriScheme.buildCloudUri(if (state.driveType == "uc") "uc" else "quark", it.path, cloudFolderPath) },
-                    onPlayVideos = onPlayVideos,
-                    scope = scope,
+            },
+            breadcrumbLabel = { it.label },
+            loginContent = {
+                QuarkLoginScreen(
+                    driveType = state.driveType,
+                    onLoginWithCookie = { cookie, dt -> viewModel.loginWithCookie(cookie, dt) },
+                    loginUrl = if (driveType == "uc") "https://drive.uc.cn/" else "https://pan.quark.cn/",
+                    cookieDomains = if (driveType == "uc") listOf("drive.uc.cn", "pc-api.uc.cn") else listOf("pan.quark.cn", "drive-pc.quark.cn"),
                 )
-            }
-        },
-        onItemMoreClick = { index -> contextMenuIndex = index },
-        expandedMenuIndex = contextMenuIndex,
-        onMenuDismiss = { contextMenuIndex = null },
-        menuContent = { index, onDismiss ->
-            val item = state.items.getOrNull(index)
-            if (item != null) {
-                ContextActionMenu(
-                    item = item,
-                    onDismiss = onDismiss,
-                    onMove = { onDismiss(); viewModel.startMove(index) },
-                    onDelete = { onDismiss(); viewModel.deleteItem(index) },
-                    onRename = { renameIndex = index; onDismiss() },
-                    onDownload = { onDismiss(); viewModel.downloadFile(index) },
-                )
-            }
-        },
-        onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
-        onRefresh = { viewModel.refresh() },
-        onLoadMore = { viewModel.loadMore() },
-        onSortClick = { showSortMenu = true },
-        showSortMenu = showSortMenu,
-        onSortMenuDismiss = { showSortMenu = false },
-        sortMenuContent = {
-            SortDropdownMenuContent(
-                currentKey = currentSortKey,
-                onSelect = { option ->
-                    showSortMenu = false
-                    val providerOrderBy = when (option.key) {
-                        "name:asc" -> "file_name:asc"
-                        "name:desc" -> "file_name:desc"
-                        "time:asc" -> "updated_at:asc"
-                        "time:desc" -> "updated_at:desc"
-                        "size:asc" -> "size:asc"
-                        "size:desc" -> "size:desc"
-                        else -> "file_name:asc"
-                    }
-                    viewModel.setSort(providerOrderBy)
+            },
+            onCreateFolder = { showCreateFolderDialog = true },
+            providerName = if (driveType == "uc") "UC网盘" else "夸克网盘",
+            onSettingsClick = onSettingsClick,
+            onExitClick = { viewModel.logout() },
+            playedUriSet = state.playedUriSet,
+            cloudProviderKey = if (state.driveType == "uc") "uc" else "quark",
+            notificationEvents = viewModel.messageEvents,
+        )
+
+        val renameItem = state.items.getOrNull(renameIndex)
+        if (renameItem != null) {
+            RenameDialog(
+                name = renameItem.name,
+                onDismiss = { renameIndex = -1 },
+                onDone = { newName ->
+                    viewModel.renameItem(renameIndex, newName)
+                    renameIndex = -1
                 },
-                onDismiss = { showSortMenu = false },
             )
-        },
-        breadcrumbLabel = { it.label },
-        loginContent = {
-            QuarkLoginScreen(
-                driveType = state.driveType,
-                onLoginWithCookie = { cookie, dt -> viewModel.loginWithCookie(cookie, dt) },
-                loginUrl = if (driveType == "uc") "https://drive.uc.cn/" else "https://pan.quark.cn/",
-                cookieDomains = if (driveType == "uc") listOf("drive.uc.cn", "pc-api.uc.cn") else listOf("pan.quark.cn", "drive-pc.quark.cn"),
+        }
+
+        if (showCreateFolderDialog) {
+            CreateFolderDialog(
+                onDismiss = { showCreateFolderDialog = false },
+                onCreate = { name ->
+                    viewModel.createDirectory(name)
+                    showCreateFolderDialog = false
+                },
             )
-        },
-        onCreateFolder = { showCreateFolderDialog = true },
-        providerName = if (driveType == "uc") "UC网盘" else "夸克网盘",
-        onSettingsClick = onSettingsClick,
-        onExitClick = { viewModel.logout() },
-        playedUriSet = state.playedUriSet,
-        cloudProviderKey = if (state.driveType == "uc") "uc" else "quark",
-        notificationEvents = viewModel.messageEvents,
-    )
+        }
 
-    val renameItem = state.items.getOrNull(renameIndex)
-    if (renameItem != null) {
-        RenameDialog(
-            name = renameItem.name,
-            onDismiss = { renameIndex = -1 },
-            onDone = { newName -> viewModel.renameItem(renameIndex, newName); renameIndex = -1 },
-        )
-    }
-
-    if (showCreateFolderDialog) {
-        CreateFolderDialog(
-            onDismiss = { showCreateFolderDialog = false },
-            onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
-        )
-    }
-
-    // 移动文件 —— 目标文件夹选择器
-    if (state.pendingAction == "move") {
-        FolderPickerDialog(
-            action = "move",
-            folders = state.pickerFolders,
-            isLoading = state.pickerIsLoading,
-            onDismiss = { viewModel.dismissPicker() },
-            onConfirm = { targetFolderId -> viewModel.moveTo(targetFolderId) },
-            onNavigateToFolder = { folderId -> viewModel.loadFoldersForPicker(folderId) },
-            onCreateFolder = { parentFolderId, name -> viewModel.createFolderInPicker(parentFolderId, name) },
-        )
-    }
-
+        // 移动文件 —— 目标文件夹选择器
+        if (state.pendingAction == "move") {
+            FolderPickerDialog(
+                action = "move",
+                folders = state.pickerFolders,
+                isLoading = state.pickerIsLoading,
+                onDismiss = { viewModel.dismissPicker() },
+                onConfirm = { targetFolderId -> viewModel.moveTo(targetFolderId) },
+                onNavigateToFolder = { folderId -> viewModel.loadFoldersForPicker(folderId) },
+                onCreateFolder = { parentFolderId, name -> viewModel.createFolderInPicker(parentFolderId, name) },
+            )
+        }
 
         // 下载进度
         downloadProgress?.let { dp ->
@@ -238,7 +254,6 @@ fun QuarkBrowserTabContent(
             )
         }
     }
-
 }
 
 /**
@@ -253,7 +268,7 @@ fun QuarkLoginScreen(
     onLoginWithCookie: (String, String) -> Unit,
     loginUrl: String = "https://pan.quark.cn/",
     cookieDomains: List<String> = listOf("pan.quark.cn", "drive-pc.quark.cn"),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     val providerName = if (driveType == "uc") "UC网盘" else "夸克网盘"
     var statusText by remember { mutableStateOf("") }
@@ -264,20 +279,20 @@ fun QuarkLoginScreen(
         // 顶部状态提示
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.primaryContainer
+            color = MaterialTheme.colorScheme.primaryContainer,
         ) {
             Row(
                 modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (isLoading && !loginTriggered) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    MediaLoadingIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
                     text = statusText.ifEmpty { "正在加载${providerName}登录页面..." },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
         }
@@ -322,8 +337,7 @@ fun QuarkLoginScreen(
                     loadUrl(loginUrl)
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }
-

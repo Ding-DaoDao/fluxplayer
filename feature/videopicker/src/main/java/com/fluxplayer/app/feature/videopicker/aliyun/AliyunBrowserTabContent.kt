@@ -21,7 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.onCloudMediaClick
 import com.fluxplayer.app.core.common.onCloudVideoClick
-import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import com.fluxplayer.app.feature.videopicker.composables.ContextActionMenu
 import com.fluxplayer.app.feature.videopicker.composables.CreateFolderDialog
@@ -29,9 +29,7 @@ import com.fluxplayer.app.feature.videopicker.composables.DownloadNotificationBa
 import com.fluxplayer.app.feature.videopicker.composables.FolderPickerDialog
 import com.fluxplayer.app.feature.videopicker.composables.ImageViewerScreen
 import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
-import com.fluxplayer.app.feature.videopicker.composables.SortOption
 import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuContent
-import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /**
@@ -46,7 +44,7 @@ fun AliyunBrowserTabContent(
     navigateToDirParam: Pair<String, String>? = null,
     onNavigateToDirConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: AliyunBrowserViewModel = hiltViewModel()
+    viewModel: AliyunBrowserViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(Unit) { viewModel.tryRestoreSession() }
     LaunchedEffect(Unit) { onLogoutReady { viewModel.logout() } }
@@ -94,170 +92,190 @@ fun AliyunBrowserTabContent(
     Box(modifier = modifier.fillMaxSize()) {
         SharedCloudBrowserPanel(
             modifier = Modifier.fillMaxSize(),
-        items = state.items,
-        breadcrumbs = state.breadcrumbs,
-        isLoading = state.isLoading,
-        isConfigured = state.isLoggedIn,
-        error = state.error,
-        isLoadingMore = state.isLoadingMore,
-        reLoginRequired = state.reLoginRequired,
-        navigationStack = navigationStack,
-        onItemClick = { item ->
-            if (item.isDirectory) {
-                viewModel.navigateToDir(state.items.indexOf(item))
-            } else if (item.isImage) {
-                imageViewerIndex = state.items.indexOf(item)
-            } else if (item.isAudio) {
-                onCloudMediaClick(
-                    item = item,
-                    allItems = state.items,
-                    mediaFilter = { it.isAudio },
-                    resolveUrl = { viewModel.resolveVideoUri(item) },
-                    buildPlaylistUri = { CloudUriScheme.buildCloudUri("alipan", it.path, cloudFolderPath) },
-                    onPlayVideos = onPlayVideos,
-                    scope = scope,
+            items = state.items,
+            breadcrumbs = state.breadcrumbs,
+            isLoading = state.isLoading,
+            isConfigured = state.isLoggedIn,
+            error = state.error,
+            isLoadingMore = state.isLoadingMore,
+            reLoginRequired = state.reLoginRequired,
+            navigationStack = navigationStack,
+            onItemClick = { item ->
+                if (item.isDirectory) {
+                    viewModel.navigateToDir(state.items.indexOf(item))
+                } else if (item.isImage) {
+                    imageViewerIndex = state.items.indexOf(item)
+                } else if (item.isAudio) {
+                    onCloudMediaClick(
+                        item = item,
+                        allItems = state.items,
+                        mediaFilter = { it.isAudio },
+                        resolveUrl = { viewModel.resolveVideoUri(item) },
+                        buildPlaylistUri = { CloudUriScheme.buildCloudUri("alipan", it.path, cloudFolderPath) },
+                        onPlayVideos = onPlayVideos,
+                        scope = scope,
+                    )
+                } else if (item.isVideo) {
+                    onCloudVideoClick(
+                        item = item,
+                        allItems = state.items,
+                        resolveUrl = { viewModel.resolveVideoUri(item) },
+                        buildPlaylistUri = { CloudUriScheme.buildCloudUri("alipan", it.path, cloudFolderPath) },
+                        onPlayVideos = onPlayVideos,
+                        scope = scope,
+                    )
+                }
+            },
+            onItemMoreClick = { index -> contextMenuIndex = index },
+            expandedMenuIndex = contextMenuIndex,
+            onMenuDismiss = { contextMenuIndex = null },
+            menuContent = { index, onDismiss ->
+                val item = state.items.getOrNull(index)
+                if (item != null) {
+                    ContextActionMenu(
+                        item = item,
+                        onDismiss = onDismiss,
+                        onMove = {
+                            onDismiss()
+                            viewModel.startMove(index)
+                        },
+                        onDelete = {
+                            onDismiss()
+                            viewModel.deleteItem(index)
+                        },
+                        onRename = {
+                            renameIndex = index
+                            onDismiss()
+                        },
+                        onDownload = {
+                            onDismiss()
+                            viewModel.downloadFile(index)
+                        },
+                    )
+                }
+            },
+            onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
+            onRefresh = { viewModel.refresh() },
+            onLoadMore = { viewModel.loadMore() },
+            onSortClick = { showSortMenu = true },
+            showSortMenu = showSortMenu,
+            onSortMenuDismiss = { showSortMenu = false },
+            sortMenuContent = {
+                SortDropdownMenuContent(
+                    currentKey = currentSortKey,
+                    onSelect = { option ->
+                        showSortMenu = false
+                        val field = when (option.key) {
+                            "name:asc" -> "name"
+                            "name:desc" -> "name"
+                            "time:asc" -> "updated_at"
+                            "time:desc" -> "updated_at"
+                            "size:asc" -> "size"
+                            "size:desc" -> "size"
+                            else -> "name"
+                        }
+                        val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
+                        viewModel.setSort(field, dir)
+                    },
+                    onDismiss = { showSortMenu = false },
                 )
-            } else if (item.isVideo) {
-                onCloudVideoClick(
-                    item = item,
-                    allItems = state.items,
-                    resolveUrl = { viewModel.resolveVideoUri(item) },
-                    buildPlaylistUri = { CloudUriScheme.buildCloudUri("alipan", it.path, cloudFolderPath) },
-                    onPlayVideos = onPlayVideos,
-                    scope = scope,
-                )
-            }
-        },
-        onItemMoreClick = { index -> contextMenuIndex = index },
-        expandedMenuIndex = contextMenuIndex,
-        onMenuDismiss = { contextMenuIndex = null },
-        menuContent = { index, onDismiss ->
-            val item = state.items.getOrNull(index)
-            if (item != null) {
-                ContextActionMenu(
-                    item = item,
-                    onDismiss = onDismiss,
-                    onMove = { onDismiss(); viewModel.startMove(index) },
-                    onDelete = { onDismiss(); viewModel.deleteItem(index) },
-                    onRename = { renameIndex = index; onDismiss() },
-                    onDownload = { onDismiss(); viewModel.downloadFile(index) },
-                )
-            }
-        },
-        onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
-        onRefresh = { viewModel.refresh() },
-        onLoadMore = { viewModel.loadMore() },
-        onSortClick = { showSortMenu = true },
-        showSortMenu = showSortMenu,
-        onSortMenuDismiss = { showSortMenu = false },
-        sortMenuContent = {
-            SortDropdownMenuContent(
-                currentKey = currentSortKey,
-                onSelect = { option ->
-                    showSortMenu = false
-                    val field = when (option.key) {
-                        "name:asc" -> "name"
-                        "name:desc" -> "name"
-                        "time:asc" -> "updated_at"
-                        "time:desc" -> "updated_at"
-                        "size:asc" -> "size"
-                        "size:desc" -> "size"
-                        else -> "name"
-                    }
-                    val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
-                    viewModel.setSort(field, dir)
-                },
-                onDismiss = { showSortMenu = false },
-            )
-        },
-        breadcrumbLabel = { it.label },
-        breadcrumbActions = {
-            if (state.driveOptions.size > 1) {
-                val currentName = state.driveOptions.find { it.driveId == state.currentDriveId }?.name
-                    ?: state.driveOptions.firstOrNull()?.name ?: "切换驱动"
-                Box {
-                    TextButton(onClick = { showDriveMenu = true }) {
-                        Text(
-                            text = currentName,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                        )
-                        Icon(
-                            imageVector = Icons.Filled.ArrowDropDown,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = showDriveMenu,
-                        onDismissRequest = { showDriveMenu = false },
-                    ) {
-                        state.driveOptions.forEach { option ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = option.name,
-                                        fontWeight = if (option.driveId == state.currentDriveId)
-                                            FontWeight.Bold else FontWeight.Normal,
-                                    )
-                                },
-                                onClick = {
-                                    showDriveMenu = false
-                                    if (option.driveId != state.currentDriveId) {
-                                        viewModel.switchDrive(option.driveId)
-                                    }
-                                },
+            },
+            breadcrumbLabel = { it.label },
+            breadcrumbActions = {
+                if (state.driveOptions.size > 1) {
+                    val currentName = state.driveOptions.find { it.driveId == state.currentDriveId }?.name
+                        ?: state.driveOptions.firstOrNull()?.name ?: "切换驱动"
+                    Box {
+                        TextButton(onClick = { showDriveMenu = true }) {
+                            Text(
+                                text = currentName,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
                             )
+                            Icon(
+                                imageVector = Icons.Filled.ArrowDropDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showDriveMenu,
+                            onDismissRequest = { showDriveMenu = false },
+                        ) {
+                            state.driveOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = option.name,
+                                            fontWeight = if (option.driveId == state.currentDriveId) {
+                                                FontWeight.Bold
+                                            } else {
+                                                FontWeight.Normal
+                                            },
+                                        )
+                                    },
+                                    onClick = {
+                                        showDriveMenu = false
+                                        if (option.driveId != state.currentDriveId) {
+                                            viewModel.switchDrive(option.driveId)
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
-            }
-        },
-        loginContent = {
-            AliyunLoginScreen(
-                onLoginWithAuthorization = { auth -> viewModel.loginWithAuthorization(auth) },
-                onLoginWithTokenJson = { json -> viewModel.loginWithTokenJson(json) },
-                autoOpenWebView = state.reLoginRequired
+            },
+            loginContent = {
+                AliyunLoginScreen(
+                    onLoginWithAuthorization = { auth -> viewModel.loginWithAuthorization(auth) },
+                    onLoginWithTokenJson = { json -> viewModel.loginWithTokenJson(json) },
+                    autoOpenWebView = state.reLoginRequired,
+                )
+            },
+            onCreateFolder = { showCreateFolderDialog = true },
+            providerName = "阿里云盘",
+            onSettingsClick = onSettingsClick,
+            onExitClick = { viewModel.logout() },
+            playedUriSet = state.playedUriSet,
+            cloudProviderKey = "alipan",
+            notificationEvents = viewModel.messageEvents,
+        )
+
+        val renameItem = state.items.getOrNull(renameIndex)
+        if (renameItem != null) {
+            RenameDialog(
+                name = renameItem.name,
+                onDismiss = { renameIndex = -1 },
+                onDone = { newName ->
+                    viewModel.renameItem(renameIndex, newName)
+                    renameIndex = -1
+                },
             )
-        },
-        onCreateFolder = { showCreateFolderDialog = true },
-        providerName = "阿里云盘",
-        onSettingsClick = onSettingsClick,
-        onExitClick = { viewModel.logout() },
-        playedUriSet = state.playedUriSet,
-        cloudProviderKey = "alipan",
-        notificationEvents = viewModel.messageEvents,
-    )
+        }
 
-    val renameItem = state.items.getOrNull(renameIndex)
-    if (renameItem != null) {
-        RenameDialog(
-            name = renameItem.name,
-            onDismiss = { renameIndex = -1 },
-            onDone = { newName -> viewModel.renameItem(renameIndex, newName); renameIndex = -1 },
-        )
-    }
+        if (showCreateFolderDialog) {
+            CreateFolderDialog(
+                onDismiss = { showCreateFolderDialog = false },
+                onCreate = { name ->
+                    viewModel.createDirectory(name)
+                    showCreateFolderDialog = false
+                },
+            )
+        }
 
-    if (showCreateFolderDialog) {
-        CreateFolderDialog(
-            onDismiss = { showCreateFolderDialog = false },
-            onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
-        )
-    }
-
-    // 移动文件 —— 目标文件夹选择器
-    if (state.pendingAction == "move") {
-        FolderPickerDialog(
-            action = "move",
-            folders = state.pickerFolders,
-            isLoading = state.pickerIsLoading,
-            onDismiss = { viewModel.dismissPicker() },
-            onConfirm = { targetFolderId -> viewModel.moveTo(targetFolderId) },
-            onNavigateToFolder = { folderId -> viewModel.loadFoldersForPicker(folderId) },
-            onCreateFolder = { parentFolderId, name -> viewModel.createFolderInPicker(parentFolderId, name) },
-        )
-    }
-
+        // 移动文件 —— 目标文件夹选择器
+        if (state.pendingAction == "move") {
+            FolderPickerDialog(
+                action = "move",
+                folders = state.pickerFolders,
+                isLoading = state.pickerIsLoading,
+                onDismiss = { viewModel.dismissPicker() },
+                onConfirm = { targetFolderId -> viewModel.moveTo(targetFolderId) },
+                onNavigateToFolder = { folderId -> viewModel.loadFoldersForPicker(folderId) },
+                onCreateFolder = { parentFolderId, name -> viewModel.createFolderInPicker(parentFolderId, name) },
+            )
+        }
 
         // 下载进度
         downloadProgress?.let { dp ->
@@ -286,7 +304,6 @@ fun AliyunBrowserTabContent(
             )
         }
     }
-
 }
 
 /**
@@ -301,7 +318,7 @@ fun AliyunLoginScreen(
     onLoginWithAuthorization: (String) -> Unit,
     onLoginWithTokenJson: (String) -> Unit,
     modifier: Modifier = Modifier,
-    autoOpenWebView: Boolean = false
+    autoOpenWebView: Boolean = false,
 ) {
     var statusText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
@@ -311,14 +328,14 @@ fun AliyunLoginScreen(
         // 顶部状态提示
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.primaryContainer
+            color = MaterialTheme.colorScheme.primaryContainer,
         ) {
             Row(
                 modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (isLoading && !loginTriggered) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    MediaLoadingIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
@@ -326,7 +343,7 @@ fun AliyunLoginScreen(
                         if (autoOpenWebView) "正在尝试自动续期..." else "正在加载阿里云盘登录页面..."
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
         }
@@ -375,9 +392,9 @@ fun AliyunLoginScreen(
 
                             view.evaluateJavascript(
                                 "(function(){" +
-                                " try{var t=localStorage.getItem('token');if(t)return t;}catch(e){}" +
-                                " return'';" +
-                                "})()"
+                                    " try{var t=localStorage.getItem('token');if(t)return t;}catch(e){}" +
+                                    " return'';" +
+                                    "})()",
                             ) { result ->
                                 if (loginTriggered) return@evaluateJavascript
                                 // evaluateJavascript 将返回值包装为 JSON 字符串，需正确解码
@@ -415,8 +432,7 @@ fun AliyunLoginScreen(
                     }
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }
-

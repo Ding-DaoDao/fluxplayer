@@ -21,9 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -42,11 +39,14 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
+import com.fluxplayer.app.core.ui.components.MediaLoadingRow
+import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 
 @Composable
 fun ListeningSettingsCard(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(shape = RoundedCornerShape(24.dp), color = FluxTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+    Surface(shape = RoundedCornerShape(32.dp), color = FluxTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, style = FluxTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(subtitle, style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
@@ -85,7 +85,7 @@ internal fun SourceSettingsSheet(
             ) {
                 Surface(
                     shape = RoundedCornerShape(28.dp),
-                    color = FluxTheme.colorScheme.surface,
+                    color = FluxTheme.colorScheme.surfaceContainerLow,
                     modifier = Modifier.widthIn(max = 600.dp).fillMaxWidth().fillMaxHeight(0.9f),
                 ) {
                     Column {
@@ -94,7 +94,7 @@ internal fun SourceSettingsSheet(
                             Text(title, style = FluxTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                             Text("管理账号、目录与书源偏好", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        if (busy) MediaLoadingRow(Modifier.fillMaxWidth())
                         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(18.dp), content = content)
                         HorizontalDivider(color = FluxTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {

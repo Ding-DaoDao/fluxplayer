@@ -2,7 +2,6 @@ package com.fluxplayer.app.settings.screens.subtitle
 
 import android.content.Intent
 import android.provider.Settings
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -29,8 +28,9 @@ import com.fluxplayer.app.core.model.Font
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
-import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
+import com.fluxplayer.app.core.ui.components.ListSectionTitle
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
 import com.fluxplayer.app.core.ui.components.PreferenceSlider
 import com.fluxplayer.app.core.ui.components.PreferenceSwitch
 import com.fluxplayer.app.core.ui.components.PreferenceSwitchWithDivider
@@ -87,7 +87,7 @@ private fun SubtitlePreferencesContent(
                         .takeIf { it.isNotBlank() } ?: stringResource(R.string.preferred_subtitle_lang_description),
                     icon = NextIcons.Language,
                     onClick = { onEvent(SubtitlePreferencesUiEvent.ShowDialog(SubtitlePreferenceDialog.SubtitleLanguageDialog)) },
-                    isFirstItem = true
+                    isFirstItem = true,
                 )
                 HorizontalDivider()
                 ClickablePreferenceItem(
@@ -95,7 +95,7 @@ private fun SubtitlePreferencesContent(
                     description = charsetResource.first { it.contains(uiState.preferences.subtitleTextEncoding) },
                     icon = NextIcons.Subtitle,
                     onClick = { onEvent(SubtitlePreferencesUiEvent.ShowDialog(SubtitlePreferenceDialog.SubtitleEncodingDialog)) },
-                    isLastItem = true
+                    isLastItem = true,
                 )
             }
             ListSectionTitle(text = stringResource(id = R.string.appearance_name))
@@ -166,7 +166,7 @@ private fun SubtitlePreferencesContent(
                     enabled = uiState.preferences.useSystemCaptionStyle.not(),
                     isChecked = uiState.preferences.applyEmbeddedStyles,
                     onClick = { onEvent(SubtitlePreferencesUiEvent.ToggleApplyEmbeddedStyles) },
-                    isLastItem = true
+                    isLastItem = true,
                 )
             }
         }

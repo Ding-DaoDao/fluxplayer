@@ -19,8 +19,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.model.DecoderPriority
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
-import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
+import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.RadioTextButton
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme

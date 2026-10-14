@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.media.sync.MediaInfoSynchronizer
+import com.fluxplayer.app.core.model.ApplicationPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,7 +26,8 @@ class GeneralPreferencesViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.applicationPreferences.collect { prefs ->
                 uiStateInternal.value = uiStateInternal.value.copy(
-                    downloadPath = prefs.downloadPath
+                    preferences = prefs,
+                    downloadPath = prefs.downloadPath,
                 )
             }
         }
@@ -33,6 +35,7 @@ class GeneralPreferencesViewModel @Inject constructor(
 
     fun onEvent(event: GeneralPreferencesUiEvent) {
         when (event) {
+            is GeneralPreferencesUiEvent.UpdatePreferences -> viewModelScope.launch { preferencesRepository.updateApplicationPreferences { event.transform(it) } }
             is GeneralPreferencesUiEvent.ShowDialog -> showDialog(event.value)
             GeneralPreferencesUiEvent.ClearThumbnailCache -> clearThumbnailCache()
             GeneralPreferencesUiEvent.ResetSettings -> resetSettings()
@@ -72,6 +75,7 @@ class GeneralPreferencesViewModel @Inject constructor(
 
 data class GeneralPreferencesUiState(
     val showDialog: GeneralPreferencesDialog? = null,
+    val preferences: ApplicationPreferences = ApplicationPreferences(),
     val downloadPath: String = "/storage/emulated/0/Download/",
 )
 
@@ -82,6 +86,7 @@ sealed interface GeneralPreferencesDialog {
 }
 
 sealed interface GeneralPreferencesUiEvent {
+    data class UpdatePreferences(val transform: (ApplicationPreferences) -> ApplicationPreferences) : GeneralPreferencesUiEvent
     data class ShowDialog(val value: GeneralPreferencesDialog?) : GeneralPreferencesUiEvent
     data object ClearThumbnailCache : GeneralPreferencesUiEvent
     data object ResetSettings : GeneralPreferencesUiEvent

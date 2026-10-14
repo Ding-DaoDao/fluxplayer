@@ -44,6 +44,7 @@ class PlayerPreferencesViewModel @Inject constructor(
 
     fun onEvent(event: PlayerPreferencesUiEvent) {
         when (event) {
+            is PlayerPreferencesUiEvent.UpdatePreferences -> viewModelScope.launch { preferencesRepository.updatePlayerPreferences { event.transform(it) } }
             is PlayerPreferencesUiEvent.ShowDialog -> showDialog(event.value)
             is PlayerPreferencesUiEvent.UpdatePlaybackResume -> updatePlaybackResume(event.resume)
             PlayerPreferencesUiEvent.ToggleAutoplay -> toggleAutoplay()
@@ -217,6 +218,7 @@ sealed interface PlayerPreferenceDialog {
 }
 
 sealed interface PlayerPreferencesUiEvent {
+    data class UpdatePreferences(val transform: (PlayerPreferences) -> PlayerPreferences) : PlayerPreferencesUiEvent
     data class ShowDialog(val value: PlayerPreferenceDialog?) : PlayerPreferencesUiEvent
     data class UpdatePlaybackResume(val resume: Resume) : PlayerPreferencesUiEvent
     data object ToggleAutoplay : PlayerPreferencesUiEvent

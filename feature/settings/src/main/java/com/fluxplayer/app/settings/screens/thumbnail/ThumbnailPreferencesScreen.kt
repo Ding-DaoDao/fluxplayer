@@ -1,6 +1,5 @@
 package com.fluxplayer.app.settings.screens.thumbnail
 
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -30,11 +29,12 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.ThumbnailGenerationStrategy
-import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.R
-import com.fluxplayer.app.core.ui.components.ListSectionTitle
-import com.fluxplayer.app.core.ui.components.NextDialog
+import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
+import com.fluxplayer.app.core.ui.components.ListSectionTitle
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
+import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.components.PreferenceSlider
 import com.fluxplayer.app.core.ui.components.SingleSelectablePreference
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
@@ -96,7 +96,7 @@ private fun ThumbnailPreferencesContent(
                         if (preferences.thumbnailGenerationStrategy == ThumbnailGenerationStrategy.FIRST_FRAME) return@SingleSelectablePreference
                         pendingChange = ThumbnailPreferenceChange.Strategy(ThumbnailGenerationStrategy.FIRST_FRAME)
                     },
-                    isFirstItem = true
+                    isFirstItem = true,
                 )
                 HorizontalDivider()
                 SingleSelectablePreference(
@@ -117,7 +117,7 @@ private fun ThumbnailPreferencesContent(
                         if (preferences.thumbnailGenerationStrategy == ThumbnailGenerationStrategy.HYBRID) return@SingleSelectablePreference
                         pendingChange = ThumbnailPreferenceChange.Strategy(ThumbnailGenerationStrategy.HYBRID)
                     },
-                    isLastItem = true
+                    isLastItem = true,
                 )
             }
 

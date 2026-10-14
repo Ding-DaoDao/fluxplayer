@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import com.fluxplayer.app.core.ui.theme.LocalMediaShell
 
 @Composable
 fun NextDialog(
@@ -23,6 +24,18 @@ fun NextDialog(
 ) {
     val configuration = LocalConfiguration.current
 
+    if (LocalMediaShell.current) {
+        MediaAlertDialog(
+            title = title,
+            text = { Column { content() } },
+            modifier = modifier.widthIn(max = configuration.screenWidthDp.dp - NextDialogDefaults.dialogMargin * 2),
+            onDismissRequest = onDismissRequest,
+            confirmButton = confirmButton,
+            dismissButton = dismissButton,
+            properties = dialogProperties,
+        )
+        return
+    }
     AlertDialog(
         title = title,
         text = { Column { content() } },

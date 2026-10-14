@@ -24,14 +24,14 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.mikepenz.aboutlibraries.Libs
-import com.mikepenz.aboutlibraries.util.withContext
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
 import com.fluxplayer.app.core.ui.components.FluxNotificationState
-import com.fluxplayer.app.core.ui.components.NextSegmentedListItem
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
+import com.fluxplayer.app.core.ui.components.NextSegmentedListItem
 import com.fluxplayer.app.core.ui.extensions.plus
+import com.mikepenz.aboutlibraries.Libs
+import com.mikepenz.aboutlibraries.util.withContext
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable

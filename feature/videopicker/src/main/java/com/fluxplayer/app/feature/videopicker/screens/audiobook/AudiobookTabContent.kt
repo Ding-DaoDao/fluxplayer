@@ -21,7 +21,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -39,10 +38,11 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.ui.base.DataState
+import com.fluxplayer.app.core.ui.components.MediaPageLoading as AudiobookLoadingIndicator
+import com.fluxplayer.app.core.ui.components.MediaPullToRefreshBox as PullToRefreshBox
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.AudiobookBookCard
-import com.fluxplayer.app.feature.player.AudiobookLoadingIndicator
 import com.fluxplayer.app.feature.player.PlayConfirmDialog
 import com.fluxplayer.app.feature.tingshu.TingshuSourceContent
 import com.fluxplayer.app.feature.tingshu.TingshuViewModel

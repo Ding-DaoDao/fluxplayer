@@ -23,7 +23,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -42,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import kotlinx.coroutines.launch
 
 /**
@@ -142,7 +142,7 @@ fun ImageViewerScreen(
                 }
                 isLoading -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = Color.White)
+                        MediaLoadingIndicator(color = Color.White)
                     }
                 }
                 isError -> {
@@ -164,8 +164,11 @@ fun ImageViewerScreen(
                                     loadingSet[item.path] = true
                                     val result = imageResolver(item)
                                     loadingSet.remove(item.path)
-                                    if (result != null) urlCache[item.path] = result
-                                    else errorSet[item.path] = true
+                                    if (result != null) {
+                                        urlCache[item.path] = result
+                                    } else {
+                                        errorSet[item.path] = true
+                                    }
                                 }
                             },
                         ) {

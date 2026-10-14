@@ -1,7 +1,9 @@
 [versions]
+capsule = "2.1.3"
+materialKolor = "5.0.1"
 android-compileSdk = "37"
 android-targetSdk = "36"
-android-minSdk = "23"
+android-minSdk = "24"
 android-jvm = "17"
 aboutlibraries = "14.0.0"
 accompanist = "0.37.3"
@@ -9,8 +11,8 @@ androidGradlePlugin = "9.1.0"
 androidMaterial = "1.13.0"
 androidxActivity = "1.13.0"
 androidxAppCompat = "1.7.1"
-androidxComposeBom = "2026.03.01"
-androidxMaterial3 = "1.5.0-alpha17"
+androidxComposeBom = "2026.09.00"
+androidxMaterial3 = "1.5.0-alpha27"
 androidxConstraintLayout = "2.2.1"
 androidxCore = "1.18.0"
 androidxCoreSplashscreen = "1.2.0"
@@ -47,6 +49,8 @@ quickjs = "1.0.15"
 bouncycastle = "1.83"
 
 [libraries]
+capsule = { module = "io.github.kyant0:capsule", version.ref = "capsule" }
+materialkolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
 bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
@@ -99,6 +103,7 @@ androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = 
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-test-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "androidxEspresso" }
 androidx-test-ext = { group = "androidx.test.ext", name = "junit-ktx", version.ref = "androidxTestExt" }
+coil-core = { module = "io.coil-kt.coil3:coil-core", version.ref = "coil" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 github-albfernandez-juniversalchardet = { group="com.github.albfernandez", name = "juniversalchardet", version.ref="universalChardet" }

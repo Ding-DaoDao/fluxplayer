@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ListItemDefaults
@@ -24,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.core.ui.components.SelectablePreference
 import com.fluxplayer.app.core.ui.extensions.plus
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
@@ -60,7 +60,7 @@ private fun FolderPreferencesContent(
                         .fillMaxSize()
                         .padding(innerPadding),
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    MediaLoadingIndicator(modifier = Modifier.align(Alignment.Center))
                 }
             }
 

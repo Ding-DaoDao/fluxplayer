@@ -41,7 +41,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -91,6 +90,7 @@ import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
 import com.fluxplayer.app.core.ui.components.ChapterDragScrollbar
 import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
 import com.fluxplayer.app.core.ui.components.FluxNotificationState
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.service.AudioSleepTimer
 import com.fluxplayer.app.feature.player.state.rememberMediaPresentationState
@@ -942,7 +942,7 @@ fun AudioPlaybackScreen(
 
         if (mediaState.isBuffering || loading) {
             loadingLabel?.let { Text(it, modifier = Modifier.align(Alignment.Center).padding(top = 80.dp), color = playerOnSurface()) }
-            CircularProgressIndicator(
+            MediaLoadingIndicator(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(48.dp),
@@ -1651,7 +1651,7 @@ fun AudioLoadingScreen(coverArtworkUri: Uri? = null, title: String? = null) {
                 )
                 Spacer(modifier = Modifier.height(16.dp))
             }
-            CircularProgressIndicator(
+            MediaLoadingIndicator(
                 modifier = Modifier.size(40.dp),
                 color = FluxTheme.colorScheme.primary,
                 strokeWidth = 3.dp,

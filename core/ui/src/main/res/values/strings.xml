@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="continue_playback">Continue watching</string>
+    <string name="last_playback_position">Last watched at %1$s</string>
+    <string name="playback_progress_percent">Watched %1$d%%</string>
     <string name="app_name" translatable="false">Flux Player</string>
     <string name="about_description">Version, support, credits</string>
     <string name="about_name">About</string>
@@ -399,14 +402,6 @@
     <string name="backup_device_name">Device Name</string>
     <string name="backup_device_name_hint">Optional. Included in backup filename (e.g., MyPhone)</string>
     <string name="backup_device_name_format_hint">Backup file format: fluxplayer_backup_{DeviceName}_{Date}_{Time}.zip</string>
-    <string name="backup_passphrase">Backup Password</string>
-    <string name="backup_passphrase_desc">Encrypts backup files. Required before exporting or uploading.</string>
-    <string name="backup_passphrase_set">Set</string>
-    <string name="backup_passphrase_not_set">Not set — required for export and upload</string>
-    <string name="backup_passphrase_required">Please set a backup password first</string>
-    <string name="backup_passphrase_hint">Backup files are encrypted with this password and can only be restored with it. It cannot be recovered if lost.</string>
-    <string name="backup_passphrase_enter">Enter Backup Password</string>
-    <string name="backup_passphrase_wrong">Wrong password, or the file is corrupted</string>
     <string name="backup_test_webdav">Test WebDAV Configuration</string>
     <string name="backup_test_webdav_desc">Test WebDAV service status</string>
     <string name="backup_auto_check">Auto check new backups</string>
@@ -525,7 +520,7 @@
     <string name="cache_size_disabled">Enable playback caching to adjust</string>
     <string name="resume_enabled_summary">Resume from the last playback position</string>
     <string name="resume_disabled_summary">Start from the beginning each time</string>
-    <string name="backup_contents_description">Includes app and player settings, audiobook library and progress, WebDAV accounts, OpenList data and cloud sign-ins. Video files, video playback history and caches are excluded. Keep account-containing backups private; stop the local OpenList service before backing up its data.</string>
+    <string name="backup_contents_description">Includes app and player settings, audiobook library, progress and online book cover images, WebDAV accounts, OpenList data and cloud sign-ins. Video files and video playback history are excluded. Stop the local OpenList service before backing up its data.</string>
     <string name="backup_export_local">Export backup file</string>
     <string name="backup_export_local_desc">Choose a location to save a ZIP backup</string>
     <string name="backup_automatic_section">Automatic backup and checks</string>
@@ -545,4 +540,17 @@
     <string name="backup_restore_failed_partial">Restore did not finish: %1$s. Some data may have changed; review it and try again.</string>
     <string name="backup_export_success">Backup file exported</string>
     <string name="backup_upload_success">Backup uploaded: %1$s</string>
+    <string name="media_home_library">Media library</string>
+    <string name="media_home_cloud">Cloud drives</string>
+    <string name="media_home_video_count">%1$d videos</string>
+    <string name="media_home_videos">Your videos</string>
+    <string name="media_home_local">LOCAL VIDEO</string>
+    <string name="media_home_play">Play</string>
+    <string name="media_home_view_all">View all</string>
+    <string name="settings_media_subtitle">Video · Cloud drives · Audiobooks</string>
+    <string name="media_home_welcome">Your media starts here</string>
+    <string name="media_home_welcome_desc">Add local videos or connect a cloud drive to start watching.</string>
+    <string name="media_home_add_local">Add local videos</string>
+    <string name="media_home_cloud_desc">Browse your cloud media</string>
+    <string name="media_loading">Loading…</string>
 </resources>

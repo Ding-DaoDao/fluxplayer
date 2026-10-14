@@ -22,7 +22,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.onCloudMediaClick
 import com.fluxplayer.app.core.common.onCloudVideoClick
-import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import com.fluxplayer.app.feature.videopicker.composables.ContextActionMenu
 import com.fluxplayer.app.feature.videopicker.composables.CreateFolderDialog
@@ -30,11 +30,9 @@ import com.fluxplayer.app.feature.videopicker.composables.DownloadNotificationBa
 import com.fluxplayer.app.feature.videopicker.composables.FolderPickerDialog
 import com.fluxplayer.app.feature.videopicker.composables.ImageViewerScreen
 import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
-import com.fluxplayer.app.feature.videopicker.composables.SortOption
 import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuContent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 
 private const val TAG = "Yun139Login"
 
@@ -50,7 +48,7 @@ fun Yun139BrowserTabContent(
     navigateToDirParam: Pair<String, String>? = null,
     onNavigateToDirConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: Yun139BrowserViewModel = hiltViewModel()
+    viewModel: Yun139BrowserViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(Unit) { onLogoutReady { viewModel.logout() } }
 
@@ -93,114 +91,136 @@ fun Yun139BrowserTabContent(
     Box(modifier = modifier.fillMaxSize()) {
         SharedCloudBrowserPanel(
             modifier = Modifier.fillMaxSize(),
-        items = state.items, breadcrumbs = state.breadcrumbs,
-        isLoading = state.isLoading, isConfigured = state.isLoggedIn,
-        error = state.error, isLoadingMore = state.isLoadingMore, reLoginRequired = false,
-        navigationStack = navigationStack,
-        onItemClick = { item ->
-            if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
-            else if (item.isImage) imageViewerIndex = state.items.indexOf(item)
-            else if (item.isAudio) onCloudMediaClick(
-                item = item,
-                allItems = state.items,
-                mediaFilter = { it.isAudio },
-                resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("yun139", it.path, cloudFolderPath) },
-                onPlayVideos = onPlayVideos,
-                scope = scope,
-            )
-            else if (item.isVideo) onCloudVideoClick(
-                item = item,
-                allItems = state.items,
-                resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("yun139", it.path, cloudFolderPath) },
-                onPlayVideos = onPlayVideos,
-                scope = scope,
-            )
-        },
-        onItemMoreClick = { index -> contextMenuIndex = index },
-        expandedMenuIndex = contextMenuIndex,
-        onMenuDismiss = { contextMenuIndex = null },
-        menuContent = { index, onDismiss ->
-            val item = state.items.getOrNull(index)
-            if (item != null) {
-                ContextActionMenu(
-                    item = item,
-                    onDismiss = onDismiss,
-                    onMove = { onDismiss(); viewModel.startMove(index) },
-                    onDelete = { onDismiss(); viewModel.deleteItem(index) },
-                    onRename = { renameIndex = index; onDismiss() },
-                    onDownload = { onDismiss(); viewModel.downloadFile(index) },
+            items = state.items, breadcrumbs = state.breadcrumbs,
+            isLoading = state.isLoading, isConfigured = state.isLoggedIn,
+            error = state.error, isLoadingMore = state.isLoadingMore, reLoginRequired = false,
+            navigationStack = navigationStack,
+            onItemClick = { item ->
+                if (item.isDirectory) {
+                    viewModel.navigateToDir(state.items.indexOf(item))
+                } else if (item.isImage) {
+                    imageViewerIndex = state.items.indexOf(item)
+                } else if (item.isAudio) {
+                    onCloudMediaClick(
+                        item = item,
+                        allItems = state.items,
+                        mediaFilter = { it.isAudio },
+                        resolveUrl = { viewModel.resolveVideoUri(item) },
+                        buildPlaylistUri = { CloudUriScheme.buildCloudUri("yun139", it.path, cloudFolderPath) },
+                        onPlayVideos = onPlayVideos,
+                        scope = scope,
+                    )
+                } else if (item.isVideo) {
+                    onCloudVideoClick(
+                        item = item,
+                        allItems = state.items,
+                        resolveUrl = { viewModel.resolveVideoUri(item) },
+                        buildPlaylistUri = { CloudUriScheme.buildCloudUri("yun139", it.path, cloudFolderPath) },
+                        onPlayVideos = onPlayVideos,
+                        scope = scope,
+                    )
+                }
+            },
+            onItemMoreClick = { index -> contextMenuIndex = index },
+            expandedMenuIndex = contextMenuIndex,
+            onMenuDismiss = { contextMenuIndex = null },
+            menuContent = { index, onDismiss ->
+                val item = state.items.getOrNull(index)
+                if (item != null) {
+                    ContextActionMenu(
+                        item = item,
+                        onDismiss = onDismiss,
+                        onMove = {
+                            onDismiss()
+                            viewModel.startMove(index)
+                        },
+                        onDelete = {
+                            onDismiss()
+                            viewModel.deleteItem(index)
+                        },
+                        onRename = {
+                            renameIndex = index
+                            onDismiss()
+                        },
+                        onDownload = {
+                            onDismiss()
+                            viewModel.downloadFile(index)
+                        },
+                    )
+                }
+            },
+            onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
+            onRefresh = { viewModel.refresh() },
+            onLoadMore = { viewModel.loadMore() },
+            onSortClick = { showSortMenu = true },
+            showSortMenu = showSortMenu,
+            onSortMenuDismiss = { showSortMenu = false },
+            sortMenuContent = {
+                SortDropdownMenuContent(
+                    currentKey = currentSortKey,
+                    onSelect = { option ->
+                        showSortMenu = false
+                        val field = when (option.key) {
+                            "name:asc", "name:desc" -> "name"
+                            "time:asc", "time:desc" -> "updated_at"
+                            "size:asc", "size:desc" -> "size"
+                            else -> "name"
+                        }
+                        val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
+                        viewModel.setSort(field, dir)
+                    },
+                    onDismiss = { showSortMenu = false },
                 )
-            }
-        },
-        onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
-        onRefresh = { viewModel.refresh() },
-        onLoadMore = { viewModel.loadMore() },
-        onSortClick = { showSortMenu = true },
-        showSortMenu = showSortMenu,
-        onSortMenuDismiss = { showSortMenu = false },
-        sortMenuContent = {
-            SortDropdownMenuContent(
-                currentKey = currentSortKey,
-                onSelect = { option ->
-                    showSortMenu = false
-                    val field = when (option.key) {
-                        "name:asc", "name:desc" -> "name"
-                        "time:asc", "time:desc" -> "updated_at"
-                        "size:asc", "size:desc" -> "size"
-                        else -> "name"
-                    }
-                    val dir = if (option.key.endsWith(":desc")) "DESC" else "ASC"
-                    viewModel.setSort(field, dir)
+            },
+            breadcrumbLabel = { it.label },
+            loginContent = {
+                Yun139LoginScreen(
+                    onLoginWithWeb = { auth, udId -> viewModel.loginWithWeb(auth, udId) },
+                )
+            },
+            onCreateFolder = { showCreateFolderDialog = true },
+            providerName = "移动云盘",
+            onSettingsClick = onSettingsClick,
+            onExitClick = { viewModel.logout() },
+            playedUriSet = state.playedUriStrings,
+            cloudProviderKey = "yun139",
+            notificationEvents = viewModel.messageEvents,
+        )
+
+        val renameItem = state.items.getOrNull(renameIndex)
+        if (renameItem != null) {
+            RenameDialog(
+                name = renameItem.name,
+                onDismiss = { renameIndex = -1 },
+                onDone = { newName ->
+                    viewModel.renameItem(renameIndex, newName)
+                    renameIndex = -1
                 },
-                onDismiss = { showSortMenu = false },
             )
-        },
-        breadcrumbLabel = { it.label },
-        loginContent = {
-            Yun139LoginScreen(
-                onLoginWithWeb = { auth, udId -> viewModel.loginWithWeb(auth, udId) }
+        }
+
+        if (showCreateFolderDialog) {
+            CreateFolderDialog(
+                onDismiss = { showCreateFolderDialog = false },
+                onCreate = { name ->
+                    viewModel.createDirectory(name)
+                    showCreateFolderDialog = false
+                },
             )
-        },
-        onCreateFolder = { showCreateFolderDialog = true },
-        providerName = "移动云盘",
-        onSettingsClick = onSettingsClick,
-        onExitClick = { viewModel.logout() },
-        playedUriSet = state.playedUriStrings,
-        cloudProviderKey = "yun139",
-        notificationEvents = viewModel.messageEvents,
-    )
+        }
 
-    val renameItem = state.items.getOrNull(renameIndex)
-    if (renameItem != null) {
-        RenameDialog(
-            name = renameItem.name,
-            onDismiss = { renameIndex = -1 },
-            onDone = { newName -> viewModel.renameItem(renameIndex, newName); renameIndex = -1 },
-        )
-    }
-
-    if (showCreateFolderDialog) {
-        CreateFolderDialog(
-            onDismiss = { showCreateFolderDialog = false },
-            onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
-        )
-    }
-
-    // 移动文件 —— 目标文件夹选择器
-    if (state.pendingAction == "move") {
-        FolderPickerDialog(
-            action = "move",
-            folders = state.pickerFolders,
-            isLoading = state.pickerIsLoading,
-            onDismiss = { viewModel.dismissPicker() },
-            onConfirm = { targetFolderId -> viewModel.moveTo(targetFolderId) },
-            onNavigateToFolder = { folderId -> viewModel.loadFoldersForPicker(folderId) },
-            onCreateFolder = { parentFolderId, name -> viewModel.createFolderInPicker(parentFolderId, name) },
-        )
-    }
-
+        // 移动文件 —— 目标文件夹选择器
+        if (state.pendingAction == "move") {
+            FolderPickerDialog(
+                action = "move",
+                folders = state.pickerFolders,
+                isLoading = state.pickerIsLoading,
+                onDismiss = { viewModel.dismissPicker() },
+                onConfirm = { targetFolderId -> viewModel.moveTo(targetFolderId) },
+                onNavigateToFolder = { folderId -> viewModel.loadFoldersForPicker(folderId) },
+                onCreateFolder = { parentFolderId, name -> viewModel.createFolderInPicker(parentFolderId, name) },
+            )
+        }
 
         // 下载进度
         downloadProgress?.let { dp ->
@@ -229,7 +249,6 @@ fun Yun139BrowserTabContent(
             )
         }
     }
-
 }
 
 /**
@@ -241,7 +260,7 @@ fun Yun139BrowserTabContent(
 @Composable
 fun Yun139LoginScreen(
     onLoginWithWeb: (String, String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     var statusText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
@@ -273,20 +292,20 @@ fun Yun139LoginScreen(
         // 顶部状态提示
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.primaryContainer
+            color = MaterialTheme.colorScheme.primaryContainer,
         ) {
             Row(
                 modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (isLoading && !loginTriggered) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    MediaLoadingIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
                     text = statusText.ifEmpty { "正在加载移动云盘登录页面..." },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
         }
@@ -328,7 +347,7 @@ fun Yun139LoginScreen(
                             // 拦截外部 scheme（mcloud://、intent:// 等），防止页面跳转客户端导致白屏
                             override fun shouldOverrideUrlLoading(
                                 view: WebView,
-                                request: WebResourceRequest
+                                request: WebResourceRequest,
                             ): Boolean {
                                 val url = request.url.toString()
                                 Log.d(TAG, "shouldOverrideUrlLoading: $url")
@@ -343,7 +362,7 @@ fun Yun139LoginScreen(
                             @Suppress("DEPRECATION")
                             override fun shouldOverrideUrlLoading(
                                 view: WebView,
-                                url: String
+                                url: String,
                             ): Boolean {
                                 Log.d(TAG, "shouldOverrideUrlLoading(deprecated): $url")
                                 if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -356,7 +375,7 @@ fun Yun139LoginScreen(
                             override fun onReceivedError(
                                 view: WebView,
                                 request: WebResourceRequest,
-                                error: android.webkit.WebResourceError
+                                error: android.webkit.WebResourceError,
                             ) {
                                 if (request.isForMainFrame) {
                                     Log.e(TAG, "onReceivedError: ${error.description} url=${request.url}")
@@ -369,7 +388,7 @@ fun Yun139LoginScreen(
                                 view: WebView,
                                 errorCode: Int,
                                 description: String,
-                                failingUrl: String
+                                failingUrl: String,
                             ) {
                                 Log.e(TAG, "onReceivedError(deprecated): $description")
                                 statusText = "页面加载失败: $description"
@@ -384,7 +403,7 @@ fun Yun139LoginScreen(
                     WebView(ctx)
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }

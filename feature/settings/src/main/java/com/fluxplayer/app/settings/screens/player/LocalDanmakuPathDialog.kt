@@ -12,12 +12,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.common.uriToFilePath
+import com.fluxplayer.app.core.ui.components.MediaAlertDialog as AlertDialog
+import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import java.io.File
 
@@ -44,7 +43,7 @@ fun LocalDanmakuPathDialog(
     val context = LocalContext.current
 
     val directoryPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
+        contract = ActivityResultContracts.OpenDocumentTree(),
     ) { uri: Uri? ->
         if (uri != null) {
             val resolvedPath = uriToFilePath(uri)
@@ -97,7 +96,7 @@ fun LocalDanmakuPathDialog(
                         TextButton(
                             onClick = {
                                 context.startActivity(
-                                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
                                 )
                             },
                         ) {
@@ -137,4 +136,3 @@ fun LocalDanmakuPathDialog(
  * 将 OpenDocumentTree 返回的 content URI 转换为文件系统路径。
  * 处理常见的 primary storage URI 格式。
  */
-

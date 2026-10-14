@@ -1,6 +1,7 @@
 package com.fluxplayer.app.core.data.repository
 
 import android.net.Uri
+import androidx.datastore.core.DataStore
 import com.fluxplayer.app.core.data.mappers.toFolder
 import com.fluxplayer.app.core.data.mappers.toVideo
 import com.fluxplayer.app.core.data.mappers.toVideoState
@@ -12,17 +13,28 @@ import com.fluxplayer.app.core.database.dao.MediumStateDao
 import com.fluxplayer.app.core.database.entities.MediumStateEntity
 import com.fluxplayer.app.core.database.relations.DirectoryWithMedia
 import com.fluxplayer.app.core.database.relations.MediumWithInfo
+import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.Folder
 import com.fluxplayer.app.core.model.Video
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 class LocalMediaRepository @Inject constructor(
     private val mediumDao: MediumDao,
     private val mediumStateDao: MediumStateDao,
     private val directoryDao: DirectoryDao,
+    private val preferences: DataStore<ApplicationPreferences>,
 ) : MediaRepository {
+
+    private suspend fun skipVideoState(uri: String): Boolean {
+        if (!preferences.data.first().videoIncognito) return false
+        val medium = mediumDao.getWithInfo(uri)
+        if (medium != null && medium.mediumEntity.width == 0 && medium.mediumEntity.height == 0 && medium.videoStreamInfo == null && medium.audioStreamsInfo.isNotEmpty()) return false
+        val extension = Uri.parse(uri).lastPathSegment?.substringAfterLast('.', "")?.lowercase(java.util.Locale.ROOT)
+        return extension !in setOf("mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "wma")
+    }
 
     override fun getVideosFlow(): Flow<List<Video>> {
         return mediumDao.getAllWithInfo().map { it.map(MediumWithInfo::toVideo) }
@@ -45,6 +57,7 @@ class LocalMediaRepository @Inject constructor(
     }
 
     override suspend fun updateMediumLastPlayedTime(uri: String, lastPlayedTime: Long) {
+        if (skipVideoState(uri)) return
         val stateEntity = mediumStateDao.get(uri) ?: MediumStateEntity(uriString = uri)
 
         mediumStateDao.upsert(
@@ -55,6 +68,7 @@ class LocalMediaRepository @Inject constructor(
     }
 
     override suspend fun updateMediumPosition(uri: String, position: Long) {
+        if (skipVideoState(uri)) return
         // 原子 upsert：避免读-改-写两次 DB 往返与并发丢更新（播放进度高频调用）
         mediumStateDao.upsertPosition(
             uri = uri,
@@ -64,6 +78,7 @@ class LocalMediaRepository @Inject constructor(
     }
 
     override suspend fun updateMediumPlaybackSpeed(uri: String, playbackSpeed: Float) {
+        if (skipVideoState(uri)) return
         val stateEntity = mediumStateDao.get(uri) ?: MediumStateEntity(uriString = uri)
 
         mediumStateDao.upsert(
@@ -75,6 +90,7 @@ class LocalMediaRepository @Inject constructor(
     }
 
     override suspend fun updateMediumAudioTrack(uri: String, audioTrackIndex: Int) {
+        if (skipVideoState(uri)) return
         val stateEntity = mediumStateDao.get(uri) ?: MediumStateEntity(uriString = uri)
 
         mediumStateDao.upsert(
@@ -86,6 +102,7 @@ class LocalMediaRepository @Inject constructor(
     }
 
     override suspend fun updateMediumSubtitleTrack(uri: String, subtitleTrackIndex: Int) {
+        if (skipVideoState(uri)) return
         val stateEntity = mediumStateDao.get(uri) ?: MediumStateEntity(uriString = uri)
 
         mediumStateDao.upsert(
@@ -97,6 +114,7 @@ class LocalMediaRepository @Inject constructor(
     }
 
     override suspend fun updateMediumZoom(uri: String, zoom: Float) {
+        if (skipVideoState(uri)) return
         val stateEntity = mediumStateDao.get(uri) ?: MediumStateEntity(uriString = uri)
 
         mediumStateDao.upsert(
@@ -108,6 +126,7 @@ class LocalMediaRepository @Inject constructor(
     }
 
     override suspend fun addExternalSubtitleToMedium(uri: String, subtitleUri: Uri) {
+        if (skipVideoState(uri)) return
         val stateEntity = mediumStateDao.get(uri) ?: MediumStateEntity(uriString = uri)
         val currentExternalSubs = UriListConverter.fromStringToList(stateEntity.externalSubs)
 
@@ -123,6 +142,7 @@ class LocalMediaRepository @Inject constructor(
     }
 
     override suspend fun updateSubtitleDelay(uri: String, delay: Long) {
+        if (skipVideoState(uri)) return
         val stateEntity = mediumStateDao.get(uri) ?: MediumStateEntity(uriString = uri)
 
         mediumStateDao.upsert(
@@ -134,6 +154,7 @@ class LocalMediaRepository @Inject constructor(
     }
 
     override suspend fun updateSubtitleSpeed(uri: String, speed: Float) {
+        if (skipVideoState(uri)) return
         val stateEntity = mediumStateDao.get(uri) ?: MediumStateEntity(uriString = uri)
 
         mediumStateDao.upsert(
@@ -145,6 +166,7 @@ class LocalMediaRepository @Inject constructor(
     }
 
     override suspend fun updateMediumIntroOutro(uri: String, introMs: Long, outroMs: Long) {
+        if (skipVideoState(uri)) return
         mediumStateDao.upsertIntroOutro(
             uri = uri,
             introMs = introMs,

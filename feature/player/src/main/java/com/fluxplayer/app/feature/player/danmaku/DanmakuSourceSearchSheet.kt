@@ -33,13 +33,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import com.fluxplayer.app.core.ui.components.FluxCircularProgressIndicator
-import com.fluxplayer.app.core.ui.components.FluxIconButton
-import com.fluxplayer.app.core.ui.components.FluxText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,10 +62,14 @@ import com.fluxplayer.app.core.model.DanmakuDownloadState
 import com.fluxplayer.app.core.model.DanmakuSource
 import com.fluxplayer.app.core.model.EpisodeInfo
 import com.fluxplayer.app.core.ui.R
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.fluxplayer.app.core.ui.components.FluxCircularProgressIndicator
+import com.fluxplayer.app.core.ui.components.FluxIconButton
+import com.fluxplayer.app.core.ui.components.FluxText
+import com.fluxplayer.app.core.ui.components.MediaLoadingRow
 import java.io.File
 import java.util.regex.Pattern
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 // ── 主题色（跟随当前 ColorScheme，弹幕弹窗显示在强制深色的视频页上） ──
 private val SurfaceColor: Color
@@ -378,10 +378,10 @@ fun DanmakuSearchSheet(
 
                     DanmakuSearchViewMode.LOCAL_FILE -> {
                         val parent = currentLocalDir.parentFile
-                        val canGoUp = parent != null
-                            && parent != currentLocalDir
-                            && currentLocalDir.absolutePath != browserRoot
-                            && (parent.absolutePath + "/").startsWith(browserRoot + "/")
+                        val canGoUp = parent != null &&
+                            parent != currentLocalDir &&
+                            currentLocalDir.absolutePath != browserRoot &&
+                            (parent.absolutePath + "/").startsWith(browserRoot + "/")
 
                         // 返回 + 标题
                         Row(
@@ -454,7 +454,7 @@ fun DanmakuSearchSheet(
                                     onClick = {
                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                                             context.startActivity(
-                                                Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                                                Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
                                             )
                                         }
                                     },
@@ -704,7 +704,7 @@ private fun DownloadingStep() {
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            LinearProgressIndicator(
+            MediaLoadingRow(
                 modifier = Modifier.fillMaxWidth(0.6f),
                 color = AccentColor,
                 trackColor = AccentDimColor,

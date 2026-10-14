@@ -32,6 +32,7 @@ kotlin {
 dependencies {
 
     implementation(project(":core:model"))
+    implementation(project(":core:tingshu"))
 
     implementation(libs.coil.compose)
     implementation(libs.androidx.core.ktx)
@@ -48,6 +49,9 @@ dependencies {
     implementation(libs.androidx.compose.material.iconsExtended)
 
     implementation(libs.haze)
+    implementation(libs.materialkolor)
+    implementation(libs.backdrop)
+    implementation(libs.capsule)
 
     implementation(libs.androidx.hilt.navigation.compose)
 

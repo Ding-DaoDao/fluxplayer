@@ -2,13 +2,7 @@ package com.fluxplayer.app.feature.videopicker.pan123
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
-
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -17,22 +11,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.onCloudMediaClick
 import com.fluxplayer.app.core.common.onCloudVideoClick
-import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.components.DoneButton
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.feature.videopicker.composables.CloudBrowserPanel as SharedCloudBrowserPanel
 import com.fluxplayer.app.feature.videopicker.composables.ContextActionMenu
@@ -43,7 +33,6 @@ import com.fluxplayer.app.feature.videopicker.composables.ImageViewerScreen
 import com.fluxplayer.app.feature.videopicker.composables.RenameDialog
 import com.fluxplayer.app.feature.videopicker.composables.SharedShareBrowseDialog
 import com.fluxplayer.app.feature.videopicker.composables.SharedShareTargetPickerDialog
-import com.fluxplayer.app.feature.videopicker.composables.SortOption
 import com.fluxplayer.app.feature.videopicker.composables.SortDropdownMenuContent
 import com.fluxplayer.app.feature.videopicker.composables.formatFileSize
 
@@ -59,7 +48,7 @@ fun Pan123BrowserTabContent(
     navigateToDirParam: Pair<String, String>? = null,
     onNavigateToDirConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: Pan123BrowserViewModel = hiltViewModel()
+    viewModel: Pan123BrowserViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(Unit) { onLogoutReady { viewModel.logout() } }
 
@@ -111,193 +100,224 @@ fun Pan123BrowserTabContent(
     Box(modifier = modifier.fillMaxSize()) {
         SharedCloudBrowserPanel(
             modifier = Modifier.fillMaxSize(),
-        items = state.items, breadcrumbs = state.breadcrumbs,
-        isLoading = state.isLoading, isConfigured = state.isLoggedIn,
-        error = state.error, isLoadingMore = state.isLoadingMore, reLoginRequired = false,
-        navigationStack = navigationStack,
-        onItemClick = { item ->
-            if (item.isDirectory) viewModel.navigateToDir(state.items.indexOf(item))
-            else if (item.isImage) imageViewerIndex = state.items.indexOf(item)
-            else if (item.isAudio) onCloudMediaClick(
-                item = item,
-                allItems = state.items,
-                mediaFilter = { it.isAudio },
-                resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("pan123", it.path, cloudFolderPath) },
-                onPlayVideos = onPlayVideos,
-                scope = scope,
-            )
-            else if (item.isVideo) onCloudVideoClick(
-                item = item,
-                allItems = state.items,
-                resolveUrl = { viewModel.resolveVideoUri(item) },
-                buildPlaylistUri = { CloudUriScheme.buildCloudUri("pan123", it.path, cloudFolderPath) },
-                onPlayVideos = onPlayVideos,
-                scope = scope,
-            )
-        },
-        onItemMoreClick = { index -> contextMenuIndex = index },
-        expandedMenuIndex = contextMenuIndex,
-        onMenuDismiss = { contextMenuIndex = null },
-        menuContent = { index, onDismiss ->
-            val item = state.items.getOrNull(index)
-            if (item != null) {
-                ContextActionMenu(
-                    item = item,
-                    onDismiss = onDismiss,
-                    onMove = { onDismiss(); viewModel.startMove(index) },
-                    onDelete = { onDismiss(); viewModel.deleteItem(index) },
-                    onRename = { renameIndex = index; onDismiss() },
-                    onDownload = { onDismiss(); viewModel.downloadFile(index) },
+            items = state.items, breadcrumbs = state.breadcrumbs,
+            isLoading = state.isLoading, isConfigured = state.isLoggedIn,
+            error = state.error, isLoadingMore = state.isLoadingMore, reLoginRequired = false,
+            navigationStack = navigationStack,
+            onItemClick = { item ->
+                if (item.isDirectory) {
+                    viewModel.navigateToDir(state.items.indexOf(item))
+                } else if (item.isImage) {
+                    imageViewerIndex = state.items.indexOf(item)
+                } else if (item.isAudio) {
+                    onCloudMediaClick(
+                        item = item,
+                        allItems = state.items,
+                        mediaFilter = { it.isAudio },
+                        resolveUrl = { viewModel.resolveVideoUri(item) },
+                        buildPlaylistUri = { CloudUriScheme.buildCloudUri("pan123", it.path, cloudFolderPath) },
+                        onPlayVideos = onPlayVideos,
+                        scope = scope,
+                    )
+                } else if (item.isVideo) {
+                    onCloudVideoClick(
+                        item = item,
+                        allItems = state.items,
+                        resolveUrl = { viewModel.resolveVideoUri(item) },
+                        buildPlaylistUri = { CloudUriScheme.buildCloudUri("pan123", it.path, cloudFolderPath) },
+                        onPlayVideos = onPlayVideos,
+                        scope = scope,
+                    )
+                }
+            },
+            onItemMoreClick = { index -> contextMenuIndex = index },
+            expandedMenuIndex = contextMenuIndex,
+            onMenuDismiss = { contextMenuIndex = null },
+            menuContent = { index, onDismiss ->
+                val item = state.items.getOrNull(index)
+                if (item != null) {
+                    ContextActionMenu(
+                        item = item,
+                        onDismiss = onDismiss,
+                        onMove = {
+                            onDismiss()
+                            viewModel.startMove(index)
+                        },
+                        onDelete = {
+                            onDismiss()
+                            viewModel.deleteItem(index)
+                        },
+                        onRename = {
+                            renameIndex = index
+                            onDismiss()
+                        },
+                        onDownload = {
+                            onDismiss()
+                            viewModel.downloadFile(index)
+                        },
+                    )
+                }
+            },
+            onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
+            onRefresh = { viewModel.refresh() },
+            onLoadMore = { viewModel.loadMore() },
+            onSortClick = { showSortMenu = true },
+            showSortMenu = showSortMenu,
+            onSortMenuDismiss = { showSortMenu = false },
+            sortMenuContent = {
+                SortDropdownMenuContent(
+                    currentKey = currentSortKey,
+                    onSelect = { option ->
+                        showSortMenu = false
+                        val field = when (option.key) {
+                            "name:asc", "name:desc" -> "file_name"
+                            "time:asc", "time:desc" -> "update_time"
+                            "size:asc", "size:desc" -> "size"
+                            else -> "file_name"
+                        }
+                        val dir = if (option.key.endsWith(":desc")) "desc" else "asc"
+                        viewModel.setSort(field, dir)
+                    },
+                    onDismiss = { showSortMenu = false },
                 )
-            }
-        },
-        onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) },
-        onRefresh = { viewModel.refresh() },
-        onLoadMore = { viewModel.loadMore() },
-        onSortClick = { showSortMenu = true },
-        showSortMenu = showSortMenu,
-        onSortMenuDismiss = { showSortMenu = false },
-        sortMenuContent = {
-            SortDropdownMenuContent(
-                currentKey = currentSortKey,
-                onSelect = { option ->
-                    showSortMenu = false
-                    val field = when (option.key) {
-                        "name:asc", "name:desc" -> "file_name"
-                        "time:asc", "time:desc" -> "update_time"
-                        "size:asc", "size:desc" -> "size"
-                        else -> "file_name"
+            },
+            breadcrumbLabel = { it.label },
+            loginContent = {
+                if (state.initializing) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        MediaLoadingIndicator()
                     }
-                    val dir = if (option.key.endsWith(":desc")) "desc" else "asc"
-                    viewModel.setSort(field, dir)
-                },
-                onDismiss = { showSortMenu = false },
-            )
-        },
-        breadcrumbLabel = { it.label },
-        loginContent = {
-            if (state.initializing) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                } else {
+                    LoginScreen(
+                        isLoading = state.isLoading,
+                        error = state.error,
+                        onLogin = { passport, password -> viewModel.login(passport, password) },
+                        onLoginWithToken = { token -> viewModel.loginWithToken(token) },
+                    )
                 }
-            } else {
-                LoginScreen(
-                    isLoading = state.isLoading,
-                    error = state.error,
-                    onLogin = { passport, password -> viewModel.login(passport, password) },
-                    onLoginWithToken = { token -> viewModel.loginWithToken(token) }
+            },
+            onCreateFolder = { showCreateFolderDialog = true },
+            providerName = "123云盘",
+            onSettingsClick = onSettingsClick,
+            onExitClick = { viewModel.logout() },
+            playedUriSet = state.playedUriStrings,
+            cloudProviderKey = "pan123",
+            notificationEvents = viewModel.messageEvents,
+            providerMenuItems = { onDismiss ->
+                DropdownMenuItem(
+                    text = { Text("盘内搜索") },
+                    onClick = {
+                        onDismiss()
+                        viewModel.enterSearch()
+                    },
                 )
-            }
-        },
-        onCreateFolder = { showCreateFolderDialog = true },
-        providerName = "123云盘",
-        onSettingsClick = onSettingsClick,
-        onExitClick = { viewModel.logout() },
-        playedUriSet = state.playedUriStrings,
-        cloudProviderKey = "pan123",
-        notificationEvents = viewModel.messageEvents,
-        providerMenuItems = { onDismiss ->
-            DropdownMenuItem(
-                text = { Text("盘内搜索") },
-                onClick = { onDismiss(); viewModel.enterSearch() },
-            )
-            DropdownMenuItem(
-                text = { Text("分享链接转存") },
-                onClick = { onDismiss(); viewModel.showShareInput() },
-            )
-            DropdownMenuItem(
-                text = { Text("账号信息") },
-                onClick = { onDismiss(); viewModel.loadUserInfo() },
-            )
-        },
-    )
+                DropdownMenuItem(
+                    text = { Text("分享链接转存") },
+                    onClick = {
+                        onDismiss()
+                        viewModel.showShareInput()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("账号信息") },
+                    onClick = {
+                        onDismiss()
+                        viewModel.loadUserInfo()
+                    },
+                )
+            },
+        )
 
-    // 搜索栏
-    if (state.isSearching) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            shape = MaterialTheme.shapes.medium,
-            shadowElevation = 4.dp,
-            color = MaterialTheme.colorScheme.surfaceVariant,
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 4.dp),
+        // 搜索栏
+        if (state.isSearching) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                shape = MaterialTheme.shapes.medium,
+                shadowElevation = 4.dp,
+                color = MaterialTheme.colorScheme.surfaceVariant,
             ) {
-                TextField(
-                    value = state.searchQuery,
-                    onValueChange = { viewModel.updateSearchQuery(it) },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("搜索文件...") },
-                    singleLine = true,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                        unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                        focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                        unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    ),
-                    keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                        onSearch = { viewModel.submitSearch(state.searchQuery) }
-                    ),
-                )
-                IconButton(onClick = { viewModel.submitSearch(state.searchQuery) }) {
-                    Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Default.Search,
-                        contentDescription = "搜索",
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                ) {
+                    TextField(
+                        value = state.searchQuery,
+                        onValueChange = { viewModel.updateSearchQuery(it) },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("搜索文件...") },
+                        singleLine = true,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onSearch = { viewModel.submitSearch(state.searchQuery) },
+                        ),
                     )
-                }
-                IconButton(onClick = { viewModel.exitSearch() }) {
-                    Icon(
-                        imageVector = androidx.compose.material.icons.Icons.Default.Close,
-                        contentDescription = "关闭搜索",
-                    )
+                    IconButton(onClick = { viewModel.submitSearch(state.searchQuery) }) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.Search,
+                            contentDescription = "搜索",
+                        )
+                    }
+                    IconButton(onClick = { viewModel.exitSearch() }) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.Close,
+                            contentDescription = "关闭搜索",
+                        )
+                    }
                 }
             }
         }
-    }
 
-    // 账号信息弹窗
-    if (state.showAccountDialog) {
-        AccountInfoDialog(
-            userInfo = state.userInfo,
-            onDismiss = { viewModel.dismissAccountDialog() }
-        )
-    }
+        // 账号信息弹窗
+        if (state.showAccountDialog) {
+            AccountInfoDialog(
+                userInfo = state.userInfo,
+                onDismiss = { viewModel.dismissAccountDialog() },
+            )
+        }
 
-    val renameItem = state.items.getOrNull(renameIndex)
-    if (renameItem != null) {
-        RenameDialog(
-            name = renameItem.name,
-            onDismiss = { renameIndex = -1 },
-            onDone = { newName -> viewModel.renameItem(renameIndex, newName); renameIndex = -1 },
-        )
-    }
+        val renameItem = state.items.getOrNull(renameIndex)
+        if (renameItem != null) {
+            RenameDialog(
+                name = renameItem.name,
+                onDismiss = { renameIndex = -1 },
+                onDone = { newName ->
+                    viewModel.renameItem(renameIndex, newName)
+                    renameIndex = -1
+                },
+            )
+        }
 
-    if (showCreateFolderDialog) {
-        CreateFolderDialog(
-            onDismiss = { showCreateFolderDialog = false },
-            onCreate = { name -> viewModel.createDirectory(name); showCreateFolderDialog = false },
-        )
-    }
+        if (showCreateFolderDialog) {
+            CreateFolderDialog(
+                onDismiss = { showCreateFolderDialog = false },
+                onCreate = { name ->
+                    viewModel.createDirectory(name)
+                    showCreateFolderDialog = false
+                },
+            )
+        }
 
-    // 移动文件 —— 目标文件夹选择器
-    if (state.pendingAction == "move") {
-        FolderPickerDialog(
-            action = "move",
-            folders = state.pickerFolders,
-            isLoading = state.pickerIsLoading,
-            onDismiss = { viewModel.dismissPicker() },
-            onConfirm = { targetFolderId -> viewModel.moveTo(targetFolderId) },
-            onNavigateToFolder = { folderId -> viewModel.loadFoldersForPicker(folderId) },
-            onCreateFolder = { parentFolderId, name -> viewModel.createFolderInPicker(parentFolderId, name) },
-        )
-    }
-
+        // 移动文件 —— 目标文件夹选择器
+        if (state.pendingAction == "move") {
+            FolderPickerDialog(
+                action = "move",
+                folders = state.pickerFolders,
+                isLoading = state.pickerIsLoading,
+                onDismiss = { viewModel.dismissPicker() },
+                onConfirm = { targetFolderId -> viewModel.moveTo(targetFolderId) },
+                onNavigateToFolder = { folderId -> viewModel.loadFoldersForPicker(folderId) },
+                onCreateFolder = { parentFolderId, name -> viewModel.createFolderInPicker(parentFolderId, name) },
+            )
+        }
 
         // 下载进度
         downloadProgress?.let { dp ->
@@ -355,8 +375,11 @@ fun Pan123BrowserTabContent(
         // === 分享浏览弹窗 ===
         if (state.showShareBrowse) {
             val backOrUp: () -> Unit = {
-                if (state.shareBreadcrumbs.size > 1) viewModel.navigateShareUp()
-                else viewModel.exitShareBrowse()
+                if (state.shareBreadcrumbs.size > 1) {
+                    viewModel.navigateShareUp()
+                } else {
+                    viewModel.exitShareBrowse()
+                }
             }
             SharedShareBrowseDialog(
                 title = "分享浏览",
@@ -392,7 +415,6 @@ fun Pan123BrowserTabContent(
             )
         }
     }
-
 }
 
 /**
@@ -404,7 +426,7 @@ fun LoginScreen(
     error: String?,
     onLogin: (String, String) -> Unit,
     onLoginWithToken: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -413,7 +435,7 @@ fun LoginScreen(
 
     Box(
         modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.Center,
     ) {
         Surface(
             modifier = Modifier
@@ -421,18 +443,18 @@ fun LoginScreen(
                 .padding(24.dp),
             shape = MaterialTheme.shapes.large,
             tonalElevation = 2.dp,
-            shadowElevation = 0.dp
+            shadowElevation = 0.dp,
         ) {
             Column(
                 modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text("123云盘", style = MaterialTheme.typography.headlineSmall)
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "请登录您的123云盘账号",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(20.dp))
 
@@ -444,7 +466,7 @@ fun LoginScreen(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Bearer Token") },
                         singleLine = true,
-                        enabled = !isLoading
+                        enabled = !isLoading,
                     )
                 } else {
                     // 账号密码登录模式
@@ -455,7 +477,7 @@ fun LoginScreen(
                         label = { Text("手机号") },
                         singleLine = true,
                         enabled = !isLoading,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     )
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
@@ -466,28 +488,34 @@ fun LoginScreen(
                         singleLine = true,
                         enabled = !isLoading,
                         visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     )
                 }
 
                 Spacer(Modifier.height(20.dp))
 
                 if (isLoading) {
-                    CircularProgressIndicator(
+                    MediaLoadingIndicator(
                         modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp
+                        strokeWidth = 2.dp,
                     )
                 } else {
-                    val loginEnabled = if (useToken) token.isNotBlank()
-                    else phone.isNotBlank() && password.isNotBlank()
+                    val loginEnabled = if (useToken) {
+                        token.isNotBlank()
+                    } else {
+                        phone.isNotBlank() && password.isNotBlank()
+                    }
 
                     Button(
                         onClick = {
-                            if (useToken) onLoginWithToken(token)
-                            else onLogin(phone, password)
+                            if (useToken) {
+                                onLoginWithToken(token)
+                            } else {
+                                onLogin(phone, password)
+                            }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = loginEnabled
+                        enabled = loginEnabled,
                     ) {
                         Text("登录")
                     }
@@ -498,7 +526,7 @@ fun LoginScreen(
                 TextButton(onClick = { useToken = !useToken }) {
                     Text(
                         if (useToken) "账号密码登录" else "使用Token登录",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
 
@@ -508,7 +536,7 @@ fun LoginScreen(
                         error,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
                     )
                 }
             }
@@ -532,7 +560,7 @@ private fun AccountInfoDialog(
                         .height(80.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(32.dp), strokeWidth = 2.dp)
+                    MediaLoadingIndicator(modifier = Modifier.size(32.dp), strokeWidth = 2.dp)
                 }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -605,4 +633,3 @@ private fun AccountInfoDialog(
         },
     )
 }
-

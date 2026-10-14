@@ -30,7 +30,7 @@ internal fun SourceBookTile(book: Book, cover: Any?, modifier: Modifier = Modifi
     Card(
         onClick = onClick,
         modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = FluxTheme.colorScheme.surfaceContainer),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

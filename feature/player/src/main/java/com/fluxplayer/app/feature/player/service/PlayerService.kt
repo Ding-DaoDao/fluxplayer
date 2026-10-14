@@ -83,9 +83,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 @OptIn(UnstableApi::class)
@@ -133,8 +136,9 @@ class PlayerService : MediaSessionService() {
     /** 媒体项元数据增强助手 */
     private lateinit var mediaItemEnricher: MediaItemEnricher
 
+    private var loadedPlayerPreferences = PlayerPreferences()
     private val playerPreferences: PlayerPreferences
-        get() = preferencesRepository.playerPreferences.value
+        get() = loadedPlayerPreferences
 
     private val customCommands = CustomCommands.asSessionCommands()
 
@@ -793,6 +797,8 @@ class PlayerService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        // 服务必须同步创建会话，先在 IO 线程读取磁盘参数，避免默认值覆盖缓冲设置。
+        loadedPlayerPreferences = runBlocking(Dispatchers.IO) { preferencesRepository.persistedPlayerPreferences.first() }
 
         persistence = PlaybackPersistence(applicationContext, mediaRepository, playbackHistoryRepository, saveScope)
         mediaItemEnricher = MediaItemEnricher(
@@ -808,14 +814,16 @@ class PlayerService : MediaSessionService() {
             setParameters(
                 buildUponParameters()
                     .setPreferredAudioLanguage(playerPreferences.preferredAudioLanguage)
-                    .setPreferredTextLanguage(playerPreferences.preferredSubtitleLanguage),
+                    .setPreferredTextLanguage(playerPreferences.preferredSubtitleLanguage)
+                    .setTunnelingEnabled(playerPreferences.tunneledPlayback)
+                    .setPreferredAudioMimeTypes(*if (playerPreferences.preferAacAudio) arrayOf(androidx.media3.common.MimeTypes.AUDIO_AAC) else emptyArray()),
             )
         }
 
         loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
-                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                playerPreferences.bufferDurationSeconds.coerceIn(10, 120) * 1000,
+                playerPreferences.bufferDurationSeconds.coerceIn(10, 120) * 1000,
                 2500,
                 5000,
             )
@@ -844,6 +852,21 @@ class PlayerService : MediaSessionService() {
                 (mediaSession?.player as? ExoPlayer)?.pauseAtEndOfMediaItems =
                     if (isAudioSession) timer.remainingEpisodes == 1 else !playerPreferences.autoplay
             }
+        }
+
+        // 音轨偏好与隧道参数实时交给现有轨道选择器。
+        serviceScope.launch {
+            preferencesRepository.persistedPlayerPreferences
+                .onEach { loadedPlayerPreferences = it }
+                .map { it.tunneledPlayback to it.preferAacAudio }
+                .distinctUntilChanged()
+                .collect { (tunneling, aac) ->
+                    trackSelector.setParameters(
+                        trackSelector.buildUponParameters()
+                            .setTunnelingEnabled(tunneling)
+                            .setPreferredAudioMimeTypes(*if (aac) arrayOf(androidx.media3.common.MimeTypes.AUDIO_AAC) else emptyArray()),
+                    )
+                }
         }
 
         // 监听缓存开关变化，实时更新 MediaSourceFactory

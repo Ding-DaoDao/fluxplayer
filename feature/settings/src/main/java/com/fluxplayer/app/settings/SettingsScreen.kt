@@ -1,66 +1,94 @@
 package com.fluxplayer.app.settings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.fluxplayer.app.core.ui.R
-import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
-import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SettingsScreen(
     onNavigateUp: () -> Unit,
     onItemClick: (Setting) -> Unit,
 ) {
+    val context = LocalContext.current
+    val version = remember(context) { context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty() }
     FluxSettingsScaffold(
-        title = stringResource(id = R.string.settings),
+        title = stringResource(R.string.settings),
         onNavigateUp = onNavigateUp,
     ) { innerPadding ->
-        val settingGroups = remember {
+        val groups = remember {
             listOf(
                 R.string.settings_group_interface to listOf(SettingRow.APPEARANCE, SettingRow.MEDIA_LIBRARY),
-                R.string.settings_group_playback to listOf(SettingRow.PLAYER, SettingRow.GESTURES, SettingRow.AUDIO, SettingRow.SUBTITLE),
+                R.string.settings_group_playback to listOf(SettingRow.PLAYER, SettingRow.GESTURES, SettingRow.AUDIO, SettingRow.SUBTITLE, SettingRow.DECODER),
                 R.string.settings_group_content to listOf(SettingRow.AUDIOBOOK, SettingRow.WEBDAV, SettingRow.OPENLIST),
-                R.string.settings_group_data to listOf(SettingRow.GENERAL, SettingRow.DECODER, SettingRow.ABOUT),
+                R.string.settings_group_data to listOf(SettingRow.GENERAL, SettingRow.ABOUT),
             )
         }
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(state = rememberScrollState())
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
+            Modifier.fillMaxSize().padding(innerPadding).verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp).padding(top = 12.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
-            settingGroups.forEach { (titleResId, rows) ->
-                ListSectionTitle(text = stringResource(titleResId))
-                Column {
-                    rows.forEachIndexed { index, row ->
-                        ClickablePreferenceItem(
-                            title = stringResource(id = row.titleResId),
-                            description = stringResource(id = row.descriptionResId),
-                            icon = row.icon,
-                            onClick = { onItemClick(row.setting) },
-                            isFirstItem = index == 0,
-                            isLastItem = index == rows.lastIndex,
-                        )
-                        if (index < rows.lastIndex) HorizontalDivider()
+            com.fluxplayer.app.core.ui.avbox.AppInfoHeaderCard(version)
+            groups.forEach { (label, rows) ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(label), Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        rows.forEachIndexed { index, row ->
+                            SettingsDestination(row, index == 0, index == rows.lastIndex) { onItemClick(row.setting) }
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+/** 设置首页使用独立的目的地卡片，图标、标题、说明和箭头各自占据固定区域。 */
+@Composable
+private fun SettingsDestination(row: SettingRow, first: Boolean, last: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.surfaceBright,
+        shape = RoundedCornerShape(
+            topStart = if (first) 32.dp else 4.dp,
+            topEnd = if (first) 32.dp else 4.dp,
+            bottomStart = if (last) 32.dp else 4.dp,
+            bottomEnd = if (last) 32.dp else 4.dp,
+        ),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            com.fluxplayer.app.core.ui.components.MediaIconBadge(row.icon)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                Text(stringResource(row.titleResId), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(row.descriptionResId), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("›", fontSize = 28.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

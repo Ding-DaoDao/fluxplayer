@@ -104,12 +104,12 @@ class BackupArchiveTest {
     // ==================== 归档加密（凭证不再以裸 ZIP 落盘） ====================
 
     @Test
-    fun plainArchiveExposesCredentialsSoEncryptionMatters() {
+    fun plainArchiveIncludesCredentials() {
         val secret = "S3cret-123pan-Password"
         val archive = BackupArchive(
             data.copy(pan123Config = Pan123BackupConfig(passport = "13800000000", password = secret, token = "tok")),
         )
-        // 旧行为：裸 ZIP 用任何标准 zip 工具解开就能读到明文账号密码（这正是要堵的窟窿）
+        // 普通 ZIP 包含账号配置，保持导出数据完整。
         val visible = ZipInputStream(ByteArrayInputStream(BackupArchiveCodec.encode(archive))).use { zip ->
             assertEquals("backup.json", zip.nextEntry.name)
             zip.readBytes().toString(Charsets.UTF_8)
@@ -118,51 +118,8 @@ class BackupArchiveTest {
     }
 
     @Test
-    fun encryptedRoundTripRestoresWithCorrectPassphrase() {
-        val binary = byteArrayOf(9, 8, 7)
-        val archive = BackupArchive(data, mapOf("data.db" to binary))
-        val encoded = BackupArchiveCodec.encodeEncrypted(archive, "correct horse".toCharArray())
-        assertTrue(BackupCrypto.isEncrypted(encoded))
-        val restored = BackupArchiveCodec.decode(ByteArrayInputStream(encoded), "correct horse".toCharArray())
-        assertEquals(data, restored.data)
-        assertArrayEquals(binary, restored.openListFiles.getValue("data.db"))
-    }
-
-    @Test
-    fun encryptedArchiveCannotBeOpenedAsPlainZip() {
-        val encoded = BackupArchiveCodec.encodeEncrypted(BackupArchive(data), "pw".toCharArray())
-        assertTrue(BackupCrypto.isEncrypted(encoded))
-        val names = ZipInputStream(ByteArrayInputStream(encoded)).use { zip ->
-            generateSequence { zip.nextEntry }.map { it.name }.toList()
-        }
-        assertTrue("加密归档不应能被当作 ZIP 解开", names.isEmpty())
-    }
-
-    @Test
-    fun encryptedArchiveRefusesToDecodeWithoutPassphrase() {
-        val encoded = BackupArchiveCodec.encodeEncrypted(BackupArchive(data), "pw".toCharArray())
-        val error = runCatching { BackupArchiveCodec.decode(ByteArrayInputStream(encoded)) }.exceptionOrNull()
-        assertTrue(error is BackupPassphraseRequiredException)
-    }
-
-    @Test
-    fun encryptedArchiveRejectsWrongPassphrase() {
-        val encoded = BackupArchiveCodec.encodeEncrypted(BackupArchive(data), "right".toCharArray())
-        val error = runCatching { BackupArchiveCodec.decode(ByteArrayInputStream(encoded), "wrong".toCharArray()) }.exceptionOrNull()
-        assertTrue(error is BackupDecryptException)
-    }
-
-    @Test
-    fun tamperedCiphertextIsRejectedByGcmTag() {
-        val encoded = BackupArchiveCodec.encodeEncrypted(BackupArchive(data), "pw".toCharArray())
-        encoded[encoded.lastIndex] = (encoded[encoded.lastIndex] + 1).toByte()
-        val error = runCatching { BackupArchiveCodec.decode(ByteArrayInputStream(encoded), "pw".toCharArray()) }.exceptionOrNull()
-        assertTrue(error is BackupDecryptException)
-    }
-
-    @Test
-    fun legacyPlainZipAndJsonStillRestoreWithoutPassphrase() {
-        // 老版本导出的裸 ZIP / 裸 JSON 必须还能直接恢复，不能因为启用加密而读不了
+    fun plainZipAndJsonCanBeRestored() {
+        // 支持普通 ZIP 与 JSON 两种非加密格式。
         val zipBytes = BackupArchiveCodec.encode(BackupArchive(data))
         assertEquals(data, BackupArchiveCodec.decode(ByteArrayInputStream(zipBytes)).data)
         val jsonBytes = Json.encodeToString(BackupData.serializer(), data).toByteArray()

@@ -6,6 +6,9 @@
 # Debug APK (arm64-v8a only — ABI splits exclude x86/armeabi by default)
 ./gradlew assembleDebug
 
+# UI 共存测试版（独立包名 com.fluxplayer.app.uipreview）
+./gradlew :app:assembleUiPreview
+
 # Release with debug signing (useful for testing release builds locally)
 ./gradlew assembleRelease-with-debug-signing
 

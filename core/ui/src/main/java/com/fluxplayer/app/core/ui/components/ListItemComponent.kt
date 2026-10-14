@@ -4,6 +4,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.ListItemDefaults
@@ -17,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.fluxplayer.app.core.ui.theme.LocalMediaShell
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -27,7 +29,10 @@ fun NextSegmentedListItem(
     isFirstItem: Boolean = false,
     isLastItem: Boolean = false,
     contentPadding: PaddingValues = PaddingValues(16.dp),
-    colors: ListItemColors = ListItemDefaults.segmentedColors(),
+    colors: ListItemColors = ListItemDefaults.segmentedColors(
+        containerColor = if (LocalMediaShell.current) MaterialTheme.colorScheme.surfaceBright else MaterialTheme.colorScheme.surfaceContainerLow,
+        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+    ),
     shapes: ListItemShapes = ListItemDefaults.shapes(),
     leadingContent: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null,
@@ -39,6 +44,7 @@ fun NextSegmentedListItem(
     interactionSource: MutableInteractionSource? = null,
 ) {
     val overrideShape = MaterialTheme.shapes.large
+    val mediaShell = LocalMediaShell.current
     SegmentedListItem(
         modifier = modifier,
         selected = selected,
@@ -46,9 +52,18 @@ fun NextSegmentedListItem(
         onLongClick = onLongClick,
         enabled = enabled,
         verticalAlignment = Alignment.CenterVertically,
-        shapes = remember(isFirstItem, isLastItem, shapes) {
+        shapes = remember(isFirstItem, isLastItem, shapes, overrideShape, mediaShell) {
             val defaultBaseShape = shapes.shape
-            if (defaultBaseShape is CornerBasedShape) {
+            if (mediaShell) {
+                shapes.copy(
+                    shape = RoundedCornerShape(
+                        topStart = if (isFirstItem) 32.dp else 4.dp,
+                        topEnd = if (isFirstItem) 32.dp else 4.dp,
+                        bottomStart = if (isLastItem) 32.dp else 4.dp,
+                        bottomEnd = if (isLastItem) 32.dp else 4.dp,
+                    ),
+                )
+            } else if (defaultBaseShape is CornerBasedShape) {
                 shapes.copy(
                     shape = defaultBaseShape.copy(
                         topStart = overrideShape.topStart.takeIf { isFirstItem } ?: defaultBaseShape.topStart,
@@ -77,16 +92,16 @@ fun ListSectionTitle(
     modifier: Modifier = Modifier,
     text: String,
     contentPadding: PaddingValues = PaddingValues(
-        start = 12.dp,
-        top = 20.dp,
-        bottom = 10.dp,
+        start = 16.dp,
+        top = 28.dp,
+        bottom = 8.dp,
     ),
-    color: Color = MaterialTheme.colorScheme.primary,
+    color: Color = if (LocalMediaShell.current) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
 ) {
     Text(
         text = text,
         modifier = modifier.padding(contentPadding),
         color = color,
-        style = MaterialTheme.typography.labelLarge,
+        style = if (LocalMediaShell.current) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
     )
 }

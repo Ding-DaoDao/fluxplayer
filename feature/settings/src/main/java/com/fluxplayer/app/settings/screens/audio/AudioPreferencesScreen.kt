@@ -1,6 +1,5 @@
 package com.fluxplayer.app.settings.screens.audio
 
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -20,8 +19,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
-import com.fluxplayer.app.core.ui.components.ListSectionTitle
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
+import com.fluxplayer.app.core.ui.components.ListSectionTitle
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
 import com.fluxplayer.app.core.ui.components.PreferenceSwitch
 import com.fluxplayer.app.core.ui.components.RadioTextButton
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
@@ -105,7 +105,7 @@ private fun AudioPreferencesContent(
                     icon = NextIcons.VolumeUp,
                     isChecked = uiState.preferences.enableVolumeBoost,
                     onClick = { onEvent(AudioPreferencesUiEvent.ToggleVolumeBoost) },
-                    isLastItem = true
+                    isLastItem = true,
                 )
             }
         }

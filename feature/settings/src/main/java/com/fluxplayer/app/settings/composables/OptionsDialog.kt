@@ -4,12 +4,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.ui.components.CancelButton
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
 import com.fluxplayer.app.core.ui.components.NextDialog
 
 @Composable

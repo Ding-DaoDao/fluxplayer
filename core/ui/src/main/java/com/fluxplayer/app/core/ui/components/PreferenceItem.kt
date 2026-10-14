@@ -11,7 +11,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
@@ -39,20 +38,24 @@ fun PreferenceItem(
         isLastItem = isLastItem,
         leadingContent = icon?.let {
             {
-                FluxIcon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                )
+                if (com.fluxplayer.app.core.ui.theme.LocalMediaShell.current) {
+                    MediaIconBadge(icon, enabled)
+                } else {
+                    FluxIcon(icon, null, Modifier.size(24.dp))
+                }
             }
         },
         supportingContent = description?.let {
             {
-                FluxText(text = description)
+                FluxText(
+                    text = description,
+                    style = if (com.fluxplayer.app.core.ui.theme.LocalMediaShell.current) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.applyAlpha(enabled),
+                )
             }
         },
         content = {
-            FluxText(text = title)
+            FluxText(text = title, style = MaterialTheme.typography.titleMedium)
         },
         trailingContent = trailingContent,
     )

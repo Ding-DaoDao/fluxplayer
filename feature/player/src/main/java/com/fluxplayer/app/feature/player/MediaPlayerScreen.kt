@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
@@ -30,8 +31,6 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -54,10 +53,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import com.fluxplayer.app.core.model.FluxMessageEvent
-import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
-import com.fluxplayer.app.core.ui.components.FluxNotificationState
-import com.fluxplayer.app.core.ui.components.NextDialog
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -70,22 +65,28 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.fluxplayer.app.core.model.ControlButtonsPosition
 import com.fluxplayer.app.core.model.DanmakuDownloadState
+import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.ui.R as coreUiR
+import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
+import com.fluxplayer.app.core.ui.components.FluxNotificationState
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
+import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.extensions.copy
-import com.fluxplayer.app.feature.player.extensions.copy as mediaItemCopy
-import com.fluxplayer.app.feature.player.danmaku.Danmaku
-import com.fluxplayer.app.feature.player.danmaku.DanmakuController
-import com.fluxplayer.app.feature.player.danmaku.DanmakuOverlay
-import com.fluxplayer.app.feature.player.danmaku.DanmakuSearchSheet
 import com.fluxplayer.app.feature.player.buttons.NextButton
 import com.fluxplayer.app.feature.player.buttons.PlayPauseButton
 import com.fluxplayer.app.feature.player.buttons.PlayerButton
 import com.fluxplayer.app.feature.player.buttons.PreviousButton
+import com.fluxplayer.app.feature.player.danmaku.Danmaku
+import com.fluxplayer.app.feature.player.danmaku.DanmakuController
+import com.fluxplayer.app.feature.player.danmaku.DanmakuOverlay
+import com.fluxplayer.app.feature.player.danmaku.DanmakuSearchSheet
+import com.fluxplayer.app.feature.player.extensions.copy as mediaItemCopy
+import com.fluxplayer.app.feature.player.extensions.formatted
+import com.fluxplayer.app.feature.player.extensions.introMs
+import com.fluxplayer.app.feature.player.extensions.nameRes
+import com.fluxplayer.app.feature.player.extensions.outroMs
 import com.fluxplayer.app.feature.player.state.ControlsVisibilityState
-import com.fluxplayer.app.feature.player.state.IntroOutroState
-import com.fluxplayer.app.feature.player.state.IntroOutroTimestamps
-import com.fluxplayer.app.feature.player.state.MediaPresentationState
 import com.fluxplayer.app.feature.player.state.VerticalGesture
 import com.fluxplayer.app.feature.player.state.rememberBrightnessState
 import com.fluxplayer.app.feature.player.state.rememberControlsVisibilityState
@@ -100,11 +101,6 @@ import com.fluxplayer.app.feature.player.state.rememberTapGestureState
 import com.fluxplayer.app.feature.player.state.rememberVideoZoomAndContentScaleState
 import com.fluxplayer.app.feature.player.state.rememberVolumeAndBrightnessGestureState
 import com.fluxplayer.app.feature.player.state.rememberVolumeState
-import com.fluxplayer.app.feature.player.extensions.nameRes
-import com.fluxplayer.app.feature.player.extensions.formatted
-import com.fluxplayer.app.feature.player.extensions.introMs
-import com.fluxplayer.app.feature.player.extensions.noRippleClickable
-import com.fluxplayer.app.feature.player.extensions.outroMs
 import com.fluxplayer.app.feature.player.state.seekAmountFormatted
 import com.fluxplayer.app.feature.player.state.seekToPositionFormated
 import com.fluxplayer.app.feature.player.ui.DoubleTapIndicator
@@ -119,15 +115,12 @@ import com.fluxplayer.app.feature.player.ui.controls.CustomSpeedDialog
 import com.fluxplayer.app.feature.player.ui.controls.SpeedBar
 import com.fluxplayer.app.feature.player.ui.controls.speedMarkFraction
 import java.io.File
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.time.DurationUnit
 
 val LocalControlsVisibilityState = compositionLocalOf<ControlsVisibilityState?> { null }
 
@@ -300,11 +293,15 @@ fun MediaPlayerScreen(
                                         val opt = arr.getJSONObject(i)
                                         com.fluxplayer.app.core.common.VideoQualityCache.QualityOption(
                                             label = opt.getString("label"),
-                                            url = opt.getString("url")
+                                            url = opt.getString("url"),
                                         )
                                     }
-                                } else null
-                            } catch (_: Exception) { null }
+                                } else {
+                                    null
+                                }
+                            } catch (_: Exception) {
+                                null
+                            }
                         }
                 }
             }
@@ -337,12 +334,16 @@ fun MediaPlayerScreen(
         ?: qualityOptions.firstOrNull()?.label
         ?: if (videoResolution.first > 0 && videoResolution.second > 0) {
             formatResolution(videoResolution.first, videoResolution.second)
-        } else ""
+        } else {
+            ""
+        }
 
     // 顶部像素分辨率行：格式 "1920x1080"
     val videoInfoLine = if (videoResolution.first > 0 && videoResolution.second > 0) {
         "${videoResolution.first}x${videoResolution.second}"
-    } else ""
+    } else {
+        ""
+    }
 
     // DanmakuController 引用
     var danmakuController by remember { mutableStateOf<DanmakuController?>(null) }
@@ -420,8 +421,8 @@ fun MediaPlayerScreen(
             val key = currentIntroOutroKey(player, viewModel)
             val ts = introOutroState.getTimestamps(key)
             val currentIndex = player.currentMediaItemIndex
-            if (ts.outroMs > 0 && currentIndex != lastSkippedOutroIndex
-                && player.isPlaying && player.currentPosition >= ts.outroMs
+            if (ts.outroMs > 0 && currentIndex != lastSkippedOutroIndex &&
+                player.isPlaying && player.currentPosition >= ts.outroMs
             ) {
                 lastSkippedOutroIndex = currentIndex
                 if (player.hasNextMediaItem()) {
@@ -494,16 +495,16 @@ fun MediaPlayerScreen(
 
                 // ── 弹幕叠加层 ──
                 DanmakuOverlay(
-                        player = player,
-                        danmakuList = danmakuList,
-                        config = playerPreferences.danmakuConfig,
-                        enabled = danmakuEnabled,
-                        modifier = Modifier.fillMaxSize(),
-                        onController = { ctrl ->
-                            danmakuController = ctrl
-                        },
-                        onMediaItemTransitioned = { indexStep -> viewModel.onMediaItemTransition(indexStep, context) },
-                    )
+                    player = player,
+                    danmakuList = danmakuList,
+                    config = playerPreferences.danmakuConfig,
+                    enabled = danmakuEnabled,
+                    modifier = Modifier.fillMaxSize(),
+                    onController = { ctrl ->
+                        danmakuController = ctrl
+                    },
+                    onMediaItemTransitioned = { indexStep -> viewModel.onMediaItemTransition(indexStep, context) },
+                )
 
                 AnimatedVisibility(
                     visible = controlsVisibilityState.controlsVisible && !controlsVisibilityState.controlsLocked,
@@ -518,7 +519,7 @@ fun MediaPlayerScreen(
                 }
 
                 if (mediaPresentationState.isBuffering) {
-                    CircularProgressIndicator(
+                    MediaLoadingIndicator(
                         modifier = Modifier
                             .align(Alignment.Center)
                             .size(72.dp),
@@ -662,192 +663,208 @@ fun MediaPlayerScreen(
                             ) {
                                 val key = currentIntroOutroKey(player, viewModel)
                                 val timestamps = introOutroState.getTimestamps(key)
-                                val introLabel = if (timestamps.introMs < 0) "片头"
-                                    else "片头 ${timestamps.introMs.milliseconds.formatted()}"
-                                val outroLabel = if (timestamps.outroMs < 0) "片尾"
-                                    else "片尾 ${timestamps.outroMs.milliseconds.formatted()}"
+                                val introLabel = if (timestamps.introMs < 0) {
+                                    "片头"
+                                } else {
+                                    "片头 ${timestamps.introMs.milliseconds.formatted()}"
+                                }
+                                val outroLabel = if (timestamps.outroMs < 0) {
+                                    "片尾"
+                                } else {
+                                    "片尾 ${timestamps.outroMs.milliseconds.formatted()}"
+                                }
 
                                 Box(modifier = Modifier.fillMaxWidth()) {
                                     Column {
-                                    ControlsBottomView(
-                                        player = player,
-                                        mediaPresentationState = mediaPresentationState,
-                                        controlsAlignment = when (playerPreferences.controlButtonsPosition) {
-                                            ControlButtonsPosition.LEFT -> Alignment.Start
-                                            ControlButtonsPosition.RIGHT -> Alignment.End
-                                        },
-                                        videoContentScale = videoZoomAndContentScaleState.videoContentScale,
-                                        isPipSupported = pictureInPictureState.isPipSupported,
-                                        onSeek = seekGestureState::onSeek,
-                                        onSeekEnd = seekGestureState::onSeekEnd,
-                                        onPlaylistClick = {
-                                            controlsVisibilityState.hideControls()
-                                            overlayView = OverlayView.PLAYLIST
-                                        },
-                                        onVideoContentScaleClick = {
-                                            controlsVisibilityState.showControls()
-                                            videoZoomAndContentScaleState.switchToNextVideoContentScale()
-                                        },
-                                        onVideoContentScaleLongClick = {
-                                            controlsVisibilityState.hideControls()
-                                            overlayView = OverlayView.VIDEO_CONTENT_SCALE
-                                        },
-                                        onPictureInPictureClick = {
-                                            if (!pictureInPictureState.hasPipPermission) {
-                                                notificationState.show(
-                                                    FluxMessageEvent.Info(context.getString(coreUiR.string.enable_pip_from_settings)),
-                                                )
-                                                pictureInPictureState.openPictureInPictureSettings()
-                                            } else {
-                                                pictureInPictureState.enterPictureInPictureMode()
-                                            }
-                                        },
-                                        qualityOptions = qualityOptions,
-                                        currentQualityLabel = currentQualityLabel,
-                                        onQualitySelected = { option ->
-                                            val currentItem = player.currentMediaItem ?: return@ControlsBottomView
-                                            val currentIndex = player.currentMediaItemIndex
-                                            val currentPosition = player.currentPosition
-                                            val playWhenReady = player.playWhenReady
-                                            val previousLabel = selectedQualityLabel
-                                            isSwitchingQuality = true
-                                            errorState.dismiss()
-                                            selectedQualityLabel = option.label
-                                            videoResolution = Pair(0, 0)
-                                            val originalFragment = currentItem.localConfiguration?.uri?.fragment
-                                            val cloudMediaId = currentItem.mediaId
-                                            val isPan123 = cloudMediaId.startsWith("cloud://pan123")
-
-                                            coroutineScope.launch {
-                                                var finalUri = option.uri
-                                                if (isPan123) {
-                                                    try {
-                                                        val fileId = cloudMediaId.removePrefix("cloud://pan123/")
-                                                            .substringBefore("?")
-                                                        val freshOptions = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                            viewModel.refreshPan123QualityUrls(fileId)
-                                                        }
-                                                        val match = freshOptions?.find { it.label == option.label }
-                                                        if (match != null) finalUri = match.uri
-                                                    } catch (e: Exception) {
-                                                        Log.w("FluxQuality", "刷新 URL 失败: ${e.message}")
-                                                    }
+                                        ControlsBottomView(
+                                            player = player,
+                                            mediaPresentationState = mediaPresentationState,
+                                            controlsAlignment = when (playerPreferences.controlButtonsPosition) {
+                                                ControlButtonsPosition.LEFT -> Alignment.Start
+                                                ControlButtonsPosition.RIGHT -> Alignment.End
+                                            },
+                                            videoContentScale = videoZoomAndContentScaleState.videoContentScale,
+                                            isPipSupported = pictureInPictureState.isPipSupported,
+                                            onSeek = seekGestureState::onSeek,
+                                            onSeekEnd = seekGestureState::onSeekEnd,
+                                            onPlaylistClick = {
+                                                controlsVisibilityState.hideControls()
+                                                overlayView = OverlayView.PLAYLIST
+                                            },
+                                            onVideoContentScaleClick = {
+                                                controlsVisibilityState.showControls()
+                                                videoZoomAndContentScaleState.switchToNextVideoContentScale()
+                                            },
+                                            onVideoContentScaleLongClick = {
+                                                controlsVisibilityState.hideControls()
+                                                overlayView = OverlayView.VIDEO_CONTENT_SCALE
+                                            },
+                                            onPictureInPictureClick = {
+                                                if (!pictureInPictureState.hasPipPermission) {
+                                                    notificationState.show(
+                                                        FluxMessageEvent.Info(context.getString(coreUiR.string.enable_pip_from_settings)),
+                                                    )
+                                                    pictureInPictureState.openPictureInPictureSettings()
+                                                } else {
+                                                    pictureInPictureState.enterPictureInPictureMode()
                                                 }
+                                            },
+                                            qualityOptions = qualityOptions,
+                                            currentQualityLabel = currentQualityLabel,
+                                            onQualitySelected = { option ->
+                                                val currentItem = player.currentMediaItem ?: return@ControlsBottomView
+                                                val currentIndex = player.currentMediaItemIndex
+                                                val currentPosition = player.currentPosition
+                                                val playWhenReady = player.playWhenReady
+                                                val previousLabel = selectedQualityLabel
+                                                isSwitchingQuality = true
+                                                errorState.dismiss()
+                                                selectedQualityLabel = option.label
+                                                videoResolution = Pair(0, 0)
+                                                val originalFragment = currentItem.localConfiguration?.uri?.fragment
+                                                val cloudMediaId = currentItem.mediaId
+                                                val isPan123 = cloudMediaId.startsWith("cloud://pan123")
 
-                                                val newUri = if (!originalFragment.isNullOrEmpty()) {
-                                                    android.net.Uri.parse("${finalUri}#${originalFragment}")
-                                                } else finalUri
-
-                                                val newMediaItem = androidx.media3.common.MediaItem.Builder()
-                                                    .setUri(newUri)
-                                                    .setMediaId(currentItem.mediaId)
-                                                    .setMediaMetadata(currentItem.mediaMetadata)
-                                                    .build()
-                                                player.setMediaItems(listOf(newMediaItem), 0, currentPosition)
-                                                player.playWhenReady = playWhenReady
-                                                // 事件驱动等待切换结果：出错立即回退、就绪即成功；
-                                                // 10 秒仅作超时兜底，避免快速失败也要白等 10 秒
-                                                val switchSucceeded = kotlinx.coroutines.withTimeoutOrNull(10000L) {
-                                                    kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-                                                        val switchListener = object : Player.Listener {
-                                                            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                                                                if (cont.isActive) cont.resume(false) {}
+                                                coroutineScope.launch {
+                                                    var finalUri = option.uri
+                                                    if (isPan123) {
+                                                        try {
+                                                            val fileId = cloudMediaId.removePrefix("cloud://pan123/")
+                                                                .substringBefore("?")
+                                                            val freshOptions = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                                viewModel.refreshPan123QualityUrls(fileId)
                                                             }
-                                                            override fun onPlaybackStateChanged(playbackState: Int) {
-                                                                if (playbackState == Player.STATE_READY && cont.isActive) {
-                                                                    cont.resume(true) {}
-                                                                }
-                                                            }
+                                                            val match = freshOptions?.find { it.label == option.label }
+                                                            if (match != null) finalUri = match.uri
+                                                        } catch (e: Exception) {
+                                                            Log.w("FluxQuality", "刷新 URL 失败: ${e.message}")
                                                         }
-                                                        player.addListener(switchListener)
-                                                        cont.invokeOnCancellation { player.removeListener(switchListener) }
                                                     }
-                                                } ?: (player.playerError == null &&
-                                                    videoResolution.first > 0 && videoResolution.second > 0)
-                                                if (!switchSucceeded) {
-                                                    Log.w("FluxQuality", "切换失败, error=${player.playerError}")
-                                                    selectedQualityLabel = previousLabel
-                                                    val revertItem = androidx.media3.common.MediaItem.Builder()
-                                                        .setUri(currentItem.localConfiguration?.uri ?: Uri.EMPTY)
+
+                                                    val newUri = if (!originalFragment.isNullOrEmpty()) {
+                                                        android.net.Uri.parse("$finalUri#$originalFragment")
+                                                    } else {
+                                                        finalUri
+                                                    }
+
+                                                    val newMediaItem = androidx.media3.common.MediaItem.Builder()
+                                                        .setUri(newUri)
                                                         .setMediaId(currentItem.mediaId)
                                                         .setMediaMetadata(currentItem.mediaMetadata)
                                                         .build()
-                                                    player.setMediaItems(listOf(revertItem), 0, currentPosition)
-                                                    player.playWhenReady = true
+                                                    player.setMediaItems(listOf(newMediaItem), 0, currentPosition)
+                                                    player.playWhenReady = playWhenReady
+                                                    // 事件驱动等待切换结果：出错立即回退、就绪即成功；
+                                                    // 10 秒仅作超时兜底，避免快速失败也要白等 10 秒
+                                                    val switchSucceeded = kotlinx.coroutines.withTimeoutOrNull(10000L) {
+                                                        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                                                            val switchListener = object : Player.Listener {
+                                                                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                                                                    if (cont.isActive) cont.resume(false) {}
+                                                                }
+                                                                override fun onPlaybackStateChanged(playbackState: Int) {
+                                                                    if (playbackState == Player.STATE_READY && cont.isActive) {
+                                                                        cont.resume(true) {}
+                                                                    }
+                                                                }
+                                                            }
+                                                            player.addListener(switchListener)
+                                                            cont.invokeOnCancellation { player.removeListener(switchListener) }
+                                                        }
+                                                    } ?: (
+                                                        player.playerError == null &&
+                                                            videoResolution.first > 0 && videoResolution.second > 0
+                                                        )
+                                                    if (!switchSucceeded) {
+                                                        Log.w("FluxQuality", "切换失败, error=${player.playerError}")
+                                                        selectedQualityLabel = previousLabel
+                                                        val revertItem = androidx.media3.common.MediaItem.Builder()
+                                                            .setUri(currentItem.localConfiguration?.uri ?: Uri.EMPTY)
+                                                            .setMediaId(currentItem.mediaId)
+                                                            .setMediaMetadata(currentItem.mediaMetadata)
+                                                            .build()
+                                                        player.setMediaItems(listOf(revertItem), 0, currentPosition)
+                                                        player.playWhenReady = true
+                                                    }
+                                                    isSwitchingQuality = false
+                                                    errorState.dismiss()
                                                 }
-                                                isSwitchingQuality = false
-                                                errorState.dismiss()
-                                            }
-                                        },
-                                        introLabel = introLabel,
-                                        onIntroClick = {
-                                            val pos = player.currentPosition
-                                            introOutroState.setIntro(key, pos)
-                                            viewModel.updateMediumIntroOutro(key, pos, timestamps.outroMs)
-                                            // 更新后续 item 的片头片尾元数据，跳过当前 item
-                                            // 替换当前 item 会导致播放器重新加载，出现"从头播放"的闪烁
-                                            val p = player
-                                            val currentIdx = p.currentMediaItemIndex
-                                            val count = p.mediaItemCount
-                                            for (i in 0 until count) {
-                                                if (i == currentIdx) continue
-                                                val item = p.getMediaItemAt(i)
-                                                val updated = item.mediaItemCopy(introMs = pos, outroMs = timestamps.outroMs)
-                                                p.replaceMediaItem(i, updated)
-                                            }
-                                        },
-                                        onIntroLongClick = {
-                                            introOutroState.setIntro(key, -1L)
-                                            viewModel.updateMediumIntroOutro(key, -1L, timestamps.outroMs)
-                                            val p = player
-                                            val currentIdx = p.currentMediaItemIndex
-                                            val count = p.mediaItemCount
-                                            for (i in 0 until count) {
-                                                if (i == currentIdx) continue
-                                                val item = p.getMediaItemAt(i)
-                                                val updated = item.mediaItemCopy(
-                                                    introMs = -1L, outroMs = timestamps.outroMs)
-                                                p.replaceMediaItem(i, updated)
-                                            }
-                                        },
-                                        outroLabel = outroLabel,
-                                        onOutroClick = {
-                                            val pos = player.currentPosition
-                                            introOutroState.setOutro(key, pos)
-                                            viewModel.updateMediumIntroOutro(key, timestamps.introMs, pos)
-                                            val p = player
-                                            val currentIdx = p.currentMediaItemIndex
-                                            val count = p.mediaItemCount
-                                            for (i in 0 until count) {
-                                                if (i == currentIdx) continue
-                                                val item = p.getMediaItemAt(i)
-                                                val updated = item.mediaItemCopy(
-                                                    introMs = timestamps.introMs, outroMs = pos)
-                                                p.replaceMediaItem(i, updated)
-                                            }
-                                        },
-                                        onOutroLongClick = {
-                                            introOutroState.setOutro(key, -1L)
-                                            viewModel.updateMediumIntroOutro(key, timestamps.introMs, -1L)
-                                            val p = player
-                                            val currentIdx = p.currentMediaItemIndex
-                                            val count = p.mediaItemCount
-                                            for (i in 0 until count) {
-                                                if (i == currentIdx) continue
-                                                val item = p.getMediaItemAt(i)
-                                                val updated = item.mediaItemCopy(
-                                                    introMs = timestamps.introMs, outroMs = -1L)
-                                                p.replaceMediaItem(i, updated)
-                                            }
-                                        },
-                                        currentSpeed = currentSpeed,
-                                        onSpeedBarToggle = {
-                                            showSpeedBar = !showSpeedBar
-                                            controlsVisibilityState.suppressAutoHide = showSpeedBar
-                                            controlsVisibilityState.showControls()
-                                        },
-                                        speedMarkFraction = if (showSpeedBar) speedMarkFraction(currentSpeed, playerPreferences.speedPresets) else null,
-                                    )
+                                            },
+                                            introLabel = introLabel,
+                                            onIntroClick = {
+                                                val pos = player.currentPosition
+                                                introOutroState.setIntro(key, pos)
+                                                viewModel.updateMediumIntroOutro(key, pos, timestamps.outroMs)
+                                                // 更新后续 item 的片头片尾元数据，跳过当前 item
+                                                // 替换当前 item 会导致播放器重新加载，出现"从头播放"的闪烁
+                                                val p = player
+                                                val currentIdx = p.currentMediaItemIndex
+                                                val count = p.mediaItemCount
+                                                for (i in 0 until count) {
+                                                    if (i == currentIdx) continue
+                                                    val item = p.getMediaItemAt(i)
+                                                    val updated = item.mediaItemCopy(introMs = pos, outroMs = timestamps.outroMs)
+                                                    p.replaceMediaItem(i, updated)
+                                                }
+                                            },
+                                            onIntroLongClick = {
+                                                introOutroState.setIntro(key, -1L)
+                                                viewModel.updateMediumIntroOutro(key, -1L, timestamps.outroMs)
+                                                val p = player
+                                                val currentIdx = p.currentMediaItemIndex
+                                                val count = p.mediaItemCount
+                                                for (i in 0 until count) {
+                                                    if (i == currentIdx) continue
+                                                    val item = p.getMediaItemAt(i)
+                                                    val updated = item.mediaItemCopy(
+                                                        introMs = -1L,
+                                                        outroMs = timestamps.outroMs,
+                                                    )
+                                                    p.replaceMediaItem(i, updated)
+                                                }
+                                            },
+                                            outroLabel = outroLabel,
+                                            onOutroClick = {
+                                                val pos = player.currentPosition
+                                                introOutroState.setOutro(key, pos)
+                                                viewModel.updateMediumIntroOutro(key, timestamps.introMs, pos)
+                                                val p = player
+                                                val currentIdx = p.currentMediaItemIndex
+                                                val count = p.mediaItemCount
+                                                for (i in 0 until count) {
+                                                    if (i == currentIdx) continue
+                                                    val item = p.getMediaItemAt(i)
+                                                    val updated = item.mediaItemCopy(
+                                                        introMs = timestamps.introMs,
+                                                        outroMs = pos,
+                                                    )
+                                                    p.replaceMediaItem(i, updated)
+                                                }
+                                            },
+                                            onOutroLongClick = {
+                                                introOutroState.setOutro(key, -1L)
+                                                viewModel.updateMediumIntroOutro(key, timestamps.introMs, -1L)
+                                                val p = player
+                                                val currentIdx = p.currentMediaItemIndex
+                                                val count = p.mediaItemCount
+                                                for (i in 0 until count) {
+                                                    if (i == currentIdx) continue
+                                                    val item = p.getMediaItemAt(i)
+                                                    val updated = item.mediaItemCopy(
+                                                        introMs = timestamps.introMs,
+                                                        outroMs = -1L,
+                                                    )
+                                                    p.replaceMediaItem(i, updated)
+                                                }
+                                            },
+                                            currentSpeed = currentSpeed,
+                                            onSpeedBarToggle = {
+                                                showSpeedBar = !showSpeedBar
+                                                controlsVisibilityState.suppressAutoHide = showSpeedBar
+                                                controlsVisibilityState.showControls()
+                                            },
+                                            speedMarkFraction = if (showSpeedBar) speedMarkFraction(currentSpeed, playerPreferences.speedPresets) else null,
+                                        )
                                     }
 
                                     // 倍速横条：底部居中显示
@@ -1127,8 +1144,6 @@ private fun formatResolution(width: Int, height: Int): String {
         width >= 1280 || height >= 720 -> "720p"
         width >= 854 || height >= 480 -> "480p"
         width >= 640 || height >= 360 -> "360p"
-        else -> "${width}×${height}"
+        else -> "$width×$height"
     }
 }
-
-

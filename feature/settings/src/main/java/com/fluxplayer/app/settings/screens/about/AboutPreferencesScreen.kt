@@ -53,7 +53,6 @@ import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.FluxNotificationBanner
 import com.fluxplayer.app.core.ui.components.FluxNotificationState
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
-import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 private const val GITHUB_URL = "https://github.com/Ding-DaoDao/fluxplayer"
 

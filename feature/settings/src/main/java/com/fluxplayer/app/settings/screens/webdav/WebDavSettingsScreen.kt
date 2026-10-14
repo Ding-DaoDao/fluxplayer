@@ -2,7 +2,6 @@ package com.fluxplayer.app.settings.screens.webdav
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,17 +11,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -43,9 +36,12 @@ import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.CancelButton
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.DoneButton
-import com.fluxplayer.app.core.ui.components.ListSectionTitle
-import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
+import com.fluxplayer.app.core.ui.components.ListSectionTitle
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
+import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
+import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 
 @Composable
@@ -313,7 +309,7 @@ private fun ServerEditDialog(
                     enabled = !isTesting && server.url.isNotBlank(),
                 ) {
                     if (isTesting) {
-                        CircularProgressIndicator(
+                        MediaLoadingIndicator(
                             modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp,
                         )
@@ -326,10 +322,11 @@ private fun ServerEditDialog(
                     Text(
                         text = if (result == "ok") stringResource(R.string.webdav_connection_ok) else stringResource(R.string.webdav_connection_failed, result),
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (result == "ok")
+                        color = if (result == "ok") {
                             MaterialTheme.colorScheme.primary
-                        else
-                            MaterialTheme.colorScheme.error,
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
                     )
                 }
             }

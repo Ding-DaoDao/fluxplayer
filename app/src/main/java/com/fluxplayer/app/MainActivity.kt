@@ -15,6 +15,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -22,7 +24,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -37,16 +38,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.rememberNavController
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.isGranted
-import com.google.accompanist.permissions.rememberMultiplePermissionsState
-import dagger.hilt.android.AndroidEntryPoint
 import com.fluxplayer.app.core.common.storagePermission
 import com.fluxplayer.app.core.data.backup.AutoBackupHelper
 import com.fluxplayer.app.core.media.services.MediaService
@@ -54,10 +53,15 @@ import com.fluxplayer.app.core.media.sync.MediaSynchronizer
 import com.fluxplayer.app.core.model.AccentPreset
 import com.fluxplayer.app.core.model.SurfaceStyle
 import com.fluxplayer.app.core.model.ThemeConfig
+import com.fluxplayer.app.core.ui.components.MediaAlertDialog as AlertDialog
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
 import com.fluxplayer.app.navigation.MediaRootRoute
 import com.fluxplayer.app.navigation.mediaNavGraph
 import com.fluxplayer.app.navigation.settingsNavGraph
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -116,7 +120,18 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            val hideStatusBar = (uiState as? MainActivityUiState.Success)?.preferences?.hideStatusBar == true
+            fun applyStatusBarVisibility() {
+                val controller = WindowInsetsControllerCompat(window, window.decorView)
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                if (hideStatusBar) controller.hide(WindowInsetsCompat.Type.statusBars()) else controller.show(WindowInsetsCompat.Type.statusBars())
+            }
+            LaunchedEffect(hideStatusBar, shouldUseDarkTheme) { applyStatusBarVisibility() }
+            LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { applyStatusBarVisibility() }
+
             NextPlayerTheme(
+                mediaShell = true,
+                preferences = (uiState as? MainActivityUiState.Success)?.preferences,
                 darkTheme = shouldUseDarkTheme,
                 highContrastDarkTheme = shouldUseHighContrastDarkTheme(uiState = uiState),
                 accentPreset = shouldUseAccentPreset(uiState = uiState),
@@ -161,10 +176,10 @@ class MainActivity : ComponentActivity() {
                     val hasRequestedManageStorage = remember { mutableStateOf(false) }
 
                     LaunchedEffect(storageGranted) {
-                        if (storageGranted
-                            && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                            && !Environment.isExternalStorageManager()
-                            && !hasRequestedManageStorage.value
+                        if (storageGranted &&
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                            !Environment.isExternalStorageManager() &&
+                            !hasRequestedManageStorage.value
                         ) {
                             showManageStorageDialog = true
                             hasRequestedManageStorage.value = true
@@ -172,7 +187,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     val manageStorageLauncher = rememberLauncherForActivityResult(
-                        ActivityResultContracts.StartActivityForResult()
+                        ActivityResultContracts.StartActivityForResult(),
                     ) {
                         // 返回后无需额外处理
                     }
@@ -186,7 +201,7 @@ class MainActivity : ComponentActivity() {
                                 TextButton(onClick = {
                                     showManageStorageDialog = false
                                     manageStorageLauncher.launch(
-                                        Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                                        Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
                                     )
                                 }) { Text("去开启") }
                             },
@@ -201,38 +216,55 @@ class MainActivity : ComponentActivity() {
                     val springOffset = spring<IntOffset>(dampingRatio = 1f, stiffness = 400f)
                     val springFloat = spring<Float>(dampingRatio = 1f, stiffness = 400f)
 
+                    val animateNavigation = (uiState as? MainActivityUiState.Success)?.preferences?.navAnimationsEnabled != false
                     NavHost(
                         navController = mainNavController,
                         startDestination = MediaRootRoute,
                         enterTransition = {
-                            slideIntoContainer(
-                                towards = AnimatedContentTransitionScope.SlideDirection.Start,
-                                animationSpec = springOffset,
-                            ) + scaleIn(animationSpec = springFloat, initialScale = 0.95f) +
-                                fadeIn(animationSpec = springFloat)
+                            if (!animateNavigation) {
+                                EnterTransition.None
+                            } else {
+                                slideIntoContainer(
+                                    towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                                    animationSpec = springOffset,
+                                ) + scaleIn(animationSpec = springFloat, initialScale = 0.95f) +
+                                    fadeIn(animationSpec = springFloat)
+                            }
                         },
                         exitTransition = {
-                            slideOutOfContainer(
-                                towards = AnimatedContentTransitionScope.SlideDirection.Start,
-                                animationSpec = springOffset,
-                                targetOffset = { fullOffset -> (fullOffset * 0.3f).toInt() },
-                            ) + scaleOut(animationSpec = springFloat, targetScale = 0.95f) +
-                                fadeOut(animationSpec = springFloat)
+                            if (!animateNavigation) {
+                                ExitTransition.None
+                            } else {
+                                slideOutOfContainer(
+                                    towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                                    animationSpec = springOffset,
+                                    targetOffset = { fullOffset -> (fullOffset * 0.3f).toInt() },
+                                ) + scaleOut(animationSpec = springFloat, targetScale = 0.95f) +
+                                    fadeOut(animationSpec = springFloat)
+                            }
                         },
                         popEnterTransition = {
-                            slideIntoContainer(
-                                towards = AnimatedContentTransitionScope.SlideDirection.End,
-                                animationSpec = springOffset,
-                                initialOffset = { fullOffset -> (fullOffset * 0.3f).toInt() },
-                            ) + scaleIn(animationSpec = springFloat, initialScale = 0.95f) +
-                                fadeIn(animationSpec = springFloat)
+                            if (!animateNavigation) {
+                                EnterTransition.None
+                            } else {
+                                slideIntoContainer(
+                                    towards = AnimatedContentTransitionScope.SlideDirection.End,
+                                    animationSpec = springOffset,
+                                    initialOffset = { fullOffset -> (fullOffset * 0.3f).toInt() },
+                                ) + scaleIn(animationSpec = springFloat, initialScale = 0.95f) +
+                                    fadeIn(animationSpec = springFloat)
+                            }
                         },
                         popExitTransition = {
-                            slideOutOfContainer(
-                                towards = AnimatedContentTransitionScope.SlideDirection.End,
-                                animationSpec = springOffset,
-                            ) + scaleOut(animationSpec = springFloat, targetScale = 0.95f) +
-                                fadeOut(animationSpec = springFloat)
+                            if (!animateNavigation) {
+                                ExitTransition.None
+                            } else {
+                                slideOutOfContainer(
+                                    towards = AnimatedContentTransitionScope.SlideDirection.End,
+                                    animationSpec = springOffset,
+                                ) + scaleOut(animationSpec = springFloat, targetScale = 0.95f) +
+                                    fadeOut(animationSpec = springFloat)
+                            }
                         },
                     ) {
                         mediaNavGraph(

@@ -1,26 +1,24 @@
 package com.fluxplayer.app.core.ui.cache
 
 import android.content.Context
-import coil3.ImageLoader
-import coil3.SingletonImageLoader
-import coil3.disk.DiskCache
-import coil3.disk.directory
-import coil3.memory.MemoryCache
-import coil3.request.CachePolicy
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.disk.DiskCache
+import coil3.memory.MemoryCache
+import coil3.request.CachePolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-/** Shared audiobook artwork cache, separate from video thumbnails and source state. */
+/** 共享听书封面缓存，与视频缩略图和书源状态独立。 */
 object BookCoverCache {
     const val LIMIT_BYTES = 128L * 1024 * 1024
-    private var disk: DiskCache? = null
     private val loaders = mutableMapOf<Boolean, ImageLoader>()
     private var state: MutableStateFlow<Boolean>? = null
 
@@ -34,9 +32,7 @@ object BookCoverCache {
     }
 
     @Synchronized
-    private fun disk(context: Context): DiskCache = disk ?: DiskCache.Builder()
-        .directory(context.applicationContext.filesDir.resolve("book-covers"))
-        .maxSizeBytes(LIMIT_BYTES).build().also { disk = it }
+    private fun disk(context: Context): DiskCache = com.fluxplayer.app.core.tingshu.ListeningCoverStore.disk(context)
 
     @Synchronized
     fun imageLoader(context: Context, enabled: Boolean = BookCoverCache.enabled(context).value): ImageLoader = loaders.getOrPut(enabled) {

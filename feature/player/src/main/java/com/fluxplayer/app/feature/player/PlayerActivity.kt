@@ -61,6 +61,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
@@ -645,6 +646,8 @@ class PlayerActivity : ComponentActivity() {
             val uri = mediaController?.currentMediaItem?.mediaId
             if (uri == null) {
                 Log.w("PlayerActivity", "thumbnail capture SKIPPED: mediaId is null")
+            } else if (preferencesRepository.persistedApplicationPreferences.first().videoIncognito) {
+                Log.d("PlayerActivity", "视频无痕模式：跳过历史缩略图保存")
             } else if (sv == null) {
                 Log.w("PlayerActivity", "thumbnail capture SKIPPED: playerSurfaceView is null (uri=$uri)")
             } else if (sv.width <= 0 || sv.height <= 0) {

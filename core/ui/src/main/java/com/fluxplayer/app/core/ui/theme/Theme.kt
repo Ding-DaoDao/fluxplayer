@@ -10,18 +10,19 @@ import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import com.fluxplayer.app.core.model.AccentPreset
+import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.SurfaceStyle
+
+/** 主应用页面采用统一媒体外观，播放器独立窗口保留原有控件布局。 */
+val LocalMediaShell = staticCompositionLocalOf { false }
 
 /**
  * 应用主题入口。
  *
- * 配色只有一条路径：**中性灰阶底座 + 用户选定的强调色派生**（见 [neutralColorScheme]）。
- * 中性灰阶意味着 secondary/tertiary 家族被刻意去色，强调色是界面上唯一的色相出口。
- *
- * 历史上还有两条分支，已随主题统一移除：
- * - Material tonal（materialkolor 从 seed/壁纸动态生成多色相配色）
- * - Miuix 组件引擎（与 Material 并行的第二套组件外观）
+ * 主应用界面使用系统壁纸或用户种子色生成 Material 配色。
+ * 播放器独立窗口保留原有中性配色，不改变其控件布局。
  */
 @Composable
 fun NextPlayerTheme(
@@ -29,21 +30,31 @@ fun NextPlayerTheme(
     highContrastDarkTheme: Boolean = false,
     accentPreset: AccentPreset = AccentPreset.Default,
     surfaceStyle: SurfaceStyle = SurfaceStyle.Default,
+    mediaShell: Boolean = false,
+    preferences: ApplicationPreferences? = null,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = resolveColorScheme(
-        darkTheme = darkTheme,
-        highContrastDarkTheme = highContrastDarkTheme,
-        accentPreset = accentPreset,
-    )
+    val colorScheme = if (mediaShell && preferences != null) {
+        rememberMediaColorScheme(preferences, darkTheme)
+    } else {
+        resolveColorScheme(
+            darkTheme = darkTheme,
+            highContrastDarkTheme = highContrastDarkTheme,
+            accentPreset = accentPreset,
+        )
+    }
     val styleFlags = remember(darkTheme, surfaceStyle) {
         FluxStyleFlags(isDark = darkTheme, surfaceStyle = surfaceStyle)
     }
-    CompositionLocalProvider(LocalFluxStyle provides styleFlags) {
+    CompositionLocalProvider(
+        LocalFluxStyle provides styleFlags,
+        LocalMediaShell provides mediaShell,
+        LocalMediaPreferences provides (preferences ?: ApplicationPreferences()),
+    ) {
         MaterialThemeWrapper(
             colorScheme = colorScheme,
-            typography = FluxM3Typography,
-            shapes = FluxShapes,
+            typography = if (mediaShell) AVBoxTypography else FluxM3Typography,
+            shapes = if (mediaShell) Shapes() else FluxShapes,
             content = content,
         )
     }

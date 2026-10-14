@@ -48,6 +48,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewModel.ktx)
     implementation(libs.google.android.material)
     implementation(libs.androidx.activity.compose)
+    // 播放模块也使用统一版本，避免输入框等组件与基础库接口不一致。
+    implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)

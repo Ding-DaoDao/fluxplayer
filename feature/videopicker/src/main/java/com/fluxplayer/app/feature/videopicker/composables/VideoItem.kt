@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -37,15 +36,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
-import androidx.compose.foundation.shape.RoundedCornerShape
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
-import com.fluxplayer.app.core.ui.components.FluxIcon
-import com.fluxplayer.app.core.ui.components.FluxText
 import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.MediaLayoutMode
 import com.fluxplayer.app.core.model.Video
+import com.fluxplayer.app.core.ui.components.FluxIcon
 import com.fluxplayer.app.core.ui.components.NextSegmentedListItem
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
@@ -106,8 +103,8 @@ private fun VideoListItem(
         selected = selected,
         contentPadding = PaddingValues(8.dp),
         colors = ListItemDefaults.segmentedColors(
-            containerColor = if (isPlayed) Color(0xFFE3F2FD) else MaterialTheme.colorScheme.surfaceContainerLow,
-            selectedContainerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f),
+            containerColor = if (isPlayed) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
         ),
         isFirstItem = isFirstItem,
         isLastItem = isLastItem,
@@ -181,8 +178,8 @@ private fun VideoGridItem(
         selected = selected,
         contentPadding = PaddingValues(8.dp),
         colors = ListItemDefaults.segmentedColors(
-            containerColor = if (isPlayed) Color(0xFFE3F2FD) else MaterialTheme.colorScheme.surfaceContainerLow,
-            selectedContainerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f),
+            containerColor = if (isPlayed) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
         ),
         isFirstItem = isFirstItem,
         isLastItem = isLastItem,
@@ -247,7 +244,7 @@ private fun ThumbnailView(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (preferences.showDurationField) {
+        if (preferences.showDurationField && video.formattedDuration.isNotBlank()) {
             InfoChip(
                 text = video.formattedDuration,
                 modifier = Modifier
@@ -259,7 +256,7 @@ private fun ThumbnailView(
             )
         }
 
-        if (preferences.showPlayedProgress && video.playedPercentage > 0) {
+        if (preferences.showPlayedProgress && video.duration > 0 && video.playedPercentage > 0) {
             Box(
                 modifier = Modifier
                     .height(4.dp)
@@ -273,7 +270,7 @@ private fun ThumbnailView(
                 )
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(video.playedPercentage)
+                        .fillMaxWidth(video.playedPercentage.coerceIn(0f, 1f))
                         .fillMaxHeight()
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary),

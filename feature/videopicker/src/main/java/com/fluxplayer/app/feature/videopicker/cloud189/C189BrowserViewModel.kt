@@ -98,7 +98,7 @@ class C189BrowserViewModel @Inject constructor(
         C189AuthProvider.initialize(application)
 
         viewModelScope.launch {
-            playbackHistoryRepository.getHistoryFlow().collect { history ->
+            playbackHistoryRepository.getAllHistoryFlow().collect { history ->
                 val latestPerDir = history
                     .filter { it.parentPath != null }
                     .groupBy { it.parentPath!! }

@@ -10,13 +10,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.OutlinedButton
@@ -38,6 +35,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.fluxplayer.app.core.tingshu.SourceHost
+import com.fluxplayer.app.core.ui.components.MediaAlertDialog as AlertDialog
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
+import com.fluxplayer.app.core.ui.components.MediaLoadingRow
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.github.eprendre.tingshu.utils.ConfigItem
@@ -69,7 +69,7 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
             }
             FilledTonalButton(onClick = { showImportInfo = true }, enabled = !state.loading, shape = RoundedCornerShape(14.dp)) { Text("导入书源") }
         }
-        if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (state.loading) MediaLoadingRow(Modifier.fillMaxWidth())
         if (state.configItems == null) state.error?.let { SourceErrorNotice(it, onRetry = viewModel::retry, onDismiss = viewModel::dismissError) }
         if (packages.isEmpty()) {
             ListeningSettingsCard("添加第一个书源", "导入书源后，就能在听书首页浏览和收听。") {
@@ -78,7 +78,7 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
         }
         packages.forEach { pkg ->
             val entries = sources.filter { it.packageEntry == pkg.entry }
-            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = FluxTheme.colorScheme.surfaceContainerLow)) {
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(32.dp), colors = CardDefaults.cardColors(containerColor = FluxTheme.colorScheme.surfaceContainerLow)) {
                 Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Surface(shape = RoundedCornerShape(14.dp), color = FluxTheme.colorScheme.primaryContainer) {
                         Icon(NextIcons.Headset, null, Modifier.padding(12.dp).size(24.dp), tint = FluxTheme.colorScheme.onPrimaryContainer)

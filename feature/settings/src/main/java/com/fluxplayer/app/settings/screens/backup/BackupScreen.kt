@@ -1,5 +1,7 @@
 package com.fluxplayer.app.settings.screens.backup
 
+import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,14 +15,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -44,6 +45,9 @@ import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
 import com.fluxplayer.app.core.ui.components.FluxSettingsScaffold
 import com.fluxplayer.app.core.ui.components.ListSectionTitle
+import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
+import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
 import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.components.PreferenceSwitch
 import java.text.DateFormat
@@ -60,10 +64,8 @@ fun BackupScreen(
     var showAccount by remember { mutableStateOf(false) }
     var showRemote by remember { mutableStateOf(false) }
     var showNewBackup by remember { mutableStateOf(false) }
-    var showPassphrase by remember { mutableStateOf(false) }
-    var passphraseDraft by remember { mutableStateOf("") }
-    var importPassphrase by remember { mutableStateOf("") }
     var draft by remember { mutableStateOf(BackupWebDavConfig()) }
+    val chooseDirectory = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(viewModel::setLocalDirectory) }
     val createFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) {
         it?.let(viewModel::createBackup)
     }
@@ -73,8 +75,9 @@ fun BackupScreen(
     BackHandler(enabled = state.isLoading) { }
     LaunchedEffect(state.successMessage, state.errorMessage) {
         val message = state.errorMessage ?: state.successMessage ?: return@LaunchedEffect
+        // 提示显示结束后再消费消息，避免状态变化取消正在显示的提示。
+        snackbar.showSnackbar(message, withDismissAction = true, duration = SnackbarDuration.Long)
         viewModel.clearMessages()
-        snackbar.showSnackbar(message)
     }
     LaunchedEffect(config.hasPendingNewBackup) {
         if (config.hasPendingNewBackup) showNewBackup = true
@@ -83,9 +86,6 @@ fun BackupScreen(
         if (state.pendingBackup != null) showRemote = false
     }
     // 新的导入目标出现时清空密码输入（密码错误重试时目标不变，保留用户输入以便修改）
-    LaunchedEffect(state.pendingPassphrase) {
-        if (state.pendingPassphrase != null) importPassphrase = ""
-    }
 
     FluxSettingsScaffold(
         title = stringResource(R.string.backup_and_restore),
@@ -103,16 +103,20 @@ fun BackupScreen(
                 )
                 ListSectionTitle(text = stringResource(R.string.backup_local_section))
                 ClickablePreferenceItem(
+                    title = "本地备份目录",
+                    description = if (config.localDirectoryUri.isBlank()) "选择文件夹，之后直接保存到这里" else runCatching { DocumentsContract.getTreeDocumentId(Uri.parse(config.localDirectoryUri)).replace("primary:", "内部存储/") }.getOrDefault(config.localDirectoryUri),
+                    enabled = !state.isLoading,
+                    isFirstItem = true,
+                    onClick = { chooseDirectory.launch(config.localDirectoryUri.takeIf { it.isNotBlank() }?.let(Uri::parse)) },
+                )
+                HorizontalDivider()
+                ClickablePreferenceItem(
                     title = stringResource(R.string.backup_export_local),
                     description = stringResource(R.string.backup_export_local_desc),
                     enabled = !state.isLoading,
-                    isFirstItem = true,
+                    isFirstItem = false,
                     onClick = {
-                        if (config.backupPassphrase.isBlank()) {
-                            viewModel.reportMissingPassphrase()
-                        } else {
-                            createFile.launch(config.generateBackupFileName())
-                        }
+                        if (config.localDirectoryUri.isNotBlank()) viewModel.exportToLocalDirectory() else createFile.launch(config.generateBackupFileName())
                     },
                 )
                 HorizontalDivider()
@@ -120,24 +124,9 @@ fun BackupScreen(
                     title = stringResource(R.string.backup_restore_local),
                     description = stringResource(R.string.backup_restore_local_desc),
                     enabled = !state.isLoading,
+                    isLastItem = true,
                     onClick = { openFile.launch(arrayOf("*/*")) },
                 )
-                HorizontalDivider()
-                ClickablePreferenceItem(
-                    title = stringResource(R.string.backup_passphrase),
-                    description = if (config.backupPassphrase.isBlank()) {
-                        stringResource(R.string.backup_passphrase_not_set)
-                    } else {
-                        "${stringResource(R.string.backup_passphrase_set)} · ${stringResource(R.string.backup_passphrase_desc)}"
-                    },
-                    enabled = !state.isLoading,
-                    isLastItem = true,
-                    onClick = {
-                        passphraseDraft = config.backupPassphrase
-                        showPassphrase = true
-                    },
-                )
-
                 ListSectionTitle(text = stringResource(R.string.backup_webdav_section))
                 ClickablePreferenceItem(
                     title = stringResource(R.string.backup_webdav_settings),
@@ -161,9 +150,7 @@ fun BackupScreen(
                     title = stringResource(R.string.backup_upload_to_cloud),
                     description = stringResource(R.string.backup_upload_to_cloud_desc),
                     enabled = config.isConfigured && !state.isLoading,
-                    onClick = {
-                        if (config.backupPassphrase.isBlank()) viewModel.reportMissingPassphrase() else viewModel.uploadToCloud()
-                    },
+                    onClick = viewModel::uploadToCloud,
                 )
                 HorizontalDivider()
                 ClickablePreferenceItem(
@@ -179,18 +166,24 @@ fun BackupScreen(
 
                 ListSectionTitle(text = stringResource(R.string.backup_automatic_section))
                 PreferenceSwitch(
+                    title = "自动备份到本地目录",
+                    description = "应用退到后台时保存到所选目录；与 WebDAV 自动备份二选一",
+                    isChecked = config.autoBackupSyncMode == "local",
+                    enabled = config.localDirectoryUri.isNotBlank() && !state.isLoading,
+                    isFirstItem = true,
+                    onClick = {
+                        viewModel.updateConfigField { it.copy(autoBackupSyncMode = if (it.autoBackupSyncMode == "local") "off" else "local") }
+                    },
+                )
+                HorizontalDivider()
+                PreferenceSwitch(
                     title = stringResource(R.string.backup_auto_webdav),
                     description = stringResource(R.string.backup_auto_webdav_desc),
                     isChecked = config.autoBackupSyncMode == "remote",
                     enabled = config.isConfigured && !state.isLoading,
                     isFirstItem = true,
                     onClick = {
-                        // 开启自动备份前必须有密码：后台无法弹窗，没密码只能明文上传
-                        if (config.autoBackupSyncMode != "remote" && config.backupPassphrase.isBlank()) {
-                            viewModel.reportMissingPassphrase()
-                        } else {
-                            viewModel.updateConfigField { it.copy(autoBackupSyncMode = if (it.autoBackupSyncMode == "remote") "off" else "remote") }
-                        }
+                        viewModel.updateConfigField { it.copy(autoBackupSyncMode = if (it.autoBackupSyncMode == "remote") "off" else "remote") }
                     },
                 )
                 HorizontalDivider()
@@ -209,7 +202,7 @@ fun BackupScreen(
                 Box(
                     Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)).clickable { },
                     contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator() }
+                ) { MediaLoadingIndicator() }
             }
         }
     }
@@ -228,6 +221,19 @@ fun BackupScreen(
             onDismiss = { if (!state.isLoading) showAccount = false },
         )
     }
+    if (state.coverWarnings.isNotEmpty()) {
+        NextDialog(
+            title = { Text("备份已完成，部分封面未包含") },
+            onDismissRequest = viewModel::dismissCoverWarnings,
+            confirmButton = { TextButton(onClick = viewModel::dismissCoverWarnings) { Text("知道了") } },
+            content = {
+                Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("设置与书库已保存。以下封面无法取得，书籍信息和原封面地址仍已保留：")
+                    state.coverWarnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
+            },
+        )
+    }
     if (showRemote) {
         NextDialog(
             title = { Text(stringResource(R.string.backup_remote_files)) },
@@ -242,7 +248,7 @@ fun BackupScreen(
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     state.operationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     if (state.isLoading) {
-                        CircularProgressIndicator()
+                        MediaLoadingIndicator()
                     } else if (state.remoteFiles.isEmpty()) Text(stringResource(R.string.backup_no_remote_files))
                     state.remoteFiles.forEach { file ->
                         TextButton(
@@ -292,7 +298,7 @@ fun BackupScreen(
                     if (state.hasOpenListFiles && "openlist_config" !in state.ignoredItems) {
                         Text(stringResource(R.string.backup_openlist_stopped_hint), style = MaterialTheme.typography.bodySmall)
                     }
-                    if (state.isLoading) CircularProgressIndicator()
+                    if (state.isLoading) MediaLoadingIndicator()
                     state.operationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
             },
@@ -327,79 +333,6 @@ fun BackupScreen(
                     showNewBackup = false
                     viewModel.clearPendingNewBackup()
                 }) { Text(stringResource(R.string.cancel)) }
-            },
-        )
-    }
-    if (showPassphrase) {
-        NextDialog(
-            title = { Text(stringResource(R.string.backup_passphrase)) },
-            onDismissRequest = { if (!state.isLoading) showPassphrase = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.savePassphrase(passphraseDraft.trim())
-                        showPassphrase = false
-                    },
-                    enabled = !state.isLoading && passphraseDraft.isNotBlank(),
-                ) { Text(stringResource(R.string.done)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { if (!state.isLoading) showPassphrase = false }, enabled = !state.isLoading) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            content = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        stringResource(R.string.backup_passphrase_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedTextField(
-                        value = passphraseDraft,
-                        onValueChange = { passphraseDraft = it },
-                        label = { Text(stringResource(R.string.backup_passphrase)) },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-        )
-    }
-    state.pendingPassphrase?.let {
-        NextDialog(
-            title = { Text(stringResource(R.string.backup_passphrase_enter)) },
-            onDismissRequest = viewModel::cancelPassphrase,
-            confirmButton = {
-                TextButton(onClick = { viewModel.submitPassphrase(importPassphrase) }, enabled = !state.isLoading) {
-                    Text(stringResource(R.string.done))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::cancelPassphrase, enabled = !state.isLoading) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            content = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        stringResource(R.string.backup_passphrase_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedTextField(
-                        value = importPassphrase,
-                        onValueChange = { importPassphrase = it },
-                        label = { Text(stringResource(R.string.backup_passphrase)) },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true,
-                        isError = state.passphraseError != null,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    state.passphraseError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    if (state.isLoading) CircularProgressIndicator()
-                }
             },
         )
     }

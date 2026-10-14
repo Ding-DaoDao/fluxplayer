@@ -17,11 +17,8 @@ import androidx.compose.ui.unit.sp
 import com.fluxplayer.app.core.model.AccentPreset
 
 /**
- * 墨 · 极简主题（借鉴 MoRead「中性灰底 + 强调色」哲学）。
- *
- * 中性灰阶底色：不带任何色相，界面上唯一的彩色来源是强调色。
- * primary 家族由强调色动态派生（见 [withAccent]），secondary / tertiary 保持中性灰，
- * 因此换强调色时无需维护任何第二套色板。
+ * 柔和的媒体主题：以中性色为底座，让背景和卡片随强调色轻微着色。
+ * 正文保留稳定的中性前景色，日夜模式共用同一套颜色派生规则。
  */
 
 /** 强调色按给定明暗取 ARGB 对应的 [Color]。 */
@@ -85,11 +82,7 @@ private val NeutralDarkColors = darkColorScheme(
 )
 
 /**
- * 中性配色入口：**中性灰阶底座 + 指定强调色派生的完整 ColorScheme**。
- *
- * 这是全应用唯一的配色实现。中性灰阶意味着 secondary/tertiary 家族被刻意去色，
- * 强调色成为界面上唯一的色相出口 —— 换强调色能立刻在全局看到变化，
- * 而底色始终保持克制。强调色由用户在「设置 › 外观」中选择。
+ * 配色入口：背景、卡片和强调色一起派生，切换预设时全局保持协调。
  */
 fun neutralColorScheme(accent: Color, dark: Boolean): ColorScheme =
     (if (dark) NeutralDarkColors else NeutralLightColors).withAccent(accent, dark)
@@ -103,48 +96,48 @@ val FluxShapes = Shapes(
     extraLarge = RoundedCornerShape(36.dp),
 )
 
-/** 排版：标题用衬线（Serif）半粗，正文保持无衬线 —— 书卷气的来源。 */
+/** 排版：统一无衬线字体，以字号和字重建立清楚的媒体信息层级。 */
 val FluxM3Typography = Typography(
     displayLarge = TextStyle(
-        fontFamily = FontFamily.Serif,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 52.sp,
         lineHeight = 58.sp,
         letterSpacing = (-0.8).sp,
     ),
     displayMedium = TextStyle(
-        fontFamily = FontFamily.Serif,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 42.sp,
         lineHeight = 48.sp,
         letterSpacing = (-0.5).sp,
     ),
     displaySmall = TextStyle(
-        fontFamily = FontFamily.Serif,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 36.sp,
         lineHeight = 44.sp,
     ),
     headlineLarge = TextStyle(
-        fontFamily = FontFamily.Serif,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 32.sp,
         lineHeight = 40.sp,
     ),
     headlineMedium = TextStyle(
-        fontFamily = FontFamily.Serif,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 27.sp,
         lineHeight = 34.sp,
     ),
     headlineSmall = TextStyle(
-        fontFamily = FontFamily.Serif,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 24.sp,
         lineHeight = 31.sp,
     ),
     titleLarge = TextStyle(
-        fontFamily = FontFamily.Serif,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 22.sp,
         lineHeight = 29.sp,
@@ -209,10 +202,26 @@ private fun ColorScheme.withAccent(
     accent: Color,
     dark: Boolean,
 ): ColorScheme {
+    fun tinted(base: Color, lightAlpha: Float, darkAlpha: Float): Color =
+        accent.copy(alpha = if (dark) darkAlpha else lightAlpha).compositeOver(base)
+
+    val canvas = tinted(background, 0.055f, 0.035f)
+    val card = tinted(surfaceContainerLowest, 0.018f, 0.045f)
     val container = accent
         .copy(alpha = if (dark) 0.22f else 0.16f)
-        .compositeOver(if (dark) surfaceContainerHigh else surfaceContainer)
+        .compositeOver(if (dark) surfaceContainerHigh else card)
     return copy(
+        background = canvas,
+        surface = canvas,
+        surfaceBright = tinted(surfaceBright, 0.018f, 0.06f),
+        surfaceDim = tinted(surfaceDim, 0.06f, 0.035f),
+        surfaceContainerLowest = card,
+        surfaceContainerLow = card,
+        surfaceContainer = tinted(surfaceContainer, 0.045f, 0.06f),
+        surfaceContainerHigh = tinted(surfaceContainerHigh, 0.06f, 0.08f),
+        surfaceContainerHighest = tinted(surfaceContainerHighest, 0.075f, 0.10f),
+        surfaceVariant = tinted(surfaceVariant, 0.08f, 0.10f),
+        outlineVariant = tinted(outlineVariant, 0.08f, 0.10f),
         primary = accent,
         onPrimary = accent.onAccent(),
         primaryContainer = container,

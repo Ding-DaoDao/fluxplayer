@@ -36,7 +36,7 @@ object FluxRadius {
     val icon: Dp = 8.dp
     val field: Dp = 14.dp
     val row: Dp = 16.dp
-    val card: Dp = 20.dp
+    val card: Dp = 28.dp
     val sheet: Dp = 28.dp
     val pill: Dp = 999.dp
 
@@ -92,7 +92,7 @@ enum class ShapeStyle(val label: String) {
 fun sectionCardColor(): Color = if (isDarkTheme()) {
     FluxTheme.colorScheme.surfaceContainerLow
 } else {
-    FluxTheme.colorScheme.surface
+    FluxTheme.colorScheme.surfaceContainerLow
 }
 
 /**
