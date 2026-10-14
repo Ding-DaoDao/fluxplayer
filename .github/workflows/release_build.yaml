@@ -1,0 +1,242 @@
+name: Publish Flux Player Release APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/build.gradle.kts'
+      - '.github/workflows/release_build.yaml'
+  workflow_dispatch:
+    inputs:
+      release_signing:
+        description: 'Signing mode: production (private cert) or test (debug cert)'
+        required: false
+        default: production
+        type: choice
+        options:
+          - production
+          - test
+      publish_release:
+        description: 'Create a GitHub Release (uncheck to only build & upload artifacts)'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fluxplayer-release-main
+  cancel-in-progress: true
+
+env:
+  # workflow_dispatch 时取输入值；push 触发时默认走正式签名。
+  RELEASE_SIGNING: ${{ github.event.inputs.release_signing || 'production' }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Resolve app version from build script
+        id: version
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re
+          text = pathlib.Path('app/build.gradle.kts').read_text(encoding='utf-8')
+          code = re.search(r'versionCode\s*=\s*(\d+)', text)
+          name = re.search(r'versionName\s*=\s*"([^"]+)"', text)
+          if not code or not name:
+              raise SystemExit('Unable to resolve versionCode/versionName from app/build.gradle.kts')
+          version_code, version_name = code.group(1), name.group(1)
+          out = pathlib.Path(os.environ['GITHUB_OUTPUT'])
+          with out.open('a', encoding='utf-8') as handle:
+              handle.write(f'code={version_code}\n')
+              handle.write(f'name={version_name}\n')
+          print(f'Resolved version {version_name} (code {version_code})')
+          PY
+
+      - name: Check release signing configuration
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import os
+          if os.environ['RELEASE_SIGNING'] == 'production':
+              names = [
+                  'ANDROID_KEYSTORE_BASE64',
+                  'ANDROID_KEYSTORE_PASSWORD',
+                  'ANDROID_KEY_ALIAS',
+                  'ANDROID_KEY_PASSWORD',
+              ]
+              missing = [name for name in names if not os.environ.get(name)]
+              if missing:
+                  raise SystemExit('Missing release signing secrets: ' + ', '.join(missing))
+              print('Production signing secrets are present')
+          else:
+              print('Test signing mode: using bundled debug certificate')
+          PY
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '14742923'
+          packages: 'platform-tools'
+
+      - name: Install Android SDK
+        run: |
+          sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+          if [ ! -d "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s android-37.0 "$ANDROID_HOME/platforms/android-37"
+          fi
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Build optimized Release APK
+        run: |
+          gradle --no-daemon --max-workers=1 \
+            '-Dorg.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8 -Djava.util.concurrent.ForkJoinPool.common.parallelism=4' \
+            -I .github/ci-repositories.gradle \
+            :app:assembleRelease
+
+      - name: Sign Release APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          mkdir -p release
+          if [ "$RELEASE_SIGNING" = production ]; then
+            python3 - <<'PY'
+          import base64, os, pathlib
+          names = [
+              'ANDROID_KEYSTORE_BASE64',
+              'ANDROID_KEYSTORE_PASSWORD',
+              'ANDROID_KEY_ALIAS',
+              'ANDROID_KEY_PASSWORD',
+          ]
+          missing = [name for name in names if not os.environ.get(name)]
+          if missing:
+              raise SystemExit('Missing release signing secrets: ' + ', '.join(missing))
+          key = pathlib.Path(os.environ['RUNNER_TEMP']) / 'fluxplayer-release.keystore'
+          key.write_bytes(base64.b64decode(''.join(os.environ['ANDROID_KEYSTORE_BASE64'].split()), validate=True))
+          key.chmod(0o600)
+          PY
+            KEYSTORE="$RUNNER_TEMP/fluxplayer-release.keystore"
+            trap 'rm -f "$KEYSTORE"' EXIT
+            APK_NAME="FluxPlayer-${VERSION_NAME}-arm64-v8a-release.apk"
+          else
+            KEYSTORE=app/debug.keystore
+            export ANDROID_KEYSTORE_PASSWORD=android ANDROID_KEY_PASSWORD=android ANDROID_KEY_ALIAS=androiddebugkey
+            APK_NAME="FluxPlayer-${VERSION_NAME}-arm64-v8a-test-signed-release.apk"
+          fi
+          UNSIGNED=$(ls app/build/outputs/apk/release/*-unsigned.apk 2>/dev/null | head -1)
+          if [ -z "$UNSIGNED" ]; then
+            UNSIGNED=$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -1)
+          fi
+          echo "Signing $UNSIGNED"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "release/$APK_NAME" \
+            "$UNSIGNED"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "release/$APK_NAME"
+
+      - name: Verify Release APK and native libraries
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess, zipfile
+          apk = next(pathlib.Path('release').glob('*.apk'))
+          badging = subprocess.check_output(
+              [os.environ['ANDROID_HOME'] + '/build-tools/36.0.0/aapt', 'dump', 'badging', str(apk)],
+              text=True,
+          )
+          assert "name='com.fluxplayer.app'" in badging, 'Unexpected application ID'
+          expected = f"versionCode='{os.environ['VERSION_CODE']}'"
+          assert expected in badging, f'Expected {expected}'
+          expected_name = f"versionName='{os.environ['VERSION_NAME']}'"
+          assert expected_name in badging, f'Expected {expected_name}'
+          assert 'application-debuggable' not in badging, 'APK must be a non-debuggable Release build'
+          with zipfile.ZipFile(apk) as archive:
+              libraries = [n for n in archive.namelist() if n.startswith('lib/arm64-v8a/') and n.endswith('.so')]
+              assert libraries, 'No arm64-v8a native libraries found'
+              assert 'lib/arm64-v8a/libopenlist.so' in libraries, 'OpenList library is missing'
+              for name in libraries:
+                  assert archive.read(name)[:4] == b'\x7fELF', f'Invalid native library: {name}'
+          print(f"Verified signed, non-debuggable Release APK {os.environ['VERSION_NAME']} with complete arm64 native libraries")
+          PY
+
+      - name: Save crash mapping and checksums
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          zip -j "release/FluxPlayer-${VERSION_NAME}-mapping.zip" app/build/outputs/mapping/release/mapping.txt
+          (cd release && sha256sum *.apk *-mapping.zip > SHA256SUMS.txt)
+
+      - name: Upload Release build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluxplayer-${{ steps.version.outputs.name }}-arm64-release
+          path: release/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: ${{ github.event_name == 'push' || github.event.inputs.publish_release == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          TAG="v${VERSION_NAME}"
+          {
+            echo "Flux Player ${VERSION_NAME} 正式版构建。"
+            echo
+            echo "Release 构建启用代码混淆和资源压缩，包含完整 arm64 原生库。"
+            echo "附带混淆映射（mapping.txt）和 SHA-256 校验文件。"
+            if [ "$RELEASE_SIGNING" = test ]; then
+              echo
+              echo '签名：使用仓库现有的公开调试证书签署 Release 优化测试版；不是正式发布签名。'
+            else
+              echo
+              echo '签名：使用 GitHub Secrets 配置的正式发布证书。'
+            fi
+          } > "$RUNNER_TEMP/release-notes.md"
+          TITLE="Flux Player ${VERSION_NAME}（Release）"
+          RELEASE_FLAGS=()
+          if [ "$RELEASE_SIGNING" = test ]; then
+            TITLE="Flux Player ${VERSION_NAME}（Release 优化测试版）"
+            RELEASE_FLAGS+=(--prerelease)
+          else
+            RELEASE_FLAGS+=(--latest)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, uploading assets to it"
+            gh release upload "$TAG" release/*.apk release/*-mapping.zip release/SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" \
+              release/*.apk release/*-mapping.zip release/SHA256SUMS.txt \
+              --target "$GITHUB_SHA" \
+              --title "$TITLE" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              "${RELEASE_FLAGS[@]}"
+          fi

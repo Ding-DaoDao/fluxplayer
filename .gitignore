@@ -13,6 +13,9 @@ local.properties
 # Never commit signing keystores (release key is a security-sensitive secret)
 app/release.keystore
 *.jks
+*.keystore
+keystore.properties
+!app/debug.keystore
 
 # ==================== IDE & Tools ====================
 .idea/
@@ -50,3 +53,9 @@ Thumbs.db
 /.mimocode/
 /.mimocode/plans/
 /.workbuddy/
+
+# ==================== Local Tooling / Agent Scratch ====================
+/.workbuddy-ai/
+/.codex-remote-attachments/
+/Python/
+*~
