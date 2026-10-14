@@ -21,10 +21,10 @@
     <string name="history">历史</string>
     <string name="audiobook">听书</string>
     <string name="no_videos_found">未找到视频</string>
-    <string name="permission_info">Next Player 应用需要“%1$s”权限以访问和播放媒体。没有它，则无法访问和播放媒体。要使用应用的完整功能，请授予此权限。</string>
+    <string name="permission_info">Flux Player 应用需要“%1$s”权限以访问和播放媒体。没有它，则无法访问和播放媒体。要使用应用的完整功能，请授予此权限。</string>
     <string name="permission_not_granted">未授予权限</string>
     <string name="permission_request">权限请求</string>
-    <string name="permission_settings">Next Player 应用需要“%1$s”权限以访问和播放媒体。没有它，则无法访问和播放媒体。由于已永久拒绝了此权限，要使用应用的完整功能，请在设置中授予此权限。</string>
+    <string name="permission_settings">Flux Player 应用需要“%1$s”权限以访问和播放媒体。没有它，则无法访问和播放媒体。由于已永久拒绝了此权限，要使用应用的完整功能，请在设置中授予此权限。</string>
     <string name="player_controls_exit">向上导航</string>
     <string name="player_controls_next">下一个</string>
     <string name="player_controls_play_pause">播放/暂停</string>
@@ -46,7 +46,7 @@
     <string name="z_a">Z-A</string>
     <string name="dark_theme">深色主题</string>
     <string name="sort">排序</string>
-    <string name="title_activity_player">Next Player 活动</string>
+    <string name="title_activity_player">Flux Player 活动</string>
     <string name="unknown_error">发生未知错误</string>
     <string name="playback">播放</string>
     <string name="interface_name">界面</string>

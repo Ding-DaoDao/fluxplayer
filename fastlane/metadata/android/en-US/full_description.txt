@@ -1,6 +1,6 @@
-Next Player is a native video player written in Kotlin and jetpack compose. It provides a simple and easy-to-use interface for users to play videos on their Android devices
+Flux Player is a native video player written in Kotlin and Jetpack Compose. It provides a simple and easy-to-use interface for users to play videos on their Android devices.
 
-This project is still in development and is expected to have bugs
+This project is still in development and is expected to have bugs.
 
 Supported formats:
 
@@ -11,9 +11,12 @@ Supported formats:
 
 Key Features:
 
- * Native Android app with simple and easy-to-use interface
- * Completely free and open source and without any ads or excessive permissions
- * Material 3 (you) support
+ * Native Android app with a simple and easy-to-use interface
+ * Completely free and open source, without any ads or excessive permissions
+ * Material 3 (Material You) support with dynamic color theming
+ * Built-in danmaku (bullet chat) overlay with real-time rendering
+ * Cloud drive integration: Aliyun Drive, Quark Drive, 189 Cloud, 139 Cloud, 123 Pan, WebDAV
+ * OpenList server support for local media streaming
  * Audio/Subtitle track selection
  * Vertical swipe to change brightness (left) / volume (right)
  * Horizontal swipe to seek through video
@@ -24,12 +27,11 @@ Key Features:
  * Volume boost
  * External subtitle support (long press subtitle icon)
  * Controls lock
+ * Background playback
  * No ads, tracking or excessive permissions
  * Picture in picture mode
 
-Project Repo: https://github.com/anilbeesetti/nextplayer
+Project Repo: https://github.com/Ding-DaoDao/fluxplayer
 
-If you like my work, consider supporting me by buying me a coffee:
- - UPI: https://pay.upilink.in/pay/anilbeesetti811@ybl
- - PayPal: https://paypal.me/AnilBeesetti
- - Ko-fi: https://ko-fi.com/anilbeesetti
+Flux Player is built upon the foundation of Next Player by Anil Beesetti:
+https://github.com/anilbeesetti/nextplayer
