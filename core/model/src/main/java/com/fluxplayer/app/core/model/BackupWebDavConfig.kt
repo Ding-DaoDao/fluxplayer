@@ -23,7 +23,7 @@ data class BackupWebDavConfig(
     val autoCheckNewBackup: Boolean = false,
     /** 自动备份模式：off 关闭，local 保存到授权目录，remote 上传至 WebDAV。 */
     val autoBackupSyncMode: String = "off",
-    /** 两次自动备份的最小间隔（分钟），取值来自 [AUTO_BACKUP_INTERVAL_PRESETS]，默认沿用旧版固定的 5 分钟。 */
+    /** 两次自动备份的最小间隔（分钟），取值来自 [AUTO_BACKUP_INTERVAL_PRESETS]，默认一周。 */
     val autoBackupIntervalMinutes: Int = DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES,
     /** 自动备份时机：on_stop 退到后台时，on_launch 打开应用后备份一次，on_both 两者都执行。 */
     val autoBackupTrigger: String = AUTO_BACKUP_TRIGGER_ON_STOP,
@@ -96,12 +96,26 @@ data class BackupWebDavConfig(
     companion object {
         val AUTO_SYNC_MODES = listOf("off", "local", "remote")
 
-        /** 旧版固定 5 分钟节流，既作为间隔预设的下限，也作为默认值保持升级行为不变。 */
-        const val MIN_AUTO_BACKUP_INTERVAL_MINUTES = 5
-        const val DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES = MIN_AUTO_BACKUP_INTERVAL_MINUTES
+        /** 预设中的最小间隔，用于把越界值收敛回来；需与 [AUTO_BACKUP_INTERVAL_PRESETS] 首项保持一致。 */
+        const val MIN_AUTO_BACKUP_INTERVAL_MINUTES = 15
 
-        /** 可选的自动备份间隔（分钟）：5 分钟到 12 小时，以及 1 天、2 天、1 周。 */
-        val AUTO_BACKUP_INTERVAL_PRESETS = listOf(5, 15, 30, 60, 180, 300, 720, 24 * 60, 2 * 24 * 60, 7 * 24 * 60)
+        /** 默认间隔为一周。 */
+        const val DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES = 7 * 24 * 60
+
+        /** 可选的自动备份间隔（分钟）：15 分钟到 12 小时，以及 1 天、2 天、3 天、5 天、1 周。 */
+        val AUTO_BACKUP_INTERVAL_PRESETS = listOf(
+            15,
+            30,
+            60,
+            180,
+            300,
+            720,
+            24 * 60,
+            2 * 24 * 60,
+            3 * 24 * 60,
+            5 * 24 * 60,
+            7 * 24 * 60,
+        )
 
         const val AUTO_BACKUP_TRIGGER_ON_STOP = "on_stop"
         const val AUTO_BACKUP_TRIGGER_ON_LAUNCH = "on_launch"

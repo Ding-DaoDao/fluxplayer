@@ -105,15 +105,30 @@ class BackupArchiveTest {
 
     @Test
     fun autoBackupIntervalIsClampedIntoThePresetRange() {
-        // 默认值等于旧版硬编码的 5 分钟节流，升级后的自动备份频率不变。
-        assertEquals(5L * 60 * 1000, BackupWebDavConfig().effectiveAutoBackupIntervalMs())
-        assertEquals(5L * 60 * 1000, BackupWebDavConfig(autoBackupIntervalMinutes = 1).effectiveAutoBackupIntervalMs())
+        // 默认间隔为一周。
+        assertEquals(7L * 24 * 60 * 60 * 1000, BackupWebDavConfig().effectiveAutoBackupIntervalMs())
+        // 低于下限的旧值收敛到预设最小值（15 分钟）。
+        assertEquals(15L * 60 * 1000, BackupWebDavConfig(autoBackupIntervalMinutes = 1).effectiveAutoBackupIntervalMs())
+        assertEquals(15L * 60 * 1000, BackupWebDavConfig(autoBackupIntervalMinutes = 5).effectiveAutoBackupIntervalMs())
         assertEquals(
             BackupWebDavConfig.AUTO_BACKUP_INTERVAL_PRESETS.last() * 60L * 1000,
             BackupWebDavConfig(autoBackupIntervalMinutes = Int.MAX_VALUE).effectiveAutoBackupIntervalMs(),
         )
         assertEquals(3L * 60 * 60 * 1000, BackupWebDavConfig(autoBackupIntervalMinutes = 180).effectiveAutoBackupIntervalMs())
+        assertEquals(3L * 24 * 60 * 60 * 1000, BackupWebDavConfig(autoBackupIntervalMinutes = 3 * 24 * 60).effectiveAutoBackupIntervalMs())
+        assertEquals(5L * 24 * 60 * 60 * 1000, BackupWebDavConfig(autoBackupIntervalMinutes = 5 * 24 * 60).effectiveAutoBackupIntervalMs())
         assertEquals(7L * 24 * 60 * 60 * 1000, BackupWebDavConfig(autoBackupIntervalMinutes = 7 * 24 * 60).effectiveAutoBackupIntervalMs())
+    }
+
+    @Test
+    fun autoBackupIntervalPresetsAreSortedAndMatchTheClampBounds() {
+        val presets = BackupWebDavConfig.AUTO_BACKUP_INTERVAL_PRESETS
+        // 预设必须严格递增，且首项与收敛下限一致，否则设置项会与生效值对不上。
+        assertEquals(presets.sorted(), presets)
+        assertEquals(presets.distinct(), presets)
+        assertEquals(BackupWebDavConfig.MIN_AUTO_BACKUP_INTERVAL_MINUTES, presets.first())
+        assertEquals(BackupWebDavConfig.DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES, presets.last())
+        assertFalse("5 分钟已从预设中移除", presets.contains(5))
     }
 
     @Test
@@ -133,7 +148,8 @@ class BackupArchiveTest {
     fun legacyBackupConfigDecodesWithNewAutoBackupDefaults() {
         val legacy = """{"url":"https://example.com/dav","autoBackupSyncMode":"remote"}"""
         val decoded = Json.decodeFromString(BackupWebDavConfig.serializer(), legacy)
-        assertEquals(5, decoded.autoBackupIntervalMinutes)
+        // 旧配置没有间隔字段，解码后应落到新的默认值（一周）。
+        assertEquals(7 * 24 * 60, decoded.autoBackupIntervalMinutes)
         assertEquals("on_stop", decoded.autoBackupTrigger)
         assertEquals(0L, decoded.lastAutoBackupAt)
         val roundTrip = Json.decodeFromString(
