@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fluxplayer.app.core.tingshu.ListeningSource
 import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.core.ui.components.MediaPageLoading as AudiobookLoadingIndicator
 import com.fluxplayer.app.core.ui.components.MediaPullToRefreshBox as PullToRefreshBox
@@ -44,6 +45,7 @@ import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.AudiobookBookCard
 import com.fluxplayer.app.feature.player.PlayConfirmDialog
+import com.fluxplayer.app.feature.tingshu.TingshuSourceConfigPanel
 import com.fluxplayer.app.feature.tingshu.TingshuSourceContent
 import com.fluxplayer.app.feature.tingshu.TingshuViewModel
 import com.fluxplayer.app.feature.videopicker.model.AudioBook
@@ -65,6 +67,8 @@ fun AudiobookTabContent(
 
     var destination by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     var showingDetail by remember { mutableStateOf(false) }
+    // 长按书源卡片时就地弹出该源的配置面板，无需绕到「设置 → 听书配置」
+    var configuringSource by remember { mutableStateOf<ListeningSource?>(null) }
     val sourceState by sourceViewModel.state.collectAsStateWithLifecycle()
 
     val detailChanged: (Boolean) -> Unit = {
@@ -117,6 +121,9 @@ fun AudiobookTabContent(
                 sourceViewModel.open(source)
                 destination = source.id
             },
+            onSourceLongClick = { source ->
+                configuringSource = source
+            },
             modifier = modifier,
         )
     } else {
@@ -133,6 +140,12 @@ fun AudiobookTabContent(
             }
         }
     }
+    // 长按书源弹出的配置面板；设置页「听书配置」复用同一入口
+    TingshuSourceConfigPanel(
+        source = configuringSource,
+        viewModel = sourceViewModel,
+        onDismiss = { configuringSource = null },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.fluxplayer.app.core.tingshu.ListeningSource
 import com.fluxplayer.app.core.tingshu.SourceHost
 import com.fluxplayer.app.core.ui.components.MediaAlertDialog as AlertDialog
 import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
@@ -55,7 +56,7 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
     }
     val sources by viewModel.repository.sources.collectAsStateWithLifecycle()
     val packages by viewModel.repository.packages.collectAsStateWithLifecycle()
-    var configuringJdr by remember { mutableStateOf<com.fluxplayer.app.core.tingshu.ListeningSource?>(null) }
+    var configuringSource by remember { mutableStateOf<ListeningSource?>(null) }
     var deleting by remember { mutableStateOf<String?>(null) }
     var showImportInfo by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -97,9 +98,7 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
                         supportingContent = { Text("账号、目录与偏好", style = FluxTheme.typography.bodySmall) },
                         trailingContent = { Icon(NextIcons.Settings, "配置", tint = FluxTheme.colorScheme.onSurfaceVariant) },
                         colors = ListItemDefaults.colors(containerColor = FluxTheme.colorScheme.surfaceContainerLow),
-                        modifier = Modifier.clickable(enabled = !state.loading) {
-                            if (source.id.startsWith("jdr:")) configuringJdr = source else viewModel.configure(source)
-                        }.padding(horizontal = 4.dp),
+                        modifier = Modifier.clickable(enabled = !state.loading) { configuringSource = source }.padding(horizontal = 4.dp),
                     )
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.End) {
@@ -138,14 +137,65 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } },
         )
     }
-    configuringJdr?.let { source -> JdrSourceDialog(source, viewModel.repository) { configuringJdr = null } }
-    state.configItems?.let { items ->
+    TingshuSourceConfigPanel(
+        source = configuringSource,
+        viewModel = viewModel,
+        onDismiss = { configuringSource = null },
+    )
+}
+
+/**
+ * 弹出指定书源的配置面板。
+ *
+ * 「设置 → 听书配置」的书源列表与听书首页长按书源共用此入口：JDR 源交给
+ * [JdrSourceDialog]，其余源先经 [TingshuViewModel.configure] 载入配置项，再由
+ * [SourceConfigDialog] 呈现。
+ *
+ * @param source 待配置的书源；传 null 表示不展示面板。
+ * @param onDismiss 面板关闭时回调，调用方应据此把 [source] 置空。
+ */
+@Composable
+fun TingshuSourceConfigPanel(
+    source: ListeningSource?,
+    viewModel: TingshuViewModel,
+    onDismiss: () -> Unit,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    // 面板内的 JDR 分支：与 source 绑定，source 变化或置空时自动复位
+    var jdrSource by remember(source?.id) { mutableStateOf<ListeningSource?>(null) }
+
+    LaunchedEffect(source?.id) {
+        val target = source ?: return@LaunchedEffect
+        if (target.id.startsWith("jdr:")) jdrSource = target else viewModel.configure(target)
+    }
+
+    jdrSource?.let { target ->
+        JdrSourceDialog(target, viewModel.repository) {
+            jdrSource = null
+            onDismiss()
+        }
+    }
+
+    val active = state.source
+    val items = state.configItems
+    if (active != null && items != null) {
         SourceConfigDialog(
-            state.source!!.id, state.source!!.name, items, state.loading, viewModel::dismissConfig, viewModel::saveConfig,
-            viewModel::configAction, state.configRevision, state.error, state.loginState,
+            active.id,
+            active.name,
+            items,
+            state.loading,
+            onDismiss = {
+                viewModel.dismissConfig()
+                onDismiss()
+            },
+            onSave = viewModel::saveConfig,
+            onAction = viewModel::configAction,
+            revision = state.configRevision,
+            error = state.error,
+            loginState = state.loginState,
             message = state.configMessage,
             onRetry = viewModel::retry,
-            onWebLogin = { state.source?.let(viewModel::startWebLogin) },
+            onWebLogin = { viewModel.startWebLogin(active) },
             canWebLogin = state.webLoginAvailable,
         )
     }

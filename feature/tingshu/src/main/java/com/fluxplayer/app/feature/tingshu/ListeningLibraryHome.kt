@@ -96,6 +96,8 @@ fun ListeningLibraryHome(
     hasLocalPath: Boolean,
     onLocalClick: () -> Unit,
     onSourceClick: (ListeningSource) -> Unit,
+    /** 长按书源卡片时触发，用于就地弹出该书源的配置面板 */
+    onSourceLongClick: (ListeningSource) -> Unit = {},
     modifier: Modifier = Modifier,
     localBooks: List<AudioBook> = emptyList(),
     localResume: Map<String, String> = emptyMap(),
@@ -385,14 +387,22 @@ fun ListeningLibraryHome(
         }
         item(key = "source-heading", span = { GridItemSpan(maxLineSpan) }) {
             SectionTitle("在线书库") {
-                Text("${sources.size} 个书源", style = FluxTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                Text(
+                    if (sources.isEmpty()) "0 个书源" else "${sources.size} 个书源 · 长按配置",
+                    style = FluxTheme.typography.labelMedium,
+                    color = colors.onSurfaceVariant,
+                )
             }
         }
         if (sources.isEmpty()) {
             item(key = "source-empty", span = { GridItemSpan(maxLineSpan) }) { EmptySourceEntryCard() }
         }
         items(sources, key = { "source-${it.id}" }) { source ->
-            CloudLibraryCard(source, onClick = { onSourceClick(source) })
+            CloudLibraryCard(
+                source,
+                onClick = { onSourceClick(source) },
+                onLongClick = { onSourceLongClick(source) },
+            )
         }
         item(key = "recent-heading", span = { GridItemSpan(maxLineSpan) }) {
             SectionTitle("最近听过") {
@@ -432,9 +442,16 @@ fun ListeningLibraryHome(
 }
 
 @Composable
-private fun CloudLibraryCard(source: ListeningSource, onClick: () -> Unit) {
+private fun CloudLibraryCard(source: ListeningSource, onClick: () -> Unit, onLongClick: () -> Unit) {
     val colors = FluxTheme.colorScheme
-    Surface(onClick = onClick, shape = HomeShapeMedium, color = colors.surfaceContainerLow, border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.35f))) {
+    Surface(
+        shape = HomeShapeMedium,
+        color = colors.surfaceContainerLow,
+        border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.35f)),
+        modifier = Modifier
+            .clip(HomeShapeMedium)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "书源配置"),
+    ) {
         Column(Modifier.fillMaxWidth().padding(20.dp).heightIn(min = 64.dp), verticalArrangement = Arrangement.Center) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Image(
