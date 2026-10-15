@@ -62,3 +62,6 @@ Thumbs.db
 
 # ==================== Local Cleanup Backup ====================
 /_cleanup_backup/
+
+# ==================== Local Release Output ====================
+/dist/
