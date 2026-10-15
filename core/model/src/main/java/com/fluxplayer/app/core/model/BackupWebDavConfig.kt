@@ -23,6 +23,12 @@ data class BackupWebDavConfig(
     val autoCheckNewBackup: Boolean = false,
     /** 自动备份模式：off 关闭，local 保存到授权目录，remote 上传至 WebDAV。 */
     val autoBackupSyncMode: String = "off",
+    /** 两次自动备份的最小间隔（分钟），取值来自 [AUTO_BACKUP_INTERVAL_PRESETS]，默认沿用旧版固定的 5 分钟。 */
+    val autoBackupIntervalMinutes: Int = DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES,
+    /** 自动备份时机：on_stop 退到后台时，on_launch 打开应用后备份一次，on_both 两者都执行。 */
+    val autoBackupTrigger: String = AUTO_BACKUP_TRIGGER_ON_STOP,
+    /** 最近一次自动备份的时刻，跨进程重启保持间隔，0 表示从未备份过。 */
+    val lastAutoBackupAt: Long = 0L,
     /** 兼容旧备份格式，本地导出不再依赖原始文件路径。 */
     val backupPath: String = "",
     /** 本机通过系统目录选择器授予读写权限的持久目录。 */
@@ -79,7 +85,34 @@ data class BackupWebDavConfig(
         password = password,
     )
 
+    /** 间隔可能被旧版本或手工编辑写成非法值，这里收敛到预设区间。 */
+    val effectiveAutoBackupIntervalMinutes: Int
+        get() = autoBackupIntervalMinutes
+            .coerceAtLeast(MIN_AUTO_BACKUP_INTERVAL_MINUTES)
+            .coerceAtMost(AUTO_BACKUP_INTERVAL_PRESETS.last())
+
+    fun effectiveAutoBackupIntervalMs(): Long = effectiveAutoBackupIntervalMinutes * 60 * 1000L
+
     companion object {
         val AUTO_SYNC_MODES = listOf("off", "local", "remote")
+
+        /** 旧版固定 5 分钟节流，既作为间隔预设的下限，也作为默认值保持升级行为不变。 */
+        const val MIN_AUTO_BACKUP_INTERVAL_MINUTES = 5
+        const val DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES = MIN_AUTO_BACKUP_INTERVAL_MINUTES
+
+        /** 可选的自动备份间隔（分钟）：5 分钟到 12 小时，以及 1 天、2 天、1 周。 */
+        val AUTO_BACKUP_INTERVAL_PRESETS = listOf(5, 15, 30, 60, 180, 300, 720, 24 * 60, 2 * 24 * 60, 7 * 24 * 60)
+
+        const val AUTO_BACKUP_TRIGGER_ON_STOP = "on_stop"
+        const val AUTO_BACKUP_TRIGGER_ON_LAUNCH = "on_launch"
+        const val AUTO_BACKUP_TRIGGER_ON_BOTH = "on_both"
+        val AUTO_BACKUP_TRIGGERS = listOf(AUTO_BACKUP_TRIGGER_ON_STOP, AUTO_BACKUP_TRIGGER_ON_LAUNCH, AUTO_BACKUP_TRIGGER_ON_BOTH)
+
+        /** 触发时机是否包含本次调用场景；未知值按退到后台处理，保持旧配置行为。 */
+        fun shouldRunOnTrigger(trigger: String, onLaunch: Boolean): Boolean = when (trigger) {
+            AUTO_BACKUP_TRIGGER_ON_LAUNCH -> onLaunch
+            AUTO_BACKUP_TRIGGER_ON_BOTH -> true
+            else -> !onLaunch
+        }
     }
 }

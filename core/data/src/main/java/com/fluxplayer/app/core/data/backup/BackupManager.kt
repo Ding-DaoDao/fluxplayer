@@ -118,6 +118,8 @@ class BackupManager @Inject constructor(
                             backupPath = "",
                             localDirectoryUri = current.localDirectoryUri,
                             autoBackupSyncMode = "off",
+                            // 备份文件里的上次备份时刻属于来源设备，保留本机的值，避免恢复后被别人的时间挡住。
+                            lastAutoBackupAt = current.lastAutoBackupAt,
                             hasPendingNewBackup = false,
                             lastSeenRemoteBackup = "",
                             deviceName = current.deviceName,

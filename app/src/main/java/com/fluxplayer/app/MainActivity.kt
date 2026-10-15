@@ -281,7 +281,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         lifecycleScope.launch(Dispatchers.IO) {
-            autoBackupHelper.performAutoBackup()
+            autoBackupHelper.performAutoBackup(onLaunch = false)
         }
     }
 }

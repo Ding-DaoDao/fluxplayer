@@ -65,6 +65,11 @@ class NextPlayerApplication : Application(), SingletonImageLoader.Factory {
             autoBackupHelper.checkNewBackupAvailable()
         }
 
+        // 「打开应用后备份一次」的时机：进程启动即触发，间隔由备份设置控制
+        applicationScope.launch(Dispatchers.IO) {
+            autoBackupHelper.performAutoBackup(onLaunch = true)
+        }
+
         // 清理超过 30 天未播放的 media_state 记录
         applicationScope.launch(Dispatchers.IO) {
             val thirtyDaysMs = 30L * 24 * 60 * 60 * 1000

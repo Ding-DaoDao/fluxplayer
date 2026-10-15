@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
@@ -50,6 +51,8 @@ import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
 import com.fluxplayer.app.core.ui.components.MediaTextField as OutlinedTextField
 import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.components.PreferenceSwitch
+import com.fluxplayer.app.core.ui.components.RadioTextButton
+import com.fluxplayer.app.settings.composables.OptionsDialog
 import java.text.DateFormat
 import java.util.Date
 
@@ -64,6 +67,8 @@ fun BackupScreen(
     var showAccount by remember { mutableStateOf(false) }
     var showRemote by remember { mutableStateOf(false) }
     var showNewBackup by remember { mutableStateOf(false) }
+    var showInterval by remember { mutableStateOf(false) }
+    var showTrigger by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf(BackupWebDavConfig()) }
     val chooseDirectory = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(viewModel::setLocalDirectory) }
     val createFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) {
@@ -166,8 +171,8 @@ fun BackupScreen(
 
                 ListSectionTitle(text = stringResource(R.string.backup_automatic_section))
                 PreferenceSwitch(
-                    title = "自动备份到本地目录",
-                    description = "应用退到后台时保存到所选目录；与 WebDAV 自动备份二选一",
+                    title = stringResource(R.string.backup_auto_local),
+                    description = stringResource(R.string.backup_auto_local_desc),
                     isChecked = config.autoBackupSyncMode == "local",
                     enabled = config.localDirectoryUri.isNotBlank() && !state.isLoading,
                     isFirstItem = true,
@@ -181,10 +186,26 @@ fun BackupScreen(
                     description = stringResource(R.string.backup_auto_webdav_desc),
                     isChecked = config.autoBackupSyncMode == "remote",
                     enabled = config.isConfigured && !state.isLoading,
-                    isFirstItem = true,
                     onClick = {
                         viewModel.updateConfigField { it.copy(autoBackupSyncMode = if (it.autoBackupSyncMode == "remote") "off" else "remote") }
                     },
+                )
+                HorizontalDivider()
+                ClickablePreferenceItem(
+                    title = stringResource(R.string.backup_auto_interval),
+                    description = stringResource(
+                        R.string.backup_auto_interval_value,
+                        backupIntervalLabel(config.effectiveAutoBackupIntervalMinutes),
+                    ),
+                    enabled = config.autoBackupSyncMode != "off" && !state.isLoading,
+                    onClick = { showInterval = true },
+                )
+                HorizontalDivider()
+                ClickablePreferenceItem(
+                    title = stringResource(R.string.backup_auto_trigger),
+                    description = backupTriggerLabel(config.autoBackupTrigger),
+                    enabled = config.autoBackupSyncMode != "off" && !state.isLoading,
+                    onClick = { showTrigger = true },
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
@@ -203,6 +224,41 @@ fun BackupScreen(
                     Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)).clickable { },
                     contentAlignment = Alignment.Center,
                 ) { MediaLoadingIndicator() }
+            }
+        }
+    }
+
+    if (showInterval) {
+        OptionsDialog(
+            text = stringResource(R.string.backup_auto_interval),
+            onDismissClick = { showInterval = false },
+        ) {
+            items(BackupWebDavConfig.AUTO_BACKUP_INTERVAL_PRESETS) { minutes ->
+                RadioTextButton(
+                    text = backupIntervalLabel(minutes),
+                    selected = minutes == config.effectiveAutoBackupIntervalMinutes,
+                    onClick = {
+                        viewModel.updateConfigField { it.copy(autoBackupIntervalMinutes = minutes) }
+                        showInterval = false
+                    },
+                )
+            }
+        }
+    }
+    if (showTrigger) {
+        OptionsDialog(
+            text = stringResource(R.string.backup_auto_trigger),
+            onDismissClick = { showTrigger = false },
+        ) {
+            items(BackupWebDavConfig.AUTO_BACKUP_TRIGGERS) { trigger ->
+                RadioTextButton(
+                    text = backupTriggerLabel(trigger),
+                    selected = trigger == config.autoBackupTrigger,
+                    onClick = {
+                        viewModel.updateConfigField { it.copy(autoBackupTrigger = trigger) }
+                        showTrigger = false
+                    },
+                )
             }
         }
     }
@@ -415,3 +471,21 @@ private fun AccountDialog(
         },
     )
 }
+
+/** 把分钟数换算成 30 分钟 / 3 小时 / 2 天 / 1 周这类展示文案。 */
+@Composable
+private fun backupIntervalLabel(minutes: Int): String = when {
+    minutes % (7 * 24 * 60) == 0 -> stringResource(R.string.weeks, minutes / (7 * 24 * 60))
+    minutes % (24 * 60) == 0 -> stringResource(R.string.days, minutes / (24 * 60))
+    minutes % 60 == 0 -> stringResource(R.string.hours, minutes / 60)
+    else -> stringResource(R.string.minutes, minutes)
+}
+
+@Composable
+private fun backupTriggerLabel(trigger: String): String = stringResource(
+    when (trigger) {
+        BackupWebDavConfig.AUTO_BACKUP_TRIGGER_ON_LAUNCH -> R.string.backup_auto_trigger_on_launch
+        BackupWebDavConfig.AUTO_BACKUP_TRIGGER_ON_BOTH -> R.string.backup_auto_trigger_on_both
+        else -> R.string.backup_auto_trigger_on_stop
+    },
+)

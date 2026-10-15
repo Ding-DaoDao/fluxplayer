@@ -101,6 +101,53 @@ class BackupArchiveTest {
         assertEquals("off", BackupWebDavConfig().autoBackupSyncMode)
     }
 
+    // ==================== 自动备份间隔与触发时机 ====================
+
+    @Test
+    fun autoBackupIntervalIsClampedIntoThePresetRange() {
+        // 默认值等于旧版硬编码的 5 分钟节流，升级后的自动备份频率不变。
+        assertEquals(5L * 60 * 1000, BackupWebDavConfig().effectiveAutoBackupIntervalMs())
+        assertEquals(5L * 60 * 1000, BackupWebDavConfig(autoBackupIntervalMinutes = 1).effectiveAutoBackupIntervalMs())
+        assertEquals(
+            BackupWebDavConfig.AUTO_BACKUP_INTERVAL_PRESETS.last() * 60L * 1000,
+            BackupWebDavConfig(autoBackupIntervalMinutes = Int.MAX_VALUE).effectiveAutoBackupIntervalMs(),
+        )
+        assertEquals(3L * 60 * 60 * 1000, BackupWebDavConfig(autoBackupIntervalMinutes = 180).effectiveAutoBackupIntervalMs())
+        assertEquals(7L * 24 * 60 * 60 * 1000, BackupWebDavConfig(autoBackupIntervalMinutes = 7 * 24 * 60).effectiveAutoBackupIntervalMs())
+    }
+
+    @Test
+    fun autoBackupTriggerSelectsTheCallSite() {
+        assertTrue(BackupWebDavConfig.shouldRunOnTrigger("on_stop", onLaunch = false))
+        assertFalse(BackupWebDavConfig.shouldRunOnTrigger("on_stop", onLaunch = true))
+        assertTrue(BackupWebDavConfig.shouldRunOnTrigger("on_launch", onLaunch = true))
+        assertFalse(BackupWebDavConfig.shouldRunOnTrigger("on_launch", onLaunch = false))
+        assertTrue(BackupWebDavConfig.shouldRunOnTrigger("on_both", onLaunch = true))
+        assertTrue(BackupWebDavConfig.shouldRunOnTrigger("on_both", onLaunch = false))
+        // 旧版本或未知取值只按退到后台执行，避免打开应用就上传。
+        assertTrue(BackupWebDavConfig.shouldRunOnTrigger("", onLaunch = false))
+        assertFalse(BackupWebDavConfig.shouldRunOnTrigger("", onLaunch = true))
+    }
+
+    @Test
+    fun legacyBackupConfigDecodesWithNewAutoBackupDefaults() {
+        val legacy = """{"url":"https://example.com/dav","autoBackupSyncMode":"remote"}"""
+        val decoded = Json.decodeFromString(BackupWebDavConfig.serializer(), legacy)
+        assertEquals(5, decoded.autoBackupIntervalMinutes)
+        assertEquals("on_stop", decoded.autoBackupTrigger)
+        assertEquals(0L, decoded.lastAutoBackupAt)
+        val roundTrip = Json.decodeFromString(
+            BackupWebDavConfig.serializer(),
+            Json.encodeToString(
+                BackupWebDavConfig.serializer(),
+                decoded.copy(autoBackupIntervalMinutes = 300, autoBackupTrigger = "on_both", lastAutoBackupAt = 1_700_000_000_000L),
+            ),
+        )
+        assertEquals(300, roundTrip.autoBackupIntervalMinutes)
+        assertEquals("on_both", roundTrip.autoBackupTrigger)
+        assertEquals(1_700_000_000_000L, roundTrip.lastAutoBackupAt)
+    }
+
     // ==================== 归档加密（凭证不再以裸 ZIP 落盘） ====================
 
     @Test

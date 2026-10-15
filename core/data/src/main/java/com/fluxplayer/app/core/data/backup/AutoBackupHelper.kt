@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import android.widget.Toast
 import com.fluxplayer.app.core.datastore.datasource.BackupWebDavDataSource
+import com.fluxplayer.app.core.model.BackupWebDavConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -13,25 +14,30 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** 仅在用户启用后自动备份，并按远程文件名识别尚未检查过的备份。 */
+/** 仅在用户启用后自动备份，间隔与触发时机由备份设置决定。 */
 @Singleton
 class AutoBackupHelper @Inject constructor(
     private val backupManager: BackupManager,
     private val backupWebDavDataSource: BackupWebDavDataSource,
     @ApplicationContext private val context: Context,
 ) {
-    private var lastAutoBackupAtMs = 0L
     private val backupMutex = Mutex()
 
-    suspend fun performAutoBackup(force: Boolean = false) {
+    /**
+     * @param onLaunch 由应用启动触发，只在触发时机包含启动时执行；
+     *                 为 false 时表示退到后台，只在触发时机包含退后台时执行。
+     */
+    suspend fun performAutoBackup(onLaunch: Boolean = false) {
         backupMutex.withLock {
             val config = backupWebDavDataSource.config.first()
             if (config.autoBackupSyncMode == "off") return
+            if (!BackupWebDavConfig.shouldRunOnTrigger(config.autoBackupTrigger, onLaunch)) return
             if (config.autoBackupSyncMode == "remote" && !config.isConfigured) return
             if (config.autoBackupSyncMode == "local" && config.localDirectoryUri.isBlank()) return
             val now = System.currentTimeMillis()
-            if (!force && now - lastAutoBackupAtMs < MIN_AUTO_BACKUP_INTERVAL_MS) return
-            lastAutoBackupAtMs = now
+            if (now - config.lastAutoBackupAt < config.effectiveAutoBackupIntervalMs()) return
+            // 先记录时刻，失败的备份同样受间隔约束，避免故障时反复重试拖住后台任务。
+            backupWebDavDataSource.updateOrThrow { it.copy(lastAutoBackupAt = now) }
             if (config.autoBackupSyncMode == "local") {
                 backupResult { backupManager.exportToDirectory(android.net.Uri.parse(config.localDirectoryUri), config.generateBackupFileName()) }
                     .onSuccess { showSuccess(it.successMessage("本地自动备份成功")) }
@@ -70,6 +76,5 @@ class AutoBackupHelper @Inject constructor(
 
     companion object {
         private const val TAG = "AutoBackupHelper"
-        private const val MIN_AUTO_BACKUP_INTERVAL_MS = 5 * 60 * 1000L
     }
 }
