@@ -387,11 +387,7 @@ fun ListeningLibraryHome(
         }
         item(key = "source-heading", span = { GridItemSpan(maxLineSpan) }) {
             SectionTitle("在线书库") {
-                Text(
-                    if (sources.isEmpty()) "0 个书源" else "${sources.size} 个书源 · 长按配置",
-                    style = FluxTheme.typography.labelMedium,
-                    color = colors.onSurfaceVariant,
-                )
+                Text("${sources.size} 个书源", style = FluxTheme.typography.labelMedium, color = colors.onSurfaceVariant)
             }
         }
         if (sources.isEmpty()) {
