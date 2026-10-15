@@ -27,7 +27,9 @@ data class ListeningCoverExport(
 
 /** 封面缓存与可迁移的图片文件共用标识，恢复后无需访问书源即可显示封面。 */
 object ListeningCoverStore {
-    const val CACHE_LIMIT_BYTES = 128L * 1024 * 1024
+    const val CACHE_LIMIT_BYTES = 1024L * 1024 * 1024
+    val cacheLimits = listOf(256L, 512L, 1024L, 2048L, 4096L).map { it * 1024 * 1024 }
+    private var limitState: MutableStateFlow<Long>? = null
     private const val MAX_IMAGE_BYTES = 4 * 1024 * 1024
     private const val MAX_BACKUP_BYTES = 24 * 1024 * 1024
     private var cache: DiskCache? = null
@@ -36,9 +38,24 @@ object ListeningCoverStore {
     private val client = OkHttpClient.Builder().callTimeout(25, TimeUnit.SECONDS).build()
 
     @Synchronized
+    fun configuredLimit(context: Context) = (
+        limitState ?: MutableStateFlow(
+            context.applicationContext.getSharedPreferences("book_cover_cache", Context.MODE_PRIVATE)
+                .getLong("limit_bytes", CACHE_LIMIT_BYTES).takeIf { it in cacheLimits } ?: CACHE_LIMIT_BYTES,
+        ).also { limitState = it }
+        ).asStateFlow()
+
+    fun setLimit(context: Context, bytes: Long) {
+        require(bytes in cacheLimits) { "不支持的封面缓存容量" }
+        context.applicationContext.getSharedPreferences("book_cover_cache", Context.MODE_PRIVATE).edit().putLong("limit_bytes", bytes).apply()
+        configuredLimit(context)
+        limitState!!.value = bytes
+    }
+
+    @Synchronized
     fun disk(context: Context): DiskCache = cache ?: DiskCache.Builder()
         .directory(context.applicationContext.filesDir.resolve("book-covers"))
-        .maxSizeBytes(CACHE_LIMIT_BYTES).build().also { cache = it }
+        .maxSizeBytes(configuredLimit(context).value).build().also { cache = it }
 
     fun fileName(sourceId: String, url: String): String = MessageDigest.getInstance("SHA-256")
         .digest("$sourceId:$url".toByteArray()).joinToString("") { "%02x".format(it) } + ".img"
@@ -73,6 +90,10 @@ object ListeningCoverStore {
         }
         ListeningCoverExport(result, warnings)
     }
+
+    /** 播放通知与备份共用图片解析，支持书源内部引用和请求鉴权。 */
+    suspend fun imageBytes(context: Context, sourceId: String, url: String, repository: TingshuRepository): ByteArray =
+        withContext(Dispatchers.IO) { exportImage(context, sourceId, url, repository) }
 
     /** 各种图片来源独立尝试，坏缓存和不可用书源不能阻止其他来源回退。 */
     private suspend fun exportImage(context: Context, sourceId: String, url: String, repository: TingshuRepository): ByteArray {

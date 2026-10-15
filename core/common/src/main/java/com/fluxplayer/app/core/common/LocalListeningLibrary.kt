@@ -10,6 +10,7 @@ import org.json.JSONObject
 
 data class ListeningFile(val uri: Uri, val name: String, val size: Long, val modified: Long, val directory: Boolean)
 data class LocalListeningBook(val path: String, val title: String, val chapters: List<ListeningFile>, val cover: Uri?)
+data class LocalListeningShelf(val revision: Long, val books: List<LocalListeningBook>)
 
 /** 目录授权直接用于读取文档，章节快照供前台与后台共用，避免传递超大的播放列表。 */
 object LocalListeningLibrary {
@@ -69,8 +70,7 @@ object LocalListeningLibrary {
     fun remember(context: Context, book: LocalListeningBook) {
         val id = digest(book.path)
         val directory = File(context.filesDir, "local_listening").apply { mkdirs() }
-        val data = JSONObject().put("path", book.path).put("title", book.title).put("cover", book.cover?.toString())
-            .put("chapters", JSONArray(book.chapters.map { JSONObject().put("uri", it.uri.toString()).put("name", it.name).put("size", it.size) }))
+        val data = bookJson(book)
         val temp = File(directory, "$id.tmp")
         temp.writeText(data.toString())
         check(temp.renameTo(File(directory, "$id.json"))) { "保存书库索引失败" }
@@ -82,18 +82,73 @@ object LocalListeningLibrary {
     fun find(context: Context, chapterOrBook: String): LocalListeningBook? {
         val id = context.getSharedPreferences("local_listening_index", Context.MODE_PRIVATE).getString(chapterOrBook, null) ?: return null
         return runCatching {
-            val data = JSONObject(File(context.filesDir, "local_listening/$id.json").readText())
-            val chapters = data.getJSONArray("chapters")
-            LocalListeningBook(
-                data.getString("path"),
-                data.getString("title"),
-                List(chapters.length()) { index ->
-                    val chapter = chapters.getJSONObject(index)
-                    ListeningFile(Uri.parse(chapter.getString("uri")), chapter.getString("name"), chapter.optLong("size"), 0, false)
-                },
-                data.optString("cover").takeIf { it.isNotBlank() }?.let(Uri::parse),
-            )
+            readBook(JSONObject(File(context.filesDir, "local_listening/$id.json").readText()))
         }.getOrNull()
+    }
+
+    /** 书架快照包含完整书籍信息，启动时无需访问外部存储或目录提供器。 */
+    fun shelf(context: Context, root: String): LocalListeningShelf? {
+        val file = File(context.filesDir, "local_listening_shelves/${digest(root)}.json")
+        if (!file.isFile) return null
+        val data = JSONObject(file.readText())
+        require(data.getString("root") == root) { "书库索引不匹配，请手动刷新" }
+        val books = data.getJSONArray("books")
+        return LocalListeningShelf(data.optLong("revision"), List(books.length()) { readBook(books.getJSONObject(it)) })
+    }
+
+    @Synchronized
+    fun saveShelf(context: Context, root: String, revision: Long, books: List<LocalListeningBook>) {
+        val directory = File(context.filesDir, "local_listening_shelves")
+        check(directory.isDirectory || directory.mkdirs()) { "无法创建书库索引目录" }
+        val data = JSONObject().put("root", root).put("revision", revision).put("books", JSONArray(books.map(::bookJson)))
+        val temporary = File.createTempFile("shelf-", ".tmp", directory)
+        try {
+            temporary.writeText(data.toString())
+            check(temporary.renameTo(File(directory, "${digest(root)}.json"))) { "保存书库索引失败" }
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    /** 升级时仅整理应用内已有索引；不会为了迁移重新枚举用户书库。 */
+    fun migrateShelf(context: Context, root: String): LocalListeningShelf {
+        val uri = if (root.startsWith('/')) Uri.fromFile(File(root)) else Uri.parse(root)
+        val path = when {
+            uri.scheme == "file" -> uri.path
+            uri.authority == "com.android.externalstorage.documents" -> {
+                val id = if (DocumentsContract.isDocumentUri(context, uri)) DocumentsContract.getDocumentId(uri) else DocumentsContract.getTreeDocumentId(uri)
+                "${if (id.substringBefore(':') == "primary") "/storage/emulated/0" else "/storage/${id.substringBefore(':')}"}/${id.substringAfter(':')}"
+            }
+            else -> null
+        }?.trimEnd('/')
+        val books = if (path == null) {
+            emptyList()
+        } else {
+            File(context.filesDir, "local_listening").listFiles().orEmpty()
+                .filter { it.extension == "json" }
+                .mapNotNull { file -> runCatching { readBook(JSONObject(file.readText())) }.getOrNull() }
+                .filter { File(it.path).parent?.trimEnd('/') == path }
+                .sortedWith(compareBy(NaturalOrder.fileNameComparator) { it.title })
+        }
+        saveShelf(context, root, 0L, books)
+        return LocalListeningShelf(0L, books)
+    }
+
+    private fun bookJson(book: LocalListeningBook): JSONObject = JSONObject()
+        .put("path", book.path).put("title", book.title).put("cover", book.cover?.toString())
+        .put("chapters", JSONArray(book.chapters.map { JSONObject().put("uri", it.uri.toString()).put("name", it.name).put("size", it.size) }))
+
+    private fun readBook(data: JSONObject): LocalListeningBook {
+        val chapters = data.getJSONArray("chapters")
+        return LocalListeningBook(
+            data.getString("path"),
+            data.getString("title"),
+            List(chapters.length()) { index ->
+                val chapter = chapters.getJSONObject(index)
+                ListeningFile(Uri.parse(chapter.getString("uri")), chapter.getString("name"), chapter.optLong("size"), 0, false)
+            },
+            if (data.isNull("cover")) null else data.optString("cover").takeIf { it.isNotBlank() }?.let(Uri::parse),
+        )
     }
 
     private fun digest(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }

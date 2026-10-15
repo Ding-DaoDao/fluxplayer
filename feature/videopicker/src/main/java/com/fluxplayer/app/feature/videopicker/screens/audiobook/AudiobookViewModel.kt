@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.fluxplayer.app.core.common.LocalListeningBook
 import com.fluxplayer.app.core.common.LocalListeningLibrary
 import com.fluxplayer.app.core.common.NaturalOrder
 import com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
@@ -18,6 +19,8 @@ import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -37,18 +40,9 @@ class AudiobookViewModel @Inject constructor(
     val uiState = _uiState.asStateFlow()
 
     private var scanJob: Job? = null
+    private var libraryRevision = 0L
 
     init {
-        // 更新进度/续播状态（不触发重扫）
-        viewModelScope.launch {
-            preferencesRepository.applicationPreferences.collect { prefs ->
-                _uiState.update {
-                    it.copy(
-                        rootUri = prefs.audiobookRootUri.takeIf { it.isNotBlank() },
-                    )
-                }
-            }
-        }
         viewModelScope.launch {
             var cachedPaths: List<String>? = null
             audiobookProgressRepository.progress.collect { progress ->
@@ -72,17 +66,18 @@ class AudiobookViewModel @Inject constructor(
                 }
             }
         }
-        // 仅在 rootUri 变化时重新扫描目录
+        // 从真实持久值读取目录选择版本，应用重开只加载已保存的书架。
         viewModelScope.launch {
-            preferencesRepository.applicationPreferences
-                .map { it.audiobookRootUri }
+            preferencesRepository.persistedApplicationPreferences
+                .map { it.audiobookRootUri to it.audiobookLibraryRevision }
                 .distinctUntilChanged()
-                .collect { rootUri ->
+                .collect { (rootUri, revision) ->
+                    libraryRevision = revision
                     if (rootUri.isNotBlank()) {
-                        scanBooks(rootUri)
+                        openLibrary(rootUri, revision)
                     } else {
                         scanJob?.cancel()
-                        _uiState.update { it.copy(scanState = DataState.Success(emptyList()), partialBooks = emptyList(), isRefreshing = false, scanError = null) }
+                        _uiState.update { it.copy(rootUri = null, scanState = DataState.Success(emptyList()), partialBooks = emptyList(), isRefreshing = false, scanError = null) }
                     }
                 }
         }
@@ -91,7 +86,7 @@ class AudiobookViewModel @Inject constructor(
     fun setRootUri(uriString: String) {
         viewModelScope.launch {
             preferencesRepository.updateApplicationPreferences { prefs ->
-                prefs.copy(audiobookRootUri = uriString)
+                prefs.copy(audiobookRootUri = uriString, audiobookLibraryRevision = maxOf(System.currentTimeMillis(), prefs.audiobookLibraryRevision + 1))
             }
         }
     }
@@ -110,34 +105,78 @@ class AudiobookViewModel @Inject constructor(
         _uiState.value.rootUri?.let { scan(it, true) }
     }
 
-    private fun scan(rootUri: String, refresh: Boolean) {
+    private fun openLibrary(rootUri: String, revision: Long) {
         scanJob?.cancel()
         scanJob = viewModelScope.launch {
-            val previous = _uiState.value.scanState
-            _uiState.update { it.copy(isRefreshing = refresh, scanError = null, partialBooks = emptyList(), scanState = if (refresh) previous else DataState.Loading) }
+            _uiState.update { it.copy(rootUri = rootUri, scanState = DataState.Loading, partialBooks = emptyList(), scanError = null) }
             try {
-                val books = withContext(Dispatchers.IO) {
-                    val root = if (rootUri.startsWith("/")) Uri.fromFile(File(rootUri)) else Uri.parse(rootUri)
-                    LocalListeningLibrary.children(appContext, root)
-                        .filter { it.directory && !it.name.startsWith('.') }
-                        .sortedWith(compareBy(NaturalOrder.fileNameComparator) { it.name })
-                        .mapNotNull { folder ->
-                            val book = LocalListeningLibrary.scanBook(appContext, folder)
-                            if (book.chapters.isEmpty()) return@mapNotNull null
-                            audiobookProgressRepository.reconcile(book.path, book.chapters.map { it.uri.toString() })
-                            AudioBook(book.title, book.path, book.cover, book.chapters.size, book.chapters.map { AudioChapter(it.name.substringBeforeLast('.'), it.uri, it.size) }).also { scanned ->
-                                if (!refresh) _uiState.update { it.copy(partialBooks = it.partialBooks + scanned) }
-                            }
+                val shelf = withContext(Dispatchers.IO) {
+                    val saved = LocalListeningLibrary.shelf(appContext, rootUri)
+                    when {
+                        saved?.revision == revision -> saved
+                        revision == 0L -> saved ?: LocalListeningLibrary.migrateShelf(appContext, rootUri)
+                        else -> {
+                            // 记录本次选择已接收；扫描失败或进程中断后不在下次启动自动重试。
+                            LocalListeningLibrary.saveShelf(appContext, rootUri, revision, saved?.books.orEmpty())
+                            null
                         }
+                    }
                 }
-                _uiState.update { it.copy(scanState = DataState.Success(books), partialBooks = emptyList(), isRefreshing = false) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _uiState.update { it.copy(isRefreshing = false, scanError = e.message ?: "无法读取书库，请重新选择目录", scanState = if (previous is DataState.Success) previous else DataState.Error(e)) }
+                if (shelf != null) {
+                    _uiState.update { it.copy(scanState = DataState.Success(shelf.books.map { book -> book.toAudioBook() }), isRefreshing = false) }
+                } else {
+                    performScan(rootUri, false, revision)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _uiState.update { it.copy(scanState = DataState.Error(error), isRefreshing = false, scanError = "书库索引读取失败，请手动刷新：${error.message.orEmpty()}") }
             }
         }
     }
+
+    private fun scan(rootUri: String, refresh: Boolean) {
+        scanJob?.cancel()
+        val revision = libraryRevision
+        scanJob = viewModelScope.launch { performScan(rootUri, refresh, revision) }
+    }
+
+    private suspend fun performScan(rootUri: String, refresh: Boolean, revision: Long) {
+        val previous = _uiState.value.scanState
+        _uiState.update { it.copy(isRefreshing = refresh, scanError = null, partialBooks = emptyList(), scanState = if (refresh) previous else DataState.Loading) }
+        try {
+            val books = withContext(Dispatchers.IO) {
+                val root = if (rootUri.startsWith("/")) Uri.fromFile(File(rootUri)) else Uri.parse(rootUri)
+                val scanned = LocalListeningLibrary.children(appContext, root)
+                    .filter { it.directory && !it.name.startsWith('.') }
+                    .sortedWith(compareBy(NaturalOrder.fileNameComparator) { it.name })
+                    .mapNotNull { folder ->
+                        currentCoroutineContext().ensureActive()
+                        val book = LocalListeningLibrary.scanBook(appContext, folder)
+                        if (book.chapters.isEmpty()) return@mapNotNull null
+                        audiobookProgressRepository.reconcile(book.path, book.chapters.map { it.uri.toString() })
+                        if (!refresh) _uiState.update { it.copy(partialBooks = it.partialBooks + book.toAudioBook()) }
+                        book
+                    }
+                currentCoroutineContext().ensureActive()
+                LocalListeningLibrary.saveShelf(appContext, rootUri, revision, scanned)
+                scanned.map { it.toAudioBook() }
+            }
+            _uiState.update { it.copy(scanState = DataState.Success(books), partialBooks = emptyList(), isRefreshing = false) }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            _uiState.update { it.copy(isRefreshing = false, scanError = error.message ?: "无法读取书库，请重新选择目录", scanState = if (previous is DataState.Success) previous else DataState.Error(error)) }
+        }
+    }
+
+    private fun LocalListeningBook.toAudioBook() = AudioBook(
+        title,
+        path,
+        cover,
+        chapters.size,
+        chapters.map { AudioChapter(it.name.substringBeforeLast('.'), it.uri, it.size) },
+    )
 }
 
 data class AudiobookUiState(

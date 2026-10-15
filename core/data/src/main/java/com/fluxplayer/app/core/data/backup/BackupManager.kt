@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.util.Log
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.openlist.OpenListManagerProvider
@@ -117,7 +118,7 @@ class BackupManager @Inject constructor(
                         restored.copy(
                             backupPath = "",
                             localDirectoryUri = current.localDirectoryUri,
-                            autoBackupSyncMode = "off",
+                            autoBackupSyncMode = BackupWebDavConfig.AUTO_SYNC_MODE_OFF,
                             // 备份文件里的上次备份时刻属于来源设备，保留本机的值，避免恢复后被别人的时间挡住。
                             lastAutoBackupAt = current.lastAutoBackupAt,
                             hasPendingNewBackup = false,
@@ -234,6 +235,71 @@ class BackupManager @Inject constructor(
                         runCatching { ZonedDateTime.parse(it.lastModified, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() }.getOrDefault(0)
                     }.thenByDescending { it.name },
                 )
+        }
+    }
+
+    // ==================== 旧备份清理 ====================
+
+    /** 本地目录里的一份文档，只保留删除所需的最小信息。 */
+    private data class LocalBackupDocument(val name: String, val uri: Uri)
+
+    /** 列举本地备份目录下的直接子文件（不递归），需要已持久化的目录授权。 */
+    private fun listLocalDocuments(directory: Uri): List<LocalBackupDocument> {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(directory, DocumentsContract.getTreeDocumentId(directory))
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        )
+        val documents = mutableListOf<LocalBackupDocument>()
+        context.contentResolver.query(children, projection, null, null, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getString(0) ?: continue
+                val name = cursor.getString(1) ?: continue
+                documents += LocalBackupDocument(name, DocumentsContract.buildDocumentUriUsingTree(directory, id))
+            }
+        }
+        return documents
+    }
+
+    /**
+     * 清理本地目录中的旧自动备份，只保留最近 [keep] 份。
+     *
+     * 三条安全底线：只删文件名严格匹配备份格式的文件（[isPrunableBackupFileName]）；
+     * [keep] 非正数表示不清理；[except]（本次刚创建的文件）永不删除。
+     * 单个文件删除失败只记日志，不影响其余文件，也不影响备份结果。返回实际删除的份数。
+     */
+    suspend fun pruneLocalBackups(directory: Uri, keep: Int, except: String): Result<Int> = withContext(Dispatchers.IO) {
+        backupResult {
+            if (keep <= 0) return@backupResult 0
+            val stale = listLocalDocuments(directory)
+                .filter { isPrunableBackupFileName(it.name) }
+                .sortedByDescending { backupFileTimestampKey(it.name).orEmpty() }
+                .drop(keep)
+                .filter { it.name != except }
+            stale.count { document ->
+                runCatching { DocumentsContract.deleteDocument(context.contentResolver, document.uri) }
+                    .onFailure { Log.w(TAG, "删除本地旧备份失败：${document.name}", it) }
+                    .isSuccess
+            }
+        }
+    }
+
+    /** 清理 WebDAV 上的旧自动备份，只保留最近 [keep] 份；规则与 [pruneLocalBackups] 相同。 */
+    suspend fun pruneRemoteBackups(config: BackupWebDavConfig, keep: Int, except: String): Result<Int> = withContext(Dispatchers.IO) {
+        backupResult {
+            if (keep <= 0) return@backupResult 0
+            require(config.isConfigured) { "请先配置有效的 WebDAV 地址" }
+            val stale = webDavRepository.listDirectory(config.url, config.remoteBackupDir(), config.basicAuthHeader)
+                .getOrThrow()
+                .filter { !it.isDirectory && isPrunableBackupFileName(it.name) }
+                .sortedByDescending { backupFileTimestampKey(it.name).orEmpty() }
+                .drop(keep)
+                .filter { it.name != except }
+            stale.count { file ->
+                webDavRepository.delete(config.url, config.remoteBackupPath(file.name), config.basicAuthHeader)
+                    .onFailure { Log.w(TAG, "删除远端旧备份失败：${file.name}", it) }
+                    .isSuccess
+            }
         }
     }
 
@@ -447,6 +513,7 @@ class BackupManager @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "BackupManager"
         private const val PREFS_NAME = "openlist_prefs"
         private const val PREF_PASSWORD = "admin_password"
         private const val PREF_AUTO_START = "openlist_auto_start"

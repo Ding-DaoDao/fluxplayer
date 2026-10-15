@@ -1228,6 +1228,9 @@ class PlayerService : MediaSessionService() {
             val player = mediaSession?.player ?: return@launch
             val currentMediaItem = player.currentMediaItem ?: return@launch
             if (currentMediaItem.mediaMetadata.artworkData != null) return@launch
+            // 书籍入口已经提供封面时，不再用音频内嵌图或通用缩略图替换。
+            val existingArtwork = currentMediaItem.mediaMetadata.artworkUri
+            if (existingArtwork != null && existingArtwork != mediaItemEnricher.getDefaultArtworkUri()) return@launch
 
             val artworkUri = mediaItemEnricher.loadArtworkForMediaItem(currentMediaItem) ?: return@launch
 

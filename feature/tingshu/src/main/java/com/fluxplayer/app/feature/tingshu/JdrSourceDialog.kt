@@ -40,7 +40,7 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
     var configuration by remember(source.id) { mutableStateOf<JdrConfiguration?>(null) }
     var values by remember(source.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var login by remember(source.id) { mutableStateOf(SourceLogin()) }
-    var busy by remember { mutableStateOf(false) }
+    var busy by remember(source.id) { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var directoryKey by remember { mutableStateOf<String?>(null) }
@@ -81,9 +81,18 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
     }
     LaunchedEffect(source.id) {
         runAction {
-            configuration = repository.jdrConfiguration(source.id)
-            values = configuration!!.values
-            if (configuration!!.canLogin) login = repository.jdrLogin(source.id, "status")
+            val loaded = repository.jdrConfiguration(source.id)
+            val status = try {
+                if (loaded.canLogin) repository.jdrLogin(source.id, "status") else SourceLogin()
+            } catch (failure: Exception) {
+                if (failure is CancellationException && failure !is TimeoutCancellationException) throw failure
+                error = ListeningErrors.describe(failure, "登录状态读取失败")
+                SourceLogin()
+            }
+            // 初始字段与登录态一起发布，避免禁用输入框先显示一次再切换为可编辑。
+            values = loaded.values
+            login = status
+            configuration = loaded
         }
     }
     SourceSettingsSheet(

@@ -56,6 +56,8 @@ data class ApplicationPreferences(
 
     // 听书根目录 URI（SAF 目录选择结果）
     val audiobookRootUri: String = "",
+    // 只有用户重新选择目录时递增，用于持久标识需要执行的一次扫描。
+    val audiobookLibraryRevision: Long = 0L,
 
     // 听书片头片尾跳过设置 (key=书籍文件夹路径, value="introSeconds,outroSeconds")
     val audiobookSkipSettings: Map<String, String> = emptyMap(),

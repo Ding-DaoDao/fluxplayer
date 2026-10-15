@@ -520,9 +520,9 @@
     <string name="backup_export_local_desc">选择保存位置，导出 ZIP 备份</string>
     <string name="backup_automatic_section">自动备份与检查</string>
     <string name="backup_auto_local">自动备份到本地目录</string>
-    <string name="backup_auto_local_desc">按下面的计划保存到所选目录；与 WebDAV 自动备份二选一</string>
+    <string name="backup_auto_local_desc">按下面的计划保存到所选目录；可与 WebDAV 自动备份同时开启</string>
     <string name="backup_auto_webdav">自动备份至 WebDAV</string>
-    <string name="backup_auto_webdav_desc">按下面的计划上传到 WebDAV；旧备份会保留</string>
+    <string name="backup_auto_webdav_desc">按下面的计划上传到 WebDAV；超出保留份数的旧备份会被清理</string>
     <string name="backup_auto_interval">备份间隔</string>
     <string name="backup_auto_interval_desc">两次自动备份之间的最短时间</string>
     <string name="backup_auto_interval_value">每 %1$s</string>
@@ -531,6 +531,10 @@
     <string name="backup_auto_trigger_on_stop">应用退到后台时</string>
     <string name="backup_auto_trigger_on_launch">打开应用后备份一次</string>
     <string name="backup_auto_trigger_on_both">打开应用后与退到后台时</string>
+    <string name="backup_auto_retention">保留份数</string>
+    <string name="backup_auto_retention_value">保留最近 %1$s</string>
+    <string name="backup_auto_retention_count">%1$d 份</string>
+    <string name="backup_auto_retention_unlimited">不限制</string>
     <string name="minutes">%1$s 分钟</string>
     <string name="hours">%1$s 小时</string>
     <string name="days">%1$s 天</string>

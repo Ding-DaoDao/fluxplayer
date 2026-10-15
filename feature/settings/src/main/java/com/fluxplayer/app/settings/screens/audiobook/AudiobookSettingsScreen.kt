@@ -61,7 +61,7 @@ fun AudiobookSettingsScreen(onNavigateUp: () -> Unit, viewModel: AudiobookSettin
                 error?.let { Text(it, color = FluxTheme.colorScheme.error) }
             }
             TingshuConfigContent()
-            ListeningSettingsCard("缓存与空间", "管理封面缓存，减少重复加载。") {
+            ListeningSettingsCard("缓存与空间", "分别管理封面、在线播放缓存与离线音频的空间。") {
                 com.fluxplayer.app.feature.tingshu.AppListeningCacheSettings()
             }
         }

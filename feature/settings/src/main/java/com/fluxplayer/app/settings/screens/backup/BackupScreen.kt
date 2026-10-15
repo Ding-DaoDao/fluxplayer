@@ -69,6 +69,7 @@ fun BackupScreen(
     var showNewBackup by remember { mutableStateOf(false) }
     var showInterval by remember { mutableStateOf(false) }
     var showTrigger by remember { mutableStateOf(false) }
+    var showRetention by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf(BackupWebDavConfig()) }
     val chooseDirectory = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(viewModel::setLocalDirectory) }
     val createFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) {
@@ -173,21 +174,21 @@ fun BackupScreen(
                 PreferenceSwitch(
                     title = stringResource(R.string.backup_auto_local),
                     description = stringResource(R.string.backup_auto_local_desc),
-                    isChecked = config.autoBackupSyncMode == "local",
+                    isChecked = config.autoBackupToLocal,
                     enabled = config.localDirectoryUri.isNotBlank() && !state.isLoading,
                     isFirstItem = true,
                     onClick = {
-                        viewModel.updateConfigField { it.copy(autoBackupSyncMode = if (it.autoBackupSyncMode == "local") "off" else "local") }
+                        viewModel.updateConfigField { it.withLocalAutoBackup(!it.autoBackupToLocal) }
                     },
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
                     title = stringResource(R.string.backup_auto_webdav),
                     description = stringResource(R.string.backup_auto_webdav_desc),
-                    isChecked = config.autoBackupSyncMode == "remote",
+                    isChecked = config.autoBackupToRemote,
                     enabled = config.isConfigured && !state.isLoading,
                     onClick = {
-                        viewModel.updateConfigField { it.copy(autoBackupSyncMode = if (it.autoBackupSyncMode == "remote") "off" else "remote") }
+                        viewModel.updateConfigField { it.withRemoteAutoBackup(!it.autoBackupToRemote) }
                     },
                 )
                 HorizontalDivider()
@@ -197,15 +198,25 @@ fun BackupScreen(
                         R.string.backup_auto_interval_value,
                         backupIntervalLabel(config.effectiveAutoBackupIntervalMinutes),
                     ),
-                    enabled = config.autoBackupSyncMode != "off" && !state.isLoading,
+                    enabled = config.autoBackupEnabled && !state.isLoading,
                     onClick = { showInterval = true },
                 )
                 HorizontalDivider()
                 ClickablePreferenceItem(
                     title = stringResource(R.string.backup_auto_trigger),
                     description = backupTriggerLabel(config.autoBackupTrigger),
-                    enabled = config.autoBackupSyncMode != "off" && !state.isLoading,
+                    enabled = config.autoBackupEnabled && !state.isLoading,
                     onClick = { showTrigger = true },
+                )
+                HorizontalDivider()
+                ClickablePreferenceItem(
+                    title = stringResource(R.string.backup_auto_retention),
+                    description = stringResource(
+                        R.string.backup_auto_retention_value,
+                        retentionLabel(config.effectiveAutoBackupRetentionCount),
+                    ),
+                    enabled = config.autoBackupEnabled && !state.isLoading,
+                    onClick = { showRetention = true },
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
@@ -257,6 +268,24 @@ fun BackupScreen(
                     onClick = {
                         viewModel.updateConfigField { it.copy(autoBackupTrigger = trigger) }
                         showTrigger = false
+                    },
+                )
+            }
+        }
+    }
+
+    if (showRetention) {
+        OptionsDialog(
+            text = stringResource(R.string.backup_auto_retention),
+            onDismissClick = { showRetention = false },
+        ) {
+            items(BackupWebDavConfig.AUTO_BACKUP_RETENTION_PRESETS) { count ->
+                RadioTextButton(
+                    text = retentionLabel(count),
+                    selected = count == config.effectiveAutoBackupRetentionCount,
+                    onClick = {
+                        viewModel.updateConfigField { it.copy(autoBackupRetentionCount = count) }
+                        showRetention = false
                     },
                 )
             }
@@ -480,6 +509,14 @@ private fun backupIntervalLabel(minutes: Int): String = when {
     minutes % 60 == 0 -> stringResource(R.string.hours, minutes / 60)
     else -> stringResource(R.string.minutes, minutes)
 }
+
+@Composable
+private fun retentionLabel(count: Int): String =
+    if (count <= 0) {
+        stringResource(R.string.backup_auto_retention_unlimited)
+    } else {
+        stringResource(R.string.backup_auto_retention_count, count)
+    }
 
 @Composable
 private fun backupTriggerLabel(trigger: String): String = stringResource(

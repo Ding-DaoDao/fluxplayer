@@ -17,8 +17,8 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         applicationId = "com.fluxplayer.app"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 59
-        versionName = "0.16.6"
+        versionCode = 61
+        versionName = "0.16.8"
     }
 
     buildFeatures {

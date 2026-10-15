@@ -18,9 +18,16 @@ import kotlinx.coroutines.withContext
 
 /** 共享听书封面缓存，与视频缩略图和书源状态独立。 */
 object BookCoverCache {
-    const val LIMIT_BYTES = 128L * 1024 * 1024
+    const val LIMIT_BYTES = com.fluxplayer.app.core.tingshu.ListeningCoverStore.CACHE_LIMIT_BYTES
+    val capacityOptions = com.fluxplayer.app.core.tingshu.ListeningCoverStore.cacheLimits
     private val loaders = mutableMapOf<Boolean, ImageLoader>()
     private var state: MutableStateFlow<Boolean>? = null
+
+    fun capacity(context: Context) = com.fluxplayer.app.core.tingshu.ListeningCoverStore.configuredLimit(context)
+
+    fun setCapacity(context: Context, bytes: Long) = com.fluxplayer.app.core.tingshu.ListeningCoverStore.setLimit(context, bytes)
+
+    fun activeCapacity(context: Context): Long = disk(context).maxSize
 
     @Synchronized
     fun enabled(context: Context) = (state ?: MutableStateFlow(context.getSharedPreferences("book_cover_cache", Context.MODE_PRIVATE).getBoolean("enabled", true)).also { state = it }).asStateFlow()

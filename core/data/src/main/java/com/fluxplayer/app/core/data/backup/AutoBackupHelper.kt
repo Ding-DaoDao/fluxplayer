@@ -30,22 +30,36 @@ class AutoBackupHelper @Inject constructor(
     suspend fun performAutoBackup(onLaunch: Boolean = false) {
         backupMutex.withLock {
             val config = backupWebDavDataSource.config.first()
-            if (config.autoBackupSyncMode == "off") return
+            if (!config.autoBackupEnabled) return
             if (!BackupWebDavConfig.shouldRunOnTrigger(config.autoBackupTrigger, onLaunch)) return
-            if (config.autoBackupSyncMode == "remote" && !config.isConfigured) return
-            if (config.autoBackupSyncMode == "local" && config.localDirectoryUri.isBlank()) return
+            // 两个目标各自校验可用性：只跑已配置好的那个，未配置的不阻塞另一个。
+            val runLocal = config.autoBackupToLocal && config.localDirectoryUri.isNotBlank()
+            val runRemote = config.autoBackupToRemote && config.isConfigured
+            if (!runLocal && !runRemote) return
             val now = System.currentTimeMillis()
             if (now - config.lastAutoBackupAt < config.effectiveAutoBackupIntervalMs()) return
             // 先记录时刻，失败的备份同样受间隔约束，避免故障时反复重试拖住后台任务。
             backupWebDavDataSource.updateOrThrow { it.copy(lastAutoBackupAt = now) }
-            if (config.autoBackupSyncMode == "local") {
-                backupResult { backupManager.exportToDirectory(android.net.Uri.parse(config.localDirectoryUri), config.generateBackupFileName()) }
-                    .onSuccess { showSuccess(it.successMessage("本地自动备份成功")) }
+            val keep = config.effectiveAutoBackupRetentionCount
+            if (runLocal) {
+                val directory = android.net.Uri.parse(config.localDirectoryUri)
+                val result = backupResult { backupManager.exportToDirectory(directory, config.generateBackupFileName()) }
+                result.onSuccess { showSuccess(it.successMessage("本地自动备份成功")) }
                     .onFailure { Log.e(TAG, "本地自动备份失败", it) }
-            } else {
-                backupManager.uploadToCloud(config)
-                    .onSuccess { showSuccess(it.successMessage("在线自动备份成功：${it.fileName}")) }
+                // 只在备份成功后再清理，且清理失败不影响备份结果，仅留日志。
+                result.getOrNull()?.let { exported ->
+                    backupManager.pruneLocalBackups(directory, keep, exported.fileName)
+                        .onFailure { Log.w(TAG, "清理本地旧备份失败", it) }
+                }
+            }
+            if (runRemote) {
+                val result = backupManager.uploadToCloud(config)
+                result.onSuccess { showSuccess(it.successMessage("在线自动备份成功：${it.fileName}")) }
                     .onFailure { Log.e(TAG, "WebDAV 自动备份失败", it) }
+                result.getOrNull()?.let { exported ->
+                    backupManager.pruneRemoteBackups(config, keep, exported.fileName)
+                        .onFailure { Log.w(TAG, "清理远端旧备份失败", it) }
+                }
             }
         }
     }

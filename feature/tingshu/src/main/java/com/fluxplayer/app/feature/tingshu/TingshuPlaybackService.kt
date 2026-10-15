@@ -2,7 +2,6 @@ package com.fluxplayer.app.feature.tingshu
 
 import android.app.PendingIntent
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -20,6 +19,7 @@ import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.fluxplayer.app.core.tingshu.ListeningBook
+import com.fluxplayer.app.core.tingshu.ListeningCoverStore
 import com.fluxplayer.app.core.tingshu.ListeningDownloads
 import com.fluxplayer.app.core.tingshu.ListeningErrors
 import com.fluxplayer.app.core.tingshu.ListeningProgress
@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 data class ListeningPlaybackState(
     val book: ListeningBook? = null,
@@ -75,6 +76,16 @@ object ListeningPlayback {
     const val NEXT = "tingshu.next"
     const val PREVIOUS = "tingshu.previous"
     const val REFRESH = "tingshu.refresh"
+
+    /** 已知书籍立即成为当前选择，不等待服务连接或书源解析完成。 */
+    fun selecting(book: ListeningBook, index: Int, position: Long) {
+        mutableState.value = state.value.copy(
+            book = book, index = index, position = position.coerceAtLeast(0), duration = 0,
+            playing = false, playWhenReady = true, lastPlayedAt = System.currentTimeMillis(),
+            loading = true, resolving = true, error = null, refreshing = false, directoryMessage = null,
+            introSkipSeconds = 0, outroSkipSeconds = 0,
+        )
+    }
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -99,6 +110,9 @@ class TingshuPlaybackService : MediaSessionService() {
     private var retryCount = 0
     private var nextAfterSleep = false
     private var speedSaveJob: Job? = null
+    private var artworkJob: Job? = null
+    private var artworkKey: String? = null
+    private var artworkBytes: ByteArray = ListeningNotificationArtwork.bytes
     private var destroying = false
 
     override fun onCreate() {
@@ -112,6 +126,7 @@ class TingshuPlaybackService : MediaSessionService() {
             setHandleAudioBecomingNoisy(true)
             addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (ListeningPlayback.state.value.resolving) return
                     updateState()
                     if (playbackState == Player.STATE_ENDED) {
                         saveProgress()
@@ -143,6 +158,7 @@ class TingshuPlaybackService : MediaSessionService() {
                 }
 
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (ListeningPlayback.state.value.resolving) return
                     if (isPlaying) {
                         ListeningPlayback.mutableState.value = ListeningPlayback.state.value.copy(lastPlayedAt = System.currentTimeMillis())
                         activeBook?.let { book -> scope.launch { repository.markPlayed(book) } }
@@ -153,6 +169,7 @@ class TingshuPlaybackService : MediaSessionService() {
                 }
 
                 override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                    if (ListeningPlayback.state.value.resolving) return
                     if (playWhenReady && ListeningPlayback.state.value.error != null) {
                         val state = ListeningPlayback.state.value
                         state.book?.let { book -> if (state.index in book.episodes.indices) select(book.key, state.index, state.position) }
@@ -173,6 +190,7 @@ class TingshuPlaybackService : MediaSessionService() {
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    if (ListeningPlayback.state.value.resolving) return
                     val status = generateSequence<Throwable>(error) { it.cause }.take(12)
                         .filterIsInstance<androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
                     val book = activeBook
@@ -332,8 +350,18 @@ class TingshuPlaybackService : MediaSessionService() {
         refreshJob?.cancel()
         if (!retry) retryCount = 0
         nextAfterSleep = false
+        val selected = repository.recentBooks.value.firstOrNull { it.key == key }
+            ?: ListeningPlayback.state.value.book?.takeIf { it.key == key }
+        if (selected != null) {
+            ListeningPlayback.selecting(selected, index, position)
+        } else {
+            ListeningPlayback.mutableState.value = ListeningPlayback.state.value.copy(
+                book = null, index = index, position = position, duration = 0, playing = false, playWhenReady = true,
+                loading = true, resolving = true, error = null, lastPlayedAt = System.currentTimeMillis(),
+                refreshing = false, directoryMessage = null,
+            )
+        }
         player.pause()
-        ListeningPlayback.mutableState.value = ListeningPlayback.state.value.copy(index = index, position = position, loading = true, resolving = true, error = null, refreshing = false, directoryMessage = null)
         resolveJob = scope.launch {
             try {
                 if (retry) delay(retryCount * 1000L)
@@ -358,22 +386,20 @@ class TingshuPlaybackService : MediaSessionService() {
                 preload = null
                 preloadKey = null
                 repository.markPlayed(book)
-                // 在线音频直接播放，保留书源针对每个请求提供的鉴权头。
+                // 缓存未命中时才访问书源，并保留每个请求的鉴权头。
                 val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(resource.headers)
                     .setConnectTimeoutMs(20_000).setReadTimeoutMs(20_000).setAllowCrossProtocolRedirects(true)
                 val dataSource = ResolvingDataSource.Factory(DefaultDataSource.Factory(this@TingshuPlaybackService, http)) { spec ->
                     val headers = if (spec.uri.scheme in setOf("http", "https")) runBlocking { repository.playbackHeaders(book.sourceId, spec.uri.toString()) } else emptyMap()
                     spec.withRequestHeaders(resource.headers + spec.httpRequestHeaders + headers)
                 }
-                val factory = DefaultMediaSourceFactory(dataSource)
                 val episode = book.episodes[index]
+                val cachedDataSource = ListeningStreamCache.factory(this@TingshuPlaybackService, dataSource, "${book.key}\u0000${episode.url}")
+                val factory = DefaultMediaSourceFactory(cachedDataSource)
                 val item = MediaItem.Builder().setUri(resource.url)
                     .setMediaId("tingshu://${book.key}/$index")
                     .setMediaMetadata(
-                        ListeningNotificationArtwork.withFallback(
-                            MediaMetadata.Builder().setTitle(episode.title).setAlbumTitle(book.title).setArtist(book.title)
-                                .setArtworkUri(book.coverUrl.takeIf { it.isNotBlank() }?.let(Uri::parse)).build(),
-                        ),
+                        notificationMetadata(book, episode.title),
                     ).build()
                 activeBook = book
                 activeIndex = index
@@ -383,6 +409,7 @@ class TingshuPlaybackService : MediaSessionService() {
                 ListeningPlayback.mutableState.value = ListeningPlayback.state.value.copy(resolving = false, error = null)
                 player.prepare()
                 player.play()
+                loadNotificationArtwork(book)
                 updateResumeIntent()
                 updateState()
             } catch (error: Throwable) {
@@ -394,9 +421,49 @@ class TingshuPlaybackService : MediaSessionService() {
         }
     }
 
+    private fun notificationMetadata(book: ListeningBook, title: String): MediaMetadata = MediaMetadata.Builder()
+        .setTitle(title).setAlbumTitle(book.title).setArtist(book.title)
+        .setArtworkData(
+            if (artworkKey == "${book.sourceId}:${book.coverUrl}") artworkBytes else ListeningNotificationArtwork.bytes,
+            MediaMetadata.PICTURE_TYPE_FRONT_COVER,
+        ).build()
+
+    /** 通知只接收实际图片数据，书源内部引用与鉴权由应用异步解析。 */
+    private fun loadNotificationArtwork(book: ListeningBook) {
+        val key = "${book.sourceId}:${book.coverUrl}"
+        if (artworkKey == key) return
+        artworkJob?.cancel()
+        artworkKey = key
+        artworkBytes = ListeningNotificationArtwork.bytes
+        if (book.coverUrl.isBlank()) return
+        artworkJob = scope.launch {
+            val bytes = try {
+                val original = ListeningCoverStore.imageBytes(this@TingshuPlaybackService, book.sourceId, book.coverUrl, repository)
+                withContext(Dispatchers.IO) { ListeningNotificationArtwork.thumbnail(original) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                ListeningNotificationArtwork.bytes
+            }
+            if (artworkKey != key) return@launch
+            artworkBytes = bytes
+            val active = activeBook ?: return@launch
+            if ("${active.sourceId}:${active.coverUrl}" != key) return@launch
+            val item = player.currentMediaItem ?: return@launch
+            player.replaceMediaItem(
+                player.currentMediaItemIndex,
+                item.buildUpon().setMediaMetadata(
+                    item.mediaMetadata.buildUpon().setArtworkUri(null)
+                        .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER).build(),
+                ).build(),
+            )
+        }
+    }
+
     private fun updateState() {
         if (activeBook == null) return
-        if (ListeningPlayback.state.value.resolving || ListeningPlayback.state.value.error != null) return
+        val selected = ListeningPlayback.state.value
+        if (selected.resolving || selected.error != null || selected.book?.key != activeBook?.key || selected.index != activeIndex) return
         ListeningPlayback.mutableState.value = ListeningPlayback.state.value.copy(
             book = activeBook,
             index = activeIndex,
@@ -456,14 +523,11 @@ class TingshuPlaybackService : MediaSessionService() {
                         0,
                         item.buildUpon().setMediaId("tingshu://${refreshed.key}/$index")
                             .setMediaMetadata(
-                                ListeningNotificationArtwork.withFallback(
-                                    MediaMetadata.Builder()
-                                        .setTitle(refreshed.episodes[index].title).setArtist(refreshed.title).setAlbumTitle(refreshed.title)
-                                        .setArtworkUri(refreshed.coverUrl.takeIf { it.isNotBlank() }?.let(Uri::parse)).build(),
-                                ),
+                                notificationMetadata(refreshed, refreshed.episodes[index].title),
                             ).build(),
                     )
                 }
+                loadNotificationArtwork(refreshed)
                 preload?.cancel()
                 preload = null
                 preloadKey = null

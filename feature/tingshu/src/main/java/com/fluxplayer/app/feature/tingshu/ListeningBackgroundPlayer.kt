@@ -13,6 +13,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
+import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.tingshu.ListeningErrors
 import com.google.common.util.concurrent.ListenableFuture
 import kotlin.coroutines.resume
@@ -37,8 +38,9 @@ internal class ListeningBackgroundPlayer : ViewModel() {
         error = message
     }
 
-    fun start(context: Context, component: ComponentName, command: SessionCommand, args: Bundle) {
+    fun start(context: Context, component: ComponentName, command: SessionCommand, args: Bundle, selectedBook: ListeningBook? = null) {
         if (starting) return
+        selectedBook?.let { ListeningPlayback.selecting(it, args.getInt("index"), args.getLong("position")) }
         starting = true
         error = null
         viewModelScope.launch {
@@ -64,6 +66,11 @@ internal class ListeningBackgroundPlayer : ViewModel() {
                 throw cancelled
             } catch (failure: Exception) {
                 error = ListeningErrors.describe(failure, "续播失败")
+                val selected = ListeningPlayback.state.value
+                val requestedBook = args.getString("book")
+                if (requestedBook != null && requestedBook == selected.book?.key && selected.resolving) {
+                    ListeningPlayback.mutableState.value = selected.copy(loading = false, resolving = false, playing = false, error = error)
+                }
                 connections.remove(component)?.let(MediaController::releaseFuture)
             } finally {
                 starting = false

@@ -161,24 +161,19 @@ fun TingshuSourceConfigPanel(
     onDismiss: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    // 面板内的 JDR 分支：与 source 绑定，source 变化或置空时自动复位
-    var jdrSource by remember(source?.id) { mutableStateOf<ListeningSource?>(null) }
-
     LaunchedEffect(source?.id) {
         val target = source ?: return@LaunchedEffect
-        if (target.id.startsWith("jdr:")) jdrSource = target else viewModel.configure(target)
+        if (!target.id.startsWith("jdr:")) viewModel.configure(target)
     }
 
-    jdrSource?.let { target ->
-        JdrSourceDialog(target, viewModel.repository) {
-            jdrSource = null
-            onDismiss()
-        }
+    // 直接由所选书源决定唯一弹窗，避免首次组合显示上一书源的输入框。
+    if (source != null && source.id.startsWith("jdr:")) {
+        JdrSourceDialog(source, viewModel.repository, onDismiss)
     }
 
     val active = state.source
     val items = state.configItems
-    if (active != null && items != null) {
+    if (source != null && !source.id.startsWith("jdr:") && active != null && active.id == source.id && items != null) {
         SourceConfigDialog(
             active.id,
             active.name,

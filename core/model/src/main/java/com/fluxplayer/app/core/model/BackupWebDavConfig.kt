@@ -21,12 +21,14 @@ data class BackupWebDavConfig(
     val deviceName: String = "",
     /** 打开软件时自动检查是否有新备份 */
     val autoCheckNewBackup: Boolean = false,
-    /** 自动备份模式：off 关闭，local 保存到授权目录，remote 上传至 WebDAV。 */
-    val autoBackupSyncMode: String = "off",
+    /** 自动备份模式：off 关闭，local 仅本地目录，remote 仅 WebDAV，both 两者都执行。 */
+    val autoBackupSyncMode: String = AUTO_SYNC_MODE_OFF,
     /** 两次自动备份的最小间隔（分钟），取值来自 [AUTO_BACKUP_INTERVAL_PRESETS]，默认一周。 */
     val autoBackupIntervalMinutes: Int = DEFAULT_AUTO_BACKUP_INTERVAL_MINUTES,
     /** 自动备份时机：on_stop 退到后台时，on_launch 打开应用后备份一次，on_both 两者都执行。 */
     val autoBackupTrigger: String = AUTO_BACKUP_TRIGGER_ON_STOP,
+    /** 每个目标保留的自动备份份数，0 表示不清理；取值来自 [AUTO_BACKUP_RETENTION_PRESETS]。 */
+    val autoBackupRetentionCount: Int = DEFAULT_AUTO_BACKUP_RETENTION_COUNT,
     /** 最近一次自动备份的时刻，跨进程重启保持间隔，0 表示从未备份过。 */
     val lastAutoBackupAt: Long = 0L,
     /** 兼容旧备份格式，本地导出不再依赖原始文件路径。 */
@@ -85,6 +87,26 @@ data class BackupWebDavConfig(
         password = password,
     )
 
+    /** 是否把自动备份写到本地目录；与 WebDAV 目标互不影响，可同时开启。 */
+    val autoBackupToLocal: Boolean
+        get() = autoBackupSyncMode == AUTO_SYNC_MODE_LOCAL || autoBackupSyncMode == AUTO_SYNC_MODE_BOTH
+
+    /** 是否把自动备份上传到 WebDAV。 */
+    val autoBackupToRemote: Boolean
+        get() = autoBackupSyncMode == AUTO_SYNC_MODE_REMOTE || autoBackupSyncMode == AUTO_SYNC_MODE_BOTH
+
+    /** 任一目标开启即视为启用，用于控制间隔与时机设置是否可点。 */
+    val autoBackupEnabled: Boolean
+        get() = autoBackupToLocal || autoBackupToRemote
+
+    /** 单独切换本地目标，保留 WebDAV 目标当前的开关状态。 */
+    fun withLocalAutoBackup(enabled: Boolean): BackupWebDavConfig =
+        copy(autoBackupSyncMode = autoBackupModeOf(enabled, autoBackupToRemote))
+
+    /** 单独切换 WebDAV 目标，保留本地目标当前的开关状态。 */
+    fun withRemoteAutoBackup(enabled: Boolean): BackupWebDavConfig =
+        copy(autoBackupSyncMode = autoBackupModeOf(autoBackupToLocal, enabled))
+
     /** 间隔可能被旧版本或手工编辑写成非法值，这里收敛到预设区间。 */
     val effectiveAutoBackupIntervalMinutes: Int
         get() = autoBackupIntervalMinutes
@@ -93,8 +115,26 @@ data class BackupWebDavConfig(
 
     fun effectiveAutoBackupIntervalMs(): Long = effectiveAutoBackupIntervalMinutes * 60 * 1000L
 
+    /** 保留份数收敛：非正数视为不清理，正数收敛到预设上限，避免手工写坏的值一次删光。 */
+    val effectiveAutoBackupRetentionCount: Int
+        get() = if (autoBackupRetentionCount <= 0) 0 else autoBackupRetentionCount.coerceAtMost(MAX_AUTO_BACKUP_RETENTION_COUNT)
+
     companion object {
-        val AUTO_SYNC_MODES = listOf("off", "local", "remote")
+        const val AUTO_SYNC_MODE_OFF = "off"
+        const val AUTO_SYNC_MODE_LOCAL = "local"
+        const val AUTO_SYNC_MODE_REMOTE = "remote"
+        const val AUTO_SYNC_MODE_BOTH = "both"
+
+        /** 模式取值；本地与 WebDAV 可同时开启（both），因此不是三选一。 */
+        val AUTO_SYNC_MODES = listOf(AUTO_SYNC_MODE_OFF, AUTO_SYNC_MODE_LOCAL, AUTO_SYNC_MODE_REMOTE, AUTO_SYNC_MODE_BOTH)
+
+        /** 由两个开关状态合成模式字符串，与旧配置共用同一字段，无需数据迁移。 */
+        fun autoBackupModeOf(local: Boolean, remote: Boolean): String = when {
+            local && remote -> AUTO_SYNC_MODE_BOTH
+            local -> AUTO_SYNC_MODE_LOCAL
+            remote -> AUTO_SYNC_MODE_REMOTE
+            else -> AUTO_SYNC_MODE_OFF
+        }
 
         /** 预设中的最小间隔，用于把越界值收敛回来；需与 [AUTO_BACKUP_INTERVAL_PRESETS] 首项保持一致。 */
         const val MIN_AUTO_BACKUP_INTERVAL_MINUTES = 15
@@ -121,6 +161,15 @@ data class BackupWebDavConfig(
         const val AUTO_BACKUP_TRIGGER_ON_LAUNCH = "on_launch"
         const val AUTO_BACKUP_TRIGGER_ON_BOTH = "on_both"
         val AUTO_BACKUP_TRIGGERS = listOf(AUTO_BACKUP_TRIGGER_ON_STOP, AUTO_BACKUP_TRIGGER_ON_LAUNCH, AUTO_BACKUP_TRIGGER_ON_BOTH)
+
+        /** 默认每个目标保留最近 10 份自动备份。 */
+        const val DEFAULT_AUTO_BACKUP_RETENTION_COUNT = 10
+
+        /** 保留份数上限，用于把越界值收敛回来；需与 [AUTO_BACKUP_RETENTION_PRESETS] 中最大的正数一致。 */
+        const val MAX_AUTO_BACKUP_RETENTION_COUNT = 30
+
+        /** 可选的保留份数：3 / 5 / 10 / 20 / 30，以及 0 表示不清理、保留全部。 */
+        val AUTO_BACKUP_RETENTION_PRESETS = listOf(3, 5, 10, 20, 30, 0)
 
         /** 触发时机是否包含本次调用场景；未知值按退到后台处理，保持旧配置行为。 */
         fun shouldRunOnTrigger(trigger: String, onLaunch: Boolean): Boolean = when (trigger) {

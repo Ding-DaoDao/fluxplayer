@@ -526,9 +526,9 @@
     <string name="backup_export_local_desc">Choose a location to save a ZIP backup</string>
     <string name="backup_automatic_section">Automatic backup and checks</string>
     <string name="backup_auto_local">Automatically back up to the local folder</string>
-    <string name="backup_auto_local_desc">Save to the chosen folder using the schedule below; the local and WebDAV options are mutually exclusive</string>
+    <string name="backup_auto_local_desc">Save to the chosen folder using the schedule below; can run alongside the WebDAV option</string>
     <string name="backup_auto_webdav">Automatically back up to WebDAV</string>
-    <string name="backup_auto_webdav_desc">Upload to WebDAV using the schedule below; older backups are kept</string>
+    <string name="backup_auto_webdav_desc">Upload to WebDAV using the schedule below; older backups beyond the retention limit are removed</string>
     <string name="backup_auto_interval">Backup interval</string>
     <string name="backup_auto_interval_desc">Minimum time between two automatic backups</string>
     <string name="backup_auto_interval_value">Every %1$s</string>
@@ -537,6 +537,10 @@
     <string name="backup_auto_trigger_on_stop">When the app goes to the background</string>
     <string name="backup_auto_trigger_on_launch">Once after opening the app</string>
     <string name="backup_auto_trigger_on_both">After opening the app and in the background</string>
+    <string name="backup_auto_retention">Backups to keep</string>
+    <string name="backup_auto_retention_value">Keep the latest %1$s</string>
+    <string name="backup_auto_retention_count">%1$d backups</string>
+    <string name="backup_auto_retention_unlimited">Unlimited</string>
     <string name="minutes">%1$s min</string>
     <string name="hours">%1$s h</string>
     <string name="days">%1$s d</string>

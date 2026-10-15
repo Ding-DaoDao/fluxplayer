@@ -2,6 +2,7 @@ package com.fluxplayer.app.feature.player
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -52,6 +53,27 @@ object ListeningNotificationArtwork {
         }
     }
 
+    /** 缩小通知封面，避免把原图经由媒体会话传输时超过系统消息大小限制。 */
+    fun thumbnail(data: ByteArray): ByteArray {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "封面图片无效" }
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1024) sample *= 2
+        val decoded = checkNotNull(BitmapFactory.decodeByteArray(data, 0, data.size, BitmapFactory.Options().apply { inSampleSize = sample }))
+        val factor = minOf(1f, 512f / maxOf(decoded.width, decoded.height))
+        val scaled = Bitmap.createScaledBitmap(decoded, (decoded.width * factor).toInt().coerceAtLeast(1), (decoded.height * factor).toInt().coerceAtLeast(1), true)
+        return try {
+            ByteArrayOutputStream().use { output ->
+                check(scaled.compress(Bitmap.CompressFormat.JPEG, 85, output)) { "通知封面转换失败" }
+                output.toByteArray()
+            }
+        } finally {
+            if (scaled !== decoded) scaled.recycle()
+            decoded.recycle()
+        }
+    }
+
     fun withFallback(metadata: MediaMetadata): MediaMetadata =
         if (metadata.artworkUri != null || metadata.artworkData != null) {
             metadata
@@ -67,8 +89,13 @@ fun listeningBitmapLoader(context: Context): BitmapLoader {
     val source = DataSourceBitmapLoader.Builder(context).setMaximumOutputDimension(1024).build()
     return CacheBitmapLoader(object : BitmapLoader {
         override fun supportsMimeType(mimeType: String): Boolean = source.supportsMimeType(mimeType)
-        override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> = fallback(source.decodeBitmap(data))
-        override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = fallback(source.loadBitmap(uri))
+        override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> = safely { source.decodeBitmap(data) }
+        override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = safely { source.loadBitmap(uri) }
+        private fun safely(load: () -> ListenableFuture<Bitmap>): ListenableFuture<Bitmap> = try {
+            fallback(load())
+        } catch (_: Exception) {
+            Futures.immediateFuture(ListeningNotificationArtwork.bitmap)
+        }
         private fun fallback(future: ListenableFuture<Bitmap>): ListenableFuture<Bitmap> =
             Futures.catching(future, Exception::class.java, { ListeningNotificationArtwork.bitmap }, MoreExecutors.directExecutor())
     })

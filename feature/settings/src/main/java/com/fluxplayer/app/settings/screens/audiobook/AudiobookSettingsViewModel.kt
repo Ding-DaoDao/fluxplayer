@@ -13,7 +13,7 @@ class AudiobookSettingsViewModel @Inject constructor(private val preferences: Pr
 
     fun setRootUri(uri: String) {
         viewModelScope.launch {
-            preferences.updateApplicationPreferences { it.copy(audiobookRootUri = uri) }
+            preferences.updateApplicationPreferences { it.copy(audiobookRootUri = uri, audiobookLibraryRevision = maxOf(System.currentTimeMillis(), it.audiobookLibraryRevision + 1)) }
         }
     }
 }

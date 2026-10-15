@@ -141,6 +141,28 @@ internal object BackupArchiveCodec {
 internal fun isBackupFileName(name: String): Boolean =
     name.startsWith("fluxplayer_backup_") && name.endsWith(".zip", ignoreCase = true)
 
+/**
+ * 删除旧备份时使用的严格匹配：只认「前缀 + 可选设备名 + 完整时间戳 + 可选毫秒与随机串 + .zip」。
+ *
+ * 比 [isBackupFileName] 严得多，用于避免把用户手动改名、恰好带同样前缀的文件一并删掉。
+ * 同时覆盖两种历史命名：旧版 `fluxplayer_backup_[设备_]2026-05-01_10-00-00.zip`
+ * 与当前版本 `fluxplayer_backup_[设备_]2026-10-15_18-39-37_123_a1b2c3d4.zip`。
+ */
+private val PRUNABLE_BACKUP_NAME = Regex(
+    """^fluxplayer_backup_(?:.+_)?(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:_\d{3})?)(?:_[0-9A-Za-z]{8})?\.zip$""",
+    RegexOption.IGNORE_CASE,
+)
+
+internal fun isPrunableBackupFileName(name: String): Boolean = PRUNABLE_BACKUP_NAME.matches(name)
+
+/**
+ * 取出文件名中的时间戳片段，用于按时间倒序排列。
+ *
+ * 格式固定为等宽的 `yyyy-MM-dd_HH-mm-ss[_SSS]`，字典序与时间先后一致，因此可直接当作排序键。
+ */
+internal fun backupFileTimestampKey(name: String): String? =
+    PRUNABLE_BACKUP_NAME.find(name)?.groupValues?.getOrNull(1)
+
 internal suspend fun <T> backupResult(block: suspend () -> T): Result<T> = try {
     Result.success(block())
 } catch (error: CancellationException) {

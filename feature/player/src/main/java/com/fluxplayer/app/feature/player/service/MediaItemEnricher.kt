@@ -6,7 +6,6 @@ import android.net.Uri
 import android.util.Log
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import coil3.ImageLoader
 import coil3.request.ImageRequest
@@ -112,8 +111,8 @@ class MediaItemEnricher(
                     )
                 }
 
-                // Use placeholder artwork initially - actual artwork will be loaded in background
-                val artworkUri = getDefaultArtworkUri()
+                // 听书入口已提供的封面优先保留，不能被通用的视频占位图覆盖。
+                val artworkUri = mediaItem.mediaMetadata.artworkUri ?: getDefaultArtworkUri()
 
                 val title = mediaItem.mediaMetadata.title
                     ?: video?.nameWithExtension
@@ -132,9 +131,12 @@ class MediaItemEnricher(
                 val introMs = dirVideoState?.introMs?.takeIf { it != -1L } ?: -1L
                 val outroMs = dirVideoState?.outroMs?.takeIf { it != -1L } ?: -1L
 
-                Log.d(TAG, "updatedMediaItems: mediaId=$mediaId, parentDirKey=$parentDirKey, " +
-                    "dbPosition=${videoState?.position}, positionMs=$positionMs, " +
-                    "playbackSpeed=$playbackSpeed, introMs=$introMs, outroMs=$outroMs")
+                Log.d(
+                    TAG,
+                    "updatedMediaItems: mediaId=$mediaId, parentDirKey=$parentDirKey, " +
+                        "dbPosition=${videoState?.position}, positionMs=$positionMs, " +
+                        "playbackSpeed=$playbackSpeed, introMs=$introMs, outroMs=$outroMs",
+                )
 
                 mediaItem.buildUpon().apply {
                     // Use pre-resolved HTTP URL so ExoPlayer starts buffering immediately
@@ -144,7 +146,7 @@ class MediaItemEnricher(
                     }
                     setSubtitleConfigurations(existingSubConfigurations + subConfigurations)
                     setMediaMetadata(
-                        MediaMetadata.Builder().apply {
+                        mediaItem.mediaMetadata.buildUpon().apply {
                             setTitle(title)
                             setArtworkUri(artworkUri)
                             setExtras(
@@ -157,6 +159,7 @@ class MediaItemEnricher(
                                 subtitleSpeed = subtitleSpeed,
                                 introMs = introMs,
                                 outroMs = outroMs,
+                                existingExtras = mediaItem.mediaMetadata.extras,
                             )
                         }.build(),
                     )

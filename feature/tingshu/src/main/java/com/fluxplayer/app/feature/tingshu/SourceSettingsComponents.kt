@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
@@ -94,7 +95,10 @@ internal fun SourceSettingsSheet(
                             Text(title, style = FluxTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                             Text("管理账号、目录与书源偏好", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (busy) MediaLoadingRow(Modifier.fillMaxWidth())
+                        // 预留加载条高度，加载与保存时不推动整张表单上下跳动。
+                        Box(Modifier.fillMaxWidth().height(4.dp)) {
+                            if (busy) MediaLoadingRow(Modifier.fillMaxWidth())
+                        }
                         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(18.dp), content = content)
                         HorizontalDivider(color = FluxTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {

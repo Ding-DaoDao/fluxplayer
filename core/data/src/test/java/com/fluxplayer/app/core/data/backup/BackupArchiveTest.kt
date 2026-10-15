@@ -15,6 +15,7 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -82,6 +83,63 @@ class BackupArchiveTest {
         assertFalse(isBackupFileName("fluxplayer_backup_photo.jpg"))
     }
 
+    // ==================== 旧备份清理（保留策略） ====================
+
+    @Test
+    fun onlyStrictlyNamedBackupFilesArePrunable() {
+        // 旧版命名（无毫秒与随机串）与当前命名都必须能被识别。
+        assertTrue(isPrunableBackupFileName("fluxplayer_backup_2026-05-01_10-00-00.zip"))
+        assertTrue(isPrunableBackupFileName("fluxplayer_backup_phone_2026-10-13_08-00-00.zip"))
+        assertTrue(isPrunableBackupFileName("fluxplayer_backup_2026-10-15_18-39-37_123_a1b2c3d4.zip"))
+        assertTrue(isPrunableBackupFileName("fluxplayer_backup_My_Phone_2026-10-15_18-39-37_123_a1b2c3d4.zip"))
+        // 宽松前缀能过、严格匹配必须拦住，否则会把用户自己改名的文件删掉。
+        assertTrue(isBackupFileName("fluxplayer_backup_重要资料.zip"))
+        assertFalse(isPrunableBackupFileName("fluxplayer_backup_重要资料.zip"))
+        assertFalse(isPrunableBackupFileName("fluxplayer_backup_2026-05-01.zip"))
+        assertFalse(isPrunableBackupFileName("fluxplayer_backup_2026-05-01_10-00-00.rar"))
+        assertFalse(isPrunableBackupFileName("holiday.zip"))
+        assertFalse(isPrunableBackupFileName("fluxplayer_backup_photo.jpg"))
+    }
+
+    @Test
+    fun backupTimestampKeySortsNewestFirst() {
+        val names = listOf(
+            "fluxplayer_backup_2026-05-01_10-00-00.zip",
+            "fluxplayer_backup_2026-10-15_18-39-37_123_a1b2c3d4.zip",
+            "fluxplayer_backup_phone_2026-10-13_08-00-00.zip",
+        )
+        assertEquals(
+            listOf(
+                "fluxplayer_backup_2026-10-15_18-39-37_123_a1b2c3d4.zip",
+                "fluxplayer_backup_phone_2026-10-13_08-00-00.zip",
+                "fluxplayer_backup_2026-05-01_10-00-00.zip",
+            ),
+            names.sortedByDescending { backupFileTimestampKey(it).orEmpty() },
+        )
+        // 解析不出时间戳的名字不应参与排序（调用方会先用 isPrunableBackupFileName 过滤）。
+        assertNull(backupFileTimestampKey("fluxplayer_backup_重要资料.zip"))
+    }
+
+    @Test
+    fun retentionCountIsClampedAndZeroMeansUnlimited() {
+        // 默认保留 10 份。
+        assertEquals(BackupWebDavConfig.DEFAULT_AUTO_BACKUP_RETENTION_COUNT, BackupWebDavConfig().effectiveAutoBackupRetentionCount)
+        // 0 与负数都表示不清理。
+        assertEquals(0, BackupWebDavConfig(autoBackupRetentionCount = 0).effectiveAutoBackupRetentionCount)
+        assertEquals(0, BackupWebDavConfig(autoBackupRetentionCount = -5).effectiveAutoBackupRetentionCount)
+        assertEquals(3, BackupWebDavConfig(autoBackupRetentionCount = 3).effectiveAutoBackupRetentionCount)
+        assertEquals(
+            BackupWebDavConfig.MAX_AUTO_BACKUP_RETENTION_COUNT,
+            BackupWebDavConfig(autoBackupRetentionCount = 999).effectiveAutoBackupRetentionCount,
+        )
+        // 预设里最大的正数必须等于收敛上限，否则设置项会与生效值对不上。
+        assertEquals(
+            BackupWebDavConfig.MAX_AUTO_BACKUP_RETENTION_COUNT,
+            BackupWebDavConfig.AUTO_BACKUP_RETENTION_PRESETS.filter { it > 0 }.max(),
+        )
+        assertTrue(BackupWebDavConfig.AUTO_BACKUP_RETENTION_PRESETS.contains(0))
+    }
+
     @Test
     fun deviceNameCannotEscapeTheBackupDirectoryAndNamesAreUnique() {
         val config = BackupWebDavConfig(deviceName = "../../手机\\test:device")
@@ -145,6 +203,39 @@ class BackupArchiveTest {
     }
 
     @Test
+    fun localAndRemoteAutoBackupCanBeEnabledTogether() {
+        val off = BackupWebDavConfig()
+        assertFalse(off.autoBackupEnabled)
+        assertEquals("off", off.autoBackupSyncMode)
+
+        val localOnly = off.withLocalAutoBackup(true)
+        assertEquals("local", localOnly.autoBackupSyncMode)
+        assertTrue(localOnly.autoBackupToLocal)
+        assertFalse(localOnly.autoBackupToRemote)
+
+        // 在本地已开启的基础上再开 WebDAV，两者应同时生效。
+        val both = localOnly.withRemoteAutoBackup(true)
+        assertEquals("both", both.autoBackupSyncMode)
+        assertTrue(both.autoBackupToLocal)
+        assertTrue(both.autoBackupToRemote)
+        assertTrue(both.autoBackupEnabled)
+
+        // 关掉其中一个只影响自己，不应把另一个一起关掉。
+        val remoteOnly = both.withLocalAutoBackup(false)
+        assertEquals("remote", remoteOnly.autoBackupSyncMode)
+        assertFalse(remoteOnly.autoBackupToLocal)
+        assertTrue(remoteOnly.autoBackupToRemote)
+
+        assertEquals("off", remoteOnly.withRemoteAutoBackup(false).autoBackupSyncMode)
+
+        // 旧版本写入的单一目标取值仍按对应目标解析，无需数据迁移。
+        assertTrue(BackupWebDavConfig(autoBackupSyncMode = "remote").autoBackupToRemote)
+        assertFalse(BackupWebDavConfig(autoBackupSyncMode = "remote").autoBackupToLocal)
+        assertTrue(BackupWebDavConfig(autoBackupSyncMode = "local").autoBackupToLocal)
+        assertFalse(BackupWebDavConfig(autoBackupSyncMode = "local").autoBackupToRemote)
+    }
+
+    @Test
     fun legacyBackupConfigDecodesWithNewAutoBackupDefaults() {
         val legacy = """{"url":"https://example.com/dav","autoBackupSyncMode":"remote"}"""
         val decoded = Json.decodeFromString(BackupWebDavConfig.serializer(), legacy)
@@ -152,6 +243,9 @@ class BackupArchiveTest {
         assertEquals(7 * 24 * 60, decoded.autoBackupIntervalMinutes)
         assertEquals("on_stop", decoded.autoBackupTrigger)
         assertEquals(0L, decoded.lastAutoBackupAt)
+        // 旧值 "remote" 仍映射到 WebDAV 目标，本地目标保持关闭。
+        assertTrue(decoded.autoBackupToRemote)
+        assertFalse(decoded.autoBackupToLocal)
         val roundTrip = Json.decodeFromString(
             BackupWebDavConfig.serializer(),
             Json.encodeToString(

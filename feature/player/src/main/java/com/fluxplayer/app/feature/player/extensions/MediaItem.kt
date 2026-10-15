@@ -46,8 +46,9 @@ fun MediaMetadata.Builder.setExtras(
     subtitleSpeed: Float? = null,
     introMs: Long? = null,
     outroMs: Long? = null,
+    existingExtras: Bundle? = null,
 ): MediaMetadata.Builder = setExtras(
-    Bundle().setExtras(
+    (existingExtras?.let { Bundle(it) } ?: Bundle()).setExtras(
         positionMs = positionMs,
         videoScale = videoScale,
         playbackSpeed = playbackSpeed,

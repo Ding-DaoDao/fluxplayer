@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -34,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -192,6 +194,7 @@ fun ListeningLibraryHome(
                     putInt("index", index)
                     putLong("position", saved.position.coerceAtLeast(0L))
                 },
+                selectedBook = source,
             )
         }
     }
@@ -199,7 +202,8 @@ fun ListeningLibraryHome(
     val progresses by repository.progresses.collectAsStateWithLifecycle()
     val playback by ListeningPlayback.state.collectAsStateWithLifecycle()
     val localPlayback by LocalAudiobookPlayback.state.collectAsStateWithLifecycle()
-    val showLocal = localPlayback.bookPath.isNotBlank() && (
+    val selectingOnline = playback.book != null && (playback.resolving || playback.loading) && playback.lastPlayedAt >= localPlayback.lastPlayedAt
+    val showLocal = !selectingOnline && localPlayback.bookPath.isNotBlank() && (
         playback.book == null ||
             (localPlayback.playing && !playback.playing) ||
             (localPlayback.playing == playback.playing && localPlayback.lastPlayedAt >= playback.lastPlayedAt)
@@ -245,7 +249,17 @@ fun ListeningLibraryHome(
     // 在组合阶段捕获显示模式，让切换触发网格内容和跨列缓存一同重建。
     // 跨列回调直接读取可变状态会保留旧行索引，导致同一卡片被重复放置。
     val recentGrid = grid
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(bannerMode != null) {
+        // 首屏插入播放卡片时取消旧的“本地书库”锚点；已滚动浏览时保持位置。
+        if (bannerMode != null && !gridState.isScrollInProgress &&
+            gridState.firstVisibleItemIndex <= 1 && gridState.firstVisibleItemScrollOffset == 0
+        ) {
+            gridState.requestScrollToItem(0)
+        }
+    }
     LazyVerticalGrid(
+        state = gridState,
         columns = LocalMediaPreferences.current.mediaGridColumns.coerceIn(0, 6).let { if (it == 0) GridCells.Adaptive(150.dp) else GridCells.Fixed(it) },
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp + LocalMediaScrollBottomPadding.current),
@@ -334,7 +348,7 @@ fun ListeningLibraryHome(
                     position = position,
                     duration = duration,
                     coverModel = coverModel,
-                    controlsEnabled = !backgroundPlayer.starting && (if (isResume) entry != null else controller != null),
+                    controlsEnabled = !backgroundPlayer.starting && (if (isResume) entry != null else controller != null && (showLocal || !playback.resolving)),
                     onTogglePlayback = {
                         val connected = controller
                         val action = listeningResumeAction(
