@@ -71,18 +71,7 @@ class MediaPickerViewModel @Inject constructor(
                 uiStateInternal.update { currentState ->
                     currentState.copy(playedUriSet = latestPerDir)
                 }
-                // 清除已删除历史对应的足迹（仅清理视频类 URI）
-                val allUris = history.map { it.uriString }.toSet()
-                preferencesRepository.updateApplicationPreferences { prefs ->
-                    val cleaned = prefs.latestFootprintPerDir.filterValues { value ->
-                        !value.startsWith("http") || value in allUris
-                    }
-                    if (cleaned.size == prefs.latestFootprintPerDir.size) {
-                        prefs
-                    } else {
-                        prefs.copy(latestFootprintPerDir = cleaned)
-                    }
-                }
+
             }
         }
         viewModelScope.launch {
@@ -103,17 +92,6 @@ class MediaPickerViewModel @Inject constructor(
                         preferencesLoaded = true,
                     )
                 }
-            }
-        }
-    }
-
-    /** 记录足迹：同目录下只保留最新的一个 */
-    fun recordFootprint(parentDir: String, itemPath: String) {
-        viewModelScope.launch {
-            preferencesRepository.updateApplicationPreferences { prefs ->
-                prefs.copy(
-                    latestFootprintPerDir = if (prefs.videoIncognito) prefs.latestFootprintPerDir else prefs.latestFootprintPerDir + (parentDir to itemPath),
-                )
             }
         }
     }

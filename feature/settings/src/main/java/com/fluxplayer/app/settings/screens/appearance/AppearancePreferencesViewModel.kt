@@ -155,7 +155,6 @@ sealed interface AppearancePreferencesEvent {
 }
 
 sealed interface AppearancePreferenceDialog {
-    data object Theme : AppearancePreferenceDialog
     data object NavStyle : AppearancePreferenceDialog
     data object StartupPage : AppearancePreferenceDialog
 }

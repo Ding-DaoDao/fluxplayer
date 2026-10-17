@@ -333,8 +333,8 @@
     <string name="delete_thumbnail_cache_description">Delete all thumbnails cached in storage. Thumbnails will be generated again when media list is opened</string>
     <string name="delete_thumbnail_cache_confirmation">Are you sure you want to delete all thumbnails?</string>
     <string name="reset_settings">Reset settings</string>
-    <string name="reset_settings_description">Reset all settings to their default state</string>
-    <string name="reset_settings_confirmation">This restores application and player defaults and clears audiobook progress. This cannot be undone. Continue?</string>
+    <string name="reset_settings_description">Restore application and player preferences; keep listening progress. Account, backup and online cache settings are managed separately.</string>
+    <string name="reset_settings_confirmation">Restore application and player preferences to defaults? Listening progress and files are kept. Account, backup and online listening cache settings are managed separately.</string>
     <string name="backup_and_restore">Backup &amp; Restore</string>
     <string name="backup_and_restore_description">Backup or restore settings, WebDAV servers and OpenList config</string>
     <string name="create_backup">Create Backup</string>
@@ -572,4 +572,13 @@
     <string name="media_home_add_local">Add local videos</string>
     <string name="media_home_cloud_desc">Browse your cloud media</string>
     <string name="media_loading">Loading…</string>
+    <string name="allow_simultaneous_audio">Allow playback with other audio</string>
+    <string name="allow_simultaneous_audio_desc">Allow audio from other apps to keep playing while watching videos or listening to local and online audiobooks.</string>
+    <string name="advanced_playback">Advanced playback</string>
+    <string name="shared_audio_settings_description">Shared by video, local audiobooks and online listening: audio coexistence and headset disconnect behavior.</string>
+    <string name="clear_local_listening_progress">Clear local audiobook progress</string>
+    <string name="clear_local_listening_progress_description">Remove local audiobook resume positions and chapter progress; keep the library and audio files.</string>
+    <string name="clear_local_listening_progress_confirmation">Clear all local audiobook resume positions and chapter progress? Library files, online listening progress and settings are kept. This cannot be undone.</string>
+    <string name="glass_settings_inactive">Glass parameters take effect when supported by the system and at least one glass effect is enabled.</string>
+    <string name="glass_nav_settings_hint">Enabling bottom bar glass also selects the floating capsule bar.</string>
 </resources>

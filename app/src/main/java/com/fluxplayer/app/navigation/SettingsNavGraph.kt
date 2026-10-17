@@ -2,6 +2,7 @@ package com.fluxplayer.app.navigation
 
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
+import androidx.navigation.compose.composable
 import androidx.navigation.navigation
 import com.fluxplayer.app.settings.Setting
 import com.fluxplayer.app.settings.navigation.aboutPreferencesScreen
@@ -9,7 +10,6 @@ import com.fluxplayer.app.settings.navigation.appearancePreferencesScreen
 import com.fluxplayer.app.settings.navigation.audioPreferencesScreen
 import com.fluxplayer.app.settings.navigation.audiobookSettingsScreen
 import com.fluxplayer.app.settings.navigation.backupSettingsScreen
-import com.fluxplayer.app.settings.navigation.decoderPreferencesScreen
 import com.fluxplayer.app.settings.navigation.folderPreferencesScreen
 import com.fluxplayer.app.settings.navigation.generalPreferencesScreen
 import com.fluxplayer.app.settings.navigation.gesturePreferencesScreen
@@ -20,7 +20,6 @@ import com.fluxplayer.app.settings.navigation.navigateToAppearancePreferences
 import com.fluxplayer.app.settings.navigation.navigateToAudioPreferences
 import com.fluxplayer.app.settings.navigation.navigateToAudiobookSettings
 import com.fluxplayer.app.settings.navigation.navigateToBackupSettings
-import com.fluxplayer.app.settings.navigation.navigateToDecoderPreferences
 import com.fluxplayer.app.settings.navigation.navigateToFolderPreferencesScreen
 import com.fluxplayer.app.settings.navigation.navigateToGeneralPreferences
 import com.fluxplayer.app.settings.navigation.navigateToGesturePreferences
@@ -38,6 +37,7 @@ import com.fluxplayer.app.settings.navigation.settingsScreen
 import com.fluxplayer.app.settings.navigation.subtitlePreferencesScreen
 import com.fluxplayer.app.settings.navigation.thumbnailPreferencesScreen
 import com.fluxplayer.app.settings.navigation.webDavSettingsScreen
+import com.fluxplayer.app.settings.screens.player.PlayerPreferencesScreen
 
 const val SETTINGS_ROUTE = "settings_nav_route"
 
@@ -56,7 +56,6 @@ fun NavGraphBuilder.settingsNavGraph(
                     Setting.MEDIA_LIBRARY -> navController.navigateToMediaLibraryPreferencesScreen()
                     Setting.PLAYER -> navController.navigateToPlayerPreferences()
                     Setting.GESTURES -> navController.navigateToGesturePreferences()
-                    Setting.DECODER -> navController.navigateToDecoderPreferences()
                     Setting.AUDIOBOOK -> navController.navigateToAudiobookSettings()
                     Setting.AUDIO -> navController.navigateToAudioPreferences()
                     Setting.SUBTITLE -> navController.navigateToSubtitlePreferences()
@@ -76,10 +75,11 @@ fun NavGraphBuilder.settingsNavGraph(
         thumbnailPreferencesScreen(onNavigateUp = navController::navigateUp)
         folderPreferencesScreen(onNavigateUp = navController::navigateUp)
         playerPreferencesScreen(onNavigateUp = navController::navigateUp)
+        // 兼容旧版保存的页面路径，统一显示合并后的播放器设置。
+        composable("decoder_preferences_route") { PlayerPreferencesScreen(onNavigateUp = navController::navigateUp) }
         gesturePreferencesScreen(onNavigateUp = navController::navigateUp)
-        decoderPreferencesScreen(onNavigateUp = navController::navigateUp)
         audioPreferencesScreen(onNavigateUp = navController::navigateUp)
-        audiobookSettingsScreen(onNavigateUp = navController::navigateUp)
+        audiobookSettingsScreen(onNavigateUp = navController::navigateUp, onAudioSettingsClick = navController::navigateToAudioPreferences)
         subtitlePreferencesScreen(onNavigateUp = navController::navigateUp)
         openListSettingsScreen(onNavigateUp = navController::navigateUp)
         webDavSettingsScreen(onNavigateUp = navController::navigateUp)

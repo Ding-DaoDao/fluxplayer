@@ -11,6 +11,6 @@ fun NavController.navigateToAudiobookSettings() {
     navigate(audiobookSettingsNavigationRoute) { launchSingleTop = true }
 }
 
-fun NavGraphBuilder.audiobookSettingsScreen(onNavigateUp: () -> Unit) {
-    composable(audiobookSettingsNavigationRoute) { AudiobookSettingsScreen(onNavigateUp) }
+fun NavGraphBuilder.audiobookSettingsScreen(onNavigateUp: () -> Unit, onAudioSettingsClick: () -> Unit) {
+    composable(audiobookSettingsNavigationRoute) { AudiobookSettingsScreen(onNavigateUp, onAudioSettingsClick) }
 }

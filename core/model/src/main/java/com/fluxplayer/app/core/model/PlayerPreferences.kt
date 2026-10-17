@@ -23,7 +23,6 @@ data class PlayerPreferences(
     val useZoomControls: Boolean = true,
     val enablePanGesture: Boolean = false,
     val doubleTapGesture: DoubleTapGesture = DoubleTapGesture.BOTH,
-    val useLongPressControls: Boolean = true,
     val longPressControlsSpeed: Float = 2.0f,
     val seekIncrement: Int = DEFAULT_SEEK_INCREMENT,
     val seekSensitivity: Float = DEFAULT_SEEK_SENSITIVITY,
@@ -70,9 +69,6 @@ data class PlayerPreferences(
         DanmakuSource.YOUKU,
         DanmakuSource.QIYI,
     ),
-    /** 已缓存的弹幕映射 episodeId -> 本地文件路径 */
-    val danmakuCacheMap: Map<String, String> = emptyMap(),
-
     // 本地弹幕路径
     val localDanmakuPath: String = "/storage/emulated/0/Video",
 

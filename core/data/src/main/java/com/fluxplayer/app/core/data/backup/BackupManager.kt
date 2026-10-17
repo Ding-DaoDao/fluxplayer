@@ -56,7 +56,7 @@ class BackupManager @Inject constructor(
     /** 直接读取持久化设置，避免启动阶段的默认状态被误备份。 */
     private suspend fun createBackup(): BackupData = BackupData(
         appPreferences = audiobookProgressRepository.exportTo(appPreferencesDataSource.preferences.first()),
-        playerPreferences = playerPreferencesDataSource.preferences.first().copy(danmakuCacheMap = emptyMap()),
+        playerPreferences = playerPreferencesDataSource.preferences.first(),
         webDavServers = webDavServersDataSource.webDavServers.first(),
         openListConfig = readOpenListConfig(),
         alipanConfig = readAlipanConfig(),
@@ -98,7 +98,7 @@ class BackupManager @Inject constructor(
                 appPreferencesDataSource.updateOrThrow { AudiobookProgressRepository.withoutLegacyProgress(backup.appPreferences) }
             }
             if ("player_preferences" !in ignoreList) {
-                playerPreferencesDataSource.updateOrThrow { backup.playerPreferences.copy(danmakuCacheMap = emptyMap()) }
+                playerPreferencesDataSource.updateOrThrow { backup.playerPreferences }
             }
             if ("webdav_servers" !in ignoreList) webDavServersDataSource.updateOrThrow { backup.webDavServers }
             if ("openlist_config" !in ignoreList) {

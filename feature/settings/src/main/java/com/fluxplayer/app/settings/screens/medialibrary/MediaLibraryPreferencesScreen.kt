@@ -15,6 +15,7 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.ThumbnailGenerationStrategy
 import com.fluxplayer.app.core.ui.R
 import com.fluxplayer.app.core.ui.components.ClickablePreferenceItem
@@ -30,10 +31,10 @@ fun MediaLibraryPreferencesScreen(
     onThumbnailSettingClick: () -> Unit = {},
     viewModel: MediaLibraryPreferencesViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val preferences by viewModel.preferences.collectAsStateWithLifecycle()
 
     MediaLibraryPreferencesContent(
-        uiState = uiState,
+        preferences = preferences,
         onNavigateUp = onNavigateUp,
         onFolderSettingClick = onFolderSettingClick,
         onThumbnailSettingClick = onThumbnailSettingClick,
@@ -43,13 +44,11 @@ fun MediaLibraryPreferencesScreen(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun MediaLibraryPreferencesContent(
-    uiState: MediaLibraryPreferencesUiState,
+    preferences: ApplicationPreferences,
     onNavigateUp: () -> Unit,
     onFolderSettingClick: () -> Unit,
     onThumbnailSettingClick: () -> Unit,
 ) {
-    val preferences = uiState.preferences
-
     FluxSettingsScaffold(
         title = stringResource(id = R.string.media_library),
         onNavigateUp = onNavigateUp,
@@ -97,7 +96,7 @@ private fun MediaLibraryPreferencesContent(
 private fun MediaLibraryPreferencesScreenPreview() {
     NextPlayerTheme {
         MediaLibraryPreferencesContent(
-            uiState = MediaLibraryPreferencesUiState(),
+            preferences = ApplicationPreferences(),
             onNavigateUp = {},
             onFolderSettingClick = {},
             onThumbnailSettingClick = {},

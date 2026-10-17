@@ -9,6 +9,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 
 class LocalPreferencesRepository @Inject constructor(
@@ -48,7 +49,8 @@ class LocalPreferencesRepository @Inject constructor(
     }
 
     override suspend fun resetPreferences() {
-        audiobookProgressRepository.clear()
+        // 重置偏好前完成旧进度迁移，收听记录只由独立清除操作删除。
+        audiobookProgressRepository.progress.first()
         appPreferencesDataSource.update { ApplicationPreferences() }
         playerPreferencesDataSource.update { PlayerPreferences() }
     }

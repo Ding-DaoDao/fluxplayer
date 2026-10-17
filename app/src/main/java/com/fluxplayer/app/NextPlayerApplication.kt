@@ -1,28 +1,37 @@
 package com.fluxplayer.app
 
 import android.app.Application
-import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
-import com.fluxplayer.app.core.data.cloud189.C189SessionKeeper
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
-import dagger.hilt.android.HiltAndroidApp
 import com.fluxplayer.app.core.common.di.ApplicationScope
 import com.fluxplayer.app.core.data.backup.AutoBackupHelper
+import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
+import com.fluxplayer.app.core.data.cloud189.C189SessionKeeper
 import com.fluxplayer.app.core.data.openlist.OpenListManager
 import com.fluxplayer.app.core.data.openlist.OpenListManagerProvider
+import com.fluxplayer.app.core.data.openlist.OpenListService
 import com.fluxplayer.app.core.data.repository.MediaRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
+import com.fluxplayer.app.core.tingshu.ListeningAudioPreferencesProvider
 import com.fluxplayer.app.crash.CrashActivity
-import com.fluxplayer.app.core.data.openlist.OpenListService
 import com.fluxplayer.app.crash.GlobalExceptionHandler
+import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 @HiltAndroidApp
-class NextPlayerApplication : Application(), SingletonImageLoader.Factory {
+class NextPlayerApplication : Application(), SingletonImageLoader.Factory, ListeningAudioPreferencesProvider {
+
+    override val listeningRequireAudioFocus: Flow<Boolean>
+        get() = preferencesRepository.persistedPlayerPreferences.map { it.requireAudioFocus }
+
+    override val listeningPauseOnHeadsetDisconnect: Flow<Boolean>
+        get() = preferencesRepository.persistedPlayerPreferences.map { it.pauseOnHeadsetDisconnect }
 
     @Inject
     lateinit var preferencesRepository: PreferencesRepository

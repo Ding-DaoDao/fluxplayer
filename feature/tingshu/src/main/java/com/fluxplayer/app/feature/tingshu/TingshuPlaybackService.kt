@@ -18,6 +18,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import com.fluxplayer.app.core.tingshu.ListeningAudioPreferencesProvider
 import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.tingshu.ListeningCoverStore
 import com.fluxplayer.app.core.tingshu.ListeningDownloads
@@ -42,6 +43,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -114,16 +118,21 @@ class TingshuPlaybackService : MediaSessionService() {
     private var artworkKey: String? = null
     private var artworkBytes: ByteArray = ListeningNotificationArtwork.bytes
     private var destroying = false
+    private var requireAudioFocus = true
 
     override fun onCreate() {
         super.onCreate()
         repository = TingshuRepository.get(this)
+        val audioFocusPreferences = (application as? ListeningAudioPreferencesProvider)?.listeningRequireAudioFocus ?: flowOf(true)
+        val headsetPreferences = (application as? ListeningAudioPreferencesProvider)?.listeningPauseOnHeadsetDisconnect ?: flowOf(true)
+        val initialPreferences = runBlocking(Dispatchers.IO) { audioFocusPreferences.first() to headsetPreferences.first() }
+        requireAudioFocus = initialPreferences.first
         player = ExoPlayer.Builder(this).build().apply {
             setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(),
-                true,
+                requireAudioFocus,
             )
-            setHandleAudioBecomingNoisy(true)
+            setHandleAudioBecomingNoisy(initialPreferences.second)
             addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (ListeningPlayback.state.value.resolving) return
@@ -186,7 +195,7 @@ class TingshuPlaybackService : MediaSessionService() {
 
                 override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
                     // 音频焦点被抢占后明确暂停，通知栏显示继续播放并保存中断位置。
-                    if (playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) player.pause()
+                    if (requireAudioFocus && playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) player.pause()
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -213,6 +222,15 @@ class TingshuPlaybackService : MediaSessionService() {
             })
         }
         player.setPlaybackSpeed(preferences.getFloat("speed", 1f))
+        scope.launch {
+            audioFocusPreferences.distinctUntilChanged().collect { required ->
+                requireAudioFocus = required
+                player.setAudioAttributes(player.audioAttributes, required)
+            }
+        }
+        scope.launch {
+            headsetPreferences.distinctUntilChanged().collect(player::setHandleAudioBecomingNoisy)
+        }
         session = MediaSession.Builder(this, player)
             .setId("fluxplayer.tingshu")
             .setShowPlayButtonIfPlaybackIsSuppressed(true)

@@ -3,7 +3,6 @@ package com.fluxplayer.app.settings.screens.player
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.fluxplayer.app.core.common.CloudAwareCacheKeyRegistry
 import com.fluxplayer.app.core.common.extensions.round
 import com.fluxplayer.app.core.data.cache.PlaybackCacheManager
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
@@ -14,27 +13,31 @@ import com.fluxplayer.app.core.model.Resume
 import com.fluxplayer.app.core.model.ScreenOrientation
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @HiltViewModel
 class PlayerPreferencesViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
     private val playbackCacheManager: PlaybackCacheManager,
-    private val cacheKeyRegistry: CloudAwareCacheKeyRegistry,
 ) : ViewModel() {
 
     private val uiStateInternal = MutableStateFlow(
         PlayerPreferencesUiState(
             preferences = preferencesRepository.playerPreferences.value,
-            cacheSizeBytes = playbackCacheManager.getCacheSize(),
         ),
     )
     val uiState = uiStateInternal.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            val bytes = withContext(Dispatchers.IO) { playbackCacheManager.getCacheSize() }
+            uiStateInternal.update { it.copy(cacheSizeBytes = bytes) }
+        }
         viewModelScope.launch {
             preferencesRepository.playerPreferences.collect { preferences ->
                 uiStateInternal.update { it.copy(preferences = preferences) }
@@ -65,6 +68,10 @@ class PlayerPreferencesViewModel @Inject constructor(
         }
     }
 
+    private fun updatePreferences(transform: (PlayerPreferences) -> PlayerPreferences) {
+        viewModelScope.launch { preferencesRepository.updatePlayerPreferences(transform) }
+    }
+
     private fun showDialog(value: PlayerPreferenceDialog?) {
         uiStateInternal.update {
             it.copy(showDialog = value)
@@ -72,130 +79,104 @@ class PlayerPreferencesViewModel @Inject constructor(
     }
 
     private fun updatePlaybackResume(resume: Resume) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(
-                    resume = resume,
-                )
-            }
+        updatePreferences {
+            it.copy(
+                resume = resume,
+            )
         }
     }
 
     private fun toggleAutoplay() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(autoplay = !it.autoplay)
-            }
+        updatePreferences {
+            it.copy(autoplay = !it.autoplay)
         }
     }
 
     private fun toggleAutoPip() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(autoPip = !it.autoPip)
-            }
+        updatePreferences {
+            it.copy(autoPip = !it.autoPip)
         }
     }
 
     private fun toggleAutoBackgroundPlay() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(autoBackgroundPlay = !it.autoBackgroundPlay)
-            }
+        updatePreferences {
+            it.copy(autoBackgroundPlay = !it.autoBackgroundPlay)
         }
     }
 
     private fun toggleRememberBrightnessLevel() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(rememberPlayerBrightness = !it.rememberPlayerBrightness)
-            }
+        updatePreferences {
+            it.copy(rememberPlayerBrightness = !it.rememberPlayerBrightness)
         }
     }
 
     private fun toggleRememberSelections() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(rememberSelections = !it.rememberSelections)
-            }
+        updatePreferences {
+            it.copy(rememberSelections = !it.rememberSelections)
         }
     }
 
     private fun updatePreferredPlayerOrientation(value: ScreenOrientation) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(playerScreenOrientation = value)
-            }
+        updatePreferences {
+            it.copy(playerScreenOrientation = value)
         }
     }
 
     private fun updateDefaultPlaybackSpeed(value: Float) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(defaultPlaybackSpeed = value.round(1))
-            }
+        updatePreferences {
+            it.copy(defaultPlaybackSpeed = value.round(1))
         }
     }
 
     private fun updateControlAutoHideTimeout(value: Int) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(controllerAutoHideTimeout = value)
-            }
+        updatePreferences {
+            it.copy(controllerAutoHideTimeout = value)
         }
     }
 
     private fun toggleUseMaterialYouControls() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(useMaterialYouControls = !it.useMaterialYouControls)
-            }
+        updatePreferences {
+            it.copy(useMaterialYouControls = !it.useMaterialYouControls)
         }
     }
 
     private fun updateDanmakuSources(sources: List<DanmakuSource>) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(danmakuSources = sources)
-            }
+        updatePreferences {
+            it.copy(danmakuSources = sources)
         }
     }
 
     private fun updateLocalDanmakuPath(path: String) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(localDanmakuPath = path)
-            }
+        updatePreferences {
+            it.copy(localDanmakuPath = path)
         }
     }
 
     private fun togglePlaybackCacheEnabled() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(playbackCacheEnabled = !it.playbackCacheEnabled)
-            }
+        updatePreferences {
+            it.copy(playbackCacheEnabled = !it.playbackCacheEnabled)
         }
     }
 
     private fun updatePlaybackCacheMaxSize(value: CacheMaxSize) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(playbackCacheMaxSize = value)
-            }
+        updatePreferences {
+            it.copy(playbackCacheMaxSize = value)
         }
     }
 
     private fun clearPlaybackCache() {
-        playbackCacheManager.clearCache()
-        cacheKeyRegistry.clear()
-        uiStateInternal.update { it.copy(cacheSizeBytes = 0) }
+        viewModelScope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                playbackCacheManager.clearCache()
+                playbackCacheManager.getCacheSize()
+            }
+            uiStateInternal.update { it.copy(cacheSizeBytes = bytes) }
+        }
     }
 
     fun updateSpeedPresets(presets: List<Float>) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(speedPresets = presets.sorted())
-            }
+        updatePreferences {
+            it.copy(speedPresets = presets.sorted())
         }
     }
 }
@@ -208,6 +189,7 @@ data class PlayerPreferencesUiState(
 )
 
 sealed interface PlayerPreferenceDialog {
+    data object DecoderPriorityDialog : PlayerPreferenceDialog
     data object ResumeDialog : PlayerPreferenceDialog
     data object PlayerScreenOrientationDialog : PlayerPreferenceDialog
     data object DanmakuSourceManagerDialog : PlayerPreferenceDialog

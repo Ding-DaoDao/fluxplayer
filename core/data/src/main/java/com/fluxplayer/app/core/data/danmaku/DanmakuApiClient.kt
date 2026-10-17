@@ -58,15 +58,16 @@ class DanmakuApiClient(
             val apiPath = "/api/v2/search/anime"
             val url = buildUrl(source, apiPath, mapOf("keyword" to keyword))
             val request = buildRequest(source, apiPath, url).get().build()
-            val response = client.newCall(request).execute()
+            client.newCall(request).execute().use { response ->
 
-            if (!response.isSuccessful) {
-                Log.w(TAG, "searchAnime HTTP ${response.code} for keyword=$keyword")
-                return emptyList()
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "searchAnime HTTP ${response.code} for keyword=$keyword")
+                    return emptyList()
+                }
+
+                val body = response.body?.string() ?: return emptyList()
+                parseSearchResult(body)
             }
-
-            val body = response.body?.string() ?: return emptyList()
-            parseSearchResult(body)
         } catch (e: Exception) {
             Log.e(TAG, "searchAnime failed for keyword=$keyword", e)
             emptyList()
@@ -90,15 +91,16 @@ class DanmakuApiClient(
             val apiPath = "/api/v2/bangumi/$animeId"
             val url = buildUrl(source, apiPath)
             val request = buildRequest(source, apiPath, url).get().build()
-            val response = client.newCall(request).execute()
+            client.newCall(request).execute().use { response ->
 
-            if (!response.isSuccessful) {
-                Log.w(TAG, "getEpisodes HTTP ${response.code} for animeId=$animeId")
-                return emptyList()
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "getEpisodes HTTP ${response.code} for animeId=$animeId")
+                    return emptyList()
+                }
+
+                val body = response.body?.string() ?: return emptyList()
+                parseEpisodes(body, animeId)
             }
-
-            val body = response.body?.string() ?: return emptyList()
-            parseEpisodes(body, animeId)
         } catch (e: Exception) {
             Log.e(TAG, "getEpisodes failed for animeId=$animeId", e)
             emptyList()
@@ -122,36 +124,37 @@ class DanmakuApiClient(
             val apiPath = "/api/v2/comment/$episodeId"
             val url = buildUrl(source, apiPath, mapOf("withRelated" to "true"))
             val request = buildRequest(source, apiPath, url).get().build()
-            val response = client.newCall(request).execute()
+            client.newCall(request).execute().use { response ->
 
-            if (!response.isSuccessful) {
-                Log.w(TAG, "downloadDanmaku HTTP ${response.code} for episodeId=$episodeId")
-                return null
-            }
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "downloadDanmaku HTTP ${response.code} for episodeId=$episodeId")
+                    return null
+                }
 
-            // 检查 Content-Type：XML 直接返回流；JSON 需先解析再转 XML
-            val contentType = response.header("Content-Type", "") ?: ""
-            Log.d(TAG, "downloadDanmaku: episodeId=$episodeId contentType=$contentType")
+                // 检查 Content-Type：XML 直接返回流；JSON 需先解析再转 XML
+                val contentType = response.header("Content-Type", "") ?: ""
+                Log.d(TAG, "downloadDanmaku: episodeId=$episodeId contentType=$contentType")
 
-            return if (contentType.contains("xml", ignoreCase = true) ||
-                contentType.contains("text", ignoreCase = true)
-            ) {
-                val body = response.body?.string()
-                Log.d(TAG, "XML response body[:500]: ${body?.take(500)}")
-                body?.byteInputStream(Charsets.UTF_8)
-            } else {
-                // JSON 响应 — 尝试将其转为 Bilibili XML 格式
-                val bodyStr = response.body?.string()
-                Log.d(TAG, "JSON response body[:500]: ${bodyStr?.take(500)}")
-                if (bodyStr != null && bodyStr.trimStart().startsWith("{")) {
-                    val xmlStream = convertJsonToXmlStream(bodyStr)
-                    val xmlText = xmlStream.bufferedReader().readText()
-                    xmlStream.close()
-                    Log.d(TAG, "Converted XML[:500]:\n${xmlText.take(500)}")
-                    xmlText.byteInputStream(Charsets.UTF_8)
+                return if (contentType.contains("xml", ignoreCase = true) ||
+                    contentType.contains("text", ignoreCase = true)
+                ) {
+                    val body = response.body?.string()
+                    Log.d(TAG, "XML response body[:500]: ${body?.take(500)}")
+                    body?.byteInputStream(Charsets.UTF_8)
                 } else {
-                    // 已经是 XML 文本
-                    bodyStr?.byteInputStream(Charsets.UTF_8)
+                    // JSON 响应 — 尝试将其转为 Bilibili XML 格式
+                    val bodyStr = response.body?.string()
+                    Log.d(TAG, "JSON response body[:500]: ${bodyStr?.take(500)}")
+                    if (bodyStr != null && bodyStr.trimStart().startsWith("{")) {
+                        val xmlStream = convertJsonToXmlStream(bodyStr)
+                        val xmlText = xmlStream.bufferedReader().readText()
+                        xmlStream.close()
+                        Log.d(TAG, "Converted XML[:500]:\n${xmlText.take(500)}")
+                        xmlText.byteInputStream(Charsets.UTF_8)
+                    } else {
+                        // 已经是 XML 文本
+                        bodyStr?.byteInputStream(Charsets.UTF_8)
+                    }
                 }
             }
         } catch (e: Exception) {

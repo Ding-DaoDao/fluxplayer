@@ -3,10 +3,10 @@ package com.fluxplayer.app.settings.screens.subtitle
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.Font
 import com.fluxplayer.app.core.model.PlayerPreferences
+import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,6 +49,10 @@ class SubtitlePreferencesViewModel @Inject constructor(
         }
     }
 
+    private fun updatePreferences(transform: (PlayerPreferences) -> PlayerPreferences) {
+        viewModelScope.launch { preferencesRepository.updatePlayerPreferences(transform) }
+    }
+
     private fun showDialog(value: SubtitlePreferenceDialog?) {
         uiStateInternal.update {
             it.copy(showDialog = value)
@@ -56,50 +60,38 @@ class SubtitlePreferencesViewModel @Inject constructor(
     }
 
     private fun updateSubtitleLanguage(value: String) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(preferredSubtitleLanguage = value)
-            }
+        updatePreferences {
+            it.copy(preferredSubtitleLanguage = value)
         }
     }
 
     private fun updateSubtitleFont(value: Font) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(subtitleFont = value)
-            }
+        updatePreferences {
+            it.copy(subtitleFont = value)
         }
     }
 
     private fun toggleSubtitleTextBold() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(subtitleTextBold = !it.subtitleTextBold)
-            }
+        updatePreferences {
+            it.copy(subtitleTextBold = !it.subtitleTextBold)
         }
     }
 
     private fun updateSubtitleFontSize(value: Int) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(subtitleTextSize = value)
-            }
+        updatePreferences {
+            it.copy(subtitleTextSize = value)
         }
     }
 
     private fun toggleSubtitleBackground() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(subtitleBackground = !it.subtitleBackground)
-            }
+        updatePreferences {
+            it.copy(subtitleBackground = !it.subtitleBackground)
         }
     }
 
     private fun toggleApplyEmbeddedStyles() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(applyEmbeddedStyles = !it.applyEmbeddedStyles)
-            }
+        updatePreferences {
+            it.copy(applyEmbeddedStyles = !it.applyEmbeddedStyles)
         }
     }
 

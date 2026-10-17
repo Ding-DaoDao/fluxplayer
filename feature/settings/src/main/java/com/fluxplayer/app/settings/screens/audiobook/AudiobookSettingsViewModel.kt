@@ -10,7 +10,6 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class AudiobookSettingsViewModel @Inject constructor(private val preferences: PreferencesRepository) : ViewModel() {
     val preferencesState = preferences.applicationPreferences
-
     fun setRootUri(uri: String) {
         viewModelScope.launch {
             preferences.updateApplicationPreferences { it.copy(audiobookRootUri = uri, audiobookLibraryRevision = maxOf(System.currentTimeMillis(), it.audiobookLibraryRevision + 1)) }

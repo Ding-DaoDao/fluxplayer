@@ -92,7 +92,14 @@ class AliyunBrowserViewModel @Inject constructor(
     private var loadDirectoryJob: kotlinx.coroutines.Job? = null
     private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
-    private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
+    private data class CachedDirectory(
+        val items: List<WebDavResource>,
+        val nextMarker: String?,
+        val orderBy: String,
+        val driveId: String,
+    )
+
+    private val directoryCache = mutableMapOf<String, CachedDirectory>()
     private var downloadJob: Job? = null
 
     data class DownloadProgressData(
@@ -291,7 +298,6 @@ class AliyunBrowserViewModel @Inject constructor(
                 }
                 verifyResult.isSuccess -> {
                     // Token 有效，正常加载
-                    CloudDirectoryCache.get(getApplication(), "alipan", "root")?.let { directoryCache["root"] = it }
                     refreshDriveInfo()
                     loadDirectory("root")
                 }
@@ -315,6 +321,10 @@ class AliyunBrowserViewModel @Inject constructor(
     // region ==================== 登出 ====================
 
     fun logout() {
+        loadSequence++
+        loadDirectoryJob?.cancel()
+        loadMoreJob?.cancel()
+        loadingMore = false
         AliyunAuthProvider.clear()
 
         // 清除 OkHttp GlobalCookieJar 中旧账号的 Cookie
@@ -422,14 +432,16 @@ class AliyunBrowserViewModel @Inject constructor(
         loadingMore = false
         loadSequence++
         val seq = loadSequence
-        updateUiState { it.copy(isLoading = true, error = null, currentFileId = parentFileId) }
+        val orderBy = _uiState.value.orderBy
+        val driveId = apiClient.driveId
+        updateUiState { it.copy(isLoading = true, isLoadingMore = false, error = null, currentFileId = parentFileId, nextMarker = null) }
         syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
             val result = apiClient.listFiles(
                 parentFileId,
-                orderBy = _uiState.value.orderBy.substringBefore(":"),
-                orderDirection = _uiState.value.orderBy.substringAfter(":", "ASC")
+                orderBy = orderBy.substringBefore(":"),
+                orderDirection = orderBy.substringAfter(":", "ASC")
             )
             if (seq != loadSequence) return@launch
 
@@ -450,7 +462,7 @@ class AliyunBrowserViewModel @Inject constructor(
                         }
                     }
                     val resources = listResult.items.map { fileToResource(it) }
-                    directoryCache[parentFileId] = resources
+                    directoryCache[parentFileId] = CachedDirectory(resources, listResult.nextMarker.ifEmpty { null }, orderBy, driveId)
                     CloudDirectoryCache.put(getApplication(), "alipan", parentFileId, resources)
                     updateUiState {
                         it.copy(
@@ -485,23 +497,28 @@ class AliyunBrowserViewModel @Inject constructor(
     }
 
     private fun loadDirectoryCached(fileId: String) {
-        val cached = directoryCache[fileId]
+        // 恢复缓存也是一次导航，旧目录的请求不得覆盖当前页面。
+        loadSequence++
+        loadDirectoryJob?.cancel()
+        loadMoreJob?.cancel()
+        loadingMore = false
+        val cached = directoryCache[fileId]?.takeIf {
+            it.orderBy == _uiState.value.orderBy && it.driveId == apiClient.driveId
+        }
         if (cached != null) {
-            loadMoreJob?.cancel()
-            loadingMore = false
             updateUiState {
                 it.copy(
-                    items = cached,
+                    items = cached.items,
                     currentFileId = fileId,
                     isLoading = false,
                     isLoadingMore = false,
                     error = null,
-                    nextMarker = null
+                    nextMarker = cached.nextMarker
                 )
             }
-            syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
+            syncStackTop { it.copy(items = cached.items, isLoading = false, error = null) }
         } else {
-            updateUiState { it.copy(items = emptyList(), currentFileId = fileId) }
+            updateUiState { it.copy(items = emptyList(), currentFileId = fileId, isLoadingMore = false, nextMarker = null) }
             syncStackTop { it.copy(items = emptyList(), isLoading = true, error = null) }
             loadDirectory(fileId)
         }
@@ -514,6 +531,8 @@ class AliyunBrowserViewModel @Inject constructor(
     fun loadMore() {
         val state = _uiState.value
         if (state.nextMarker == null || loadingMore || state.isLoading) return
+        val seq = loadSequence
+        val driveId = apiClient.driveId
         loadingMore = true
         updateUiState { it.copy(isLoadingMore = true) }
 
@@ -521,22 +540,25 @@ class AliyunBrowserViewModel @Inject constructor(
             try {
                 val result = apiClient.listFiles(
                     parentFileId = state.currentFileId,
-                    nextMarker = state.nextMarker
+                    nextMarker = state.nextMarker,
+                    orderBy = state.orderBy.substringBefore(":"),
+                    orderDirection = state.orderBy.substringAfter(":", "ASC"),
                 )
+                if (seq != loadSequence) return@launch
                 result.fold(
                     onSuccess = { listResult ->
                         val newItems = listResult.items.map { fileToResource(it) }
                         val existingPaths = _uiState.value.items.map { it.path }.toSet()
                         val filtered = newItems.filter { it.path !in existingPaths }
-                        if (filtered.isEmpty()) {
-                            updateUiState { it.copy(isLoadingMore = false, nextMarker = null) }
-                            return@fold
-                        }
+                        val combined = _uiState.value.items + filtered
+                        // 有效游标决定是否还有下一页，重复条目不代表分页结束。
+                        val marker = listResult.nextMarker.takeIf { it.isNotEmpty() && it != state.nextMarker }
+                        directoryCache[state.currentFileId] = CachedDirectory(combined, marker, state.orderBy, driveId)
                         updateUiState {
                             it.copy(
-                                items = _uiState.value.items + filtered,
+                                items = combined,
                                 isLoadingMore = false,
-                                nextMarker = listResult.nextMarker.ifEmpty { null }
+                                nextMarker = marker
                             )
                         }
                         syncStackTop { it.copy(items = _uiState.value.items, isLoading = false, error = null) }
@@ -548,8 +570,10 @@ class AliyunBrowserViewModel @Inject constructor(
                     }
                 )
             } finally {
-                loadingMore = false
-                updateUiState { it.copy(isLoadingMore = false) }
+                if (seq == loadSequence) {
+                    loadingMore = false
+                    updateUiState { it.copy(isLoadingMore = false) }
+                }
             }
         }
     }

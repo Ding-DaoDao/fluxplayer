@@ -10,6 +10,7 @@ import com.fluxplayer.app.core.common.LocalListeningLibrary
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.PlayerPreferences
+import com.fluxplayer.app.core.ui.base.DataState
 import com.fluxplayer.app.feature.player.AudioThemePreferences
 import com.fluxplayer.app.feature.videopicker.screens.audiobook.AudiobookViewModel
 import dagger.hilt.android.EntryPointAccessors
@@ -19,6 +20,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -29,6 +31,7 @@ class LocalListeningHistoryTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val progress = EntryPointAccessors.fromApplication(context, AudioThemePreferences::class.java).audiobookProgressRepository()
+        val playedAt = System.currentTimeMillis()
         val books = List(2) { index ->
             LocalListeningBook(
                 path = "${context.cacheDir}/history-unavailable/$index",
@@ -38,7 +41,7 @@ class LocalListeningHistoryTest {
             )
         }
         books.forEach { LocalListeningLibrary.remember(context, it) }
-        progress.save(books[0].path, 0, 12_000, 60_000, 100, books[0].chapters.single().uri.toString())
+        progress.save(books[0].path, 0, 12_000, 60_000, playedAt, books[0].chapters.single().uri.toString())
         val preferences = HistoryPreferences("${context.cacheDir}/history-unavailable")
         var store = ViewModelStore()
         fun create(): AudiobookViewModel {
@@ -54,9 +57,10 @@ class LocalListeningHistoryTest {
             val initial = withTimeout(5_000) { model.uiState.first { it.recentLocalBooks.any { book -> book.folderPath == books[0].path } } }
             assertEquals("历史书籍 0", initial.recentLocalBooks.single { it.folderPath == books[0].path }.title)
             assertEquals("0|12000", initial.resumeStates[books[0].path])
-            // 外部目录不可用也须显示历史，证明展示不依赖扫描完成。
-            withTimeout(5_000) { model.uiState.first { it.scanError != null } }
-            progress.save(books[1].path, 0, 0, 60_000, 200, books[1].chapters.single().uri.toString())
+            // 启动只读取或迁移已有书架索引，外部目录不可用也无需重新扫描。
+            val shelf = withTimeout(5_000) { model.uiState.first { it.scanState is DataState.Success } }
+            assertNull(shelf.scanError)
+            progress.save(books[1].path, 0, 0, 60_000, playedAt + 1, books[1].chapters.single().uri.toString())
             val updated = withTimeout(2_000) { model.uiState.first { it.recentLocalBooks.any { book -> book.folderPath == books[1].path } } }
             assertEquals(books[1].path, updated.recentLocalBooks.first().folderPath)
             instrumentation.runOnMainSync { store.clear() }

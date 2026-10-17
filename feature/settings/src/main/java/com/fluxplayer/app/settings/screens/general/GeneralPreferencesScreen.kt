@@ -149,13 +149,21 @@ private fun GeneralPreferencesContent(
                     icon = NextIcons.History,
                     onClick = { onEvent(GeneralPreferencesUiEvent.ShowDialog(GeneralPreferencesDialog.ResetSettingsDialog)) },
                 )
+                HorizontalDivider()
+                ClickablePreferenceItem(
+                    title = stringResource(R.string.clear_local_listening_progress),
+                    description = stringResource(R.string.clear_local_listening_progress_description),
+                    icon = NextIcons.DeleteSweep,
+                    onClick = { onEvent(GeneralPreferencesUiEvent.ShowDialog(GeneralPreferencesDialog.ClearLocalListeningProgressDialog)) },
+                    isLastItem = true,
+                )
             }
 
             ListSectionTitle(text = stringResource(R.string.download))
             Column {
                 ClickablePreferenceItem(
                     title = stringResource(R.string.download_location),
-                    description = uiState.downloadPath.ifBlank { stringResource(R.string.not_set) },
+                    description = uiState.preferences.downloadPath.ifBlank { stringResource(R.string.not_set) },
                     icon = NextIcons.Folder,
                     onClick = { onEvent(GeneralPreferencesUiEvent.ShowDialog(GeneralPreferencesDialog.ChangeDownloadPathDialog)) },
                     isFirstItem = true,
@@ -192,6 +200,20 @@ private fun GeneralPreferencesContent(
                                 style = MaterialTheme.typography.titleSmall,
                             )
                         },
+                    )
+                }
+                GeneralPreferencesDialog.ClearLocalListeningProgressDialog -> {
+                    NextDialog(
+                        onDismissRequest = { onEvent(GeneralPreferencesUiEvent.ShowDialog(null)) },
+                        title = { Text(stringResource(R.string.clear_local_listening_progress)) },
+                        content = { Text(stringResource(R.string.clear_local_listening_progress_confirmation)) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                onEvent(GeneralPreferencesUiEvent.ClearLocalListeningProgress)
+                                onEvent(GeneralPreferencesUiEvent.ShowDialog(null))
+                            }) { Text(stringResource(R.string.delete)) }
+                        },
+                        dismissButton = { CancelButton(onClick = { onEvent(GeneralPreferencesUiEvent.ShowDialog(null)) }) },
                     )
                 }
                 GeneralPreferencesDialog.ResetSettingsDialog -> {
@@ -257,7 +279,7 @@ private fun GeneralPreferencesContent(
                             Column {
                                 Text(stringResource(R.string.current_path), style = MaterialTheme.typography.bodyMedium)
                                 Text(
-                                    uiState.downloadPath.ifBlank { stringResource(R.string.not_set) },
+                                    uiState.preferences.downloadPath.ifBlank { stringResource(R.string.not_set) },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

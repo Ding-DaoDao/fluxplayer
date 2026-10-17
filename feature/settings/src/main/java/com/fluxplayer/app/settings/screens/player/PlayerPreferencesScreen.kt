@@ -34,6 +34,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fluxplayer.app.core.common.extensions.isPipFeatureSupported
 import com.fluxplayer.app.core.model.CacheMaxSize
 import com.fluxplayer.app.core.model.DanmakuSource
+import com.fluxplayer.app.core.model.DecoderPriority
 import com.fluxplayer.app.core.model.PlayerPreferences
 import com.fluxplayer.app.core.model.Resume
 import com.fluxplayer.app.core.model.ScreenOrientation
@@ -90,15 +91,21 @@ private fun PlayerPreferencesContent(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
         ) {
-            ListSectionTitle(text = "播放引擎")
+            ListSectionTitle(text = stringResource(R.string.advanced_playback))
             Column {
+                ClickablePreferenceItem(
+                    title = stringResource(R.string.decoder_priority),
+                    description = uiState.preferences.decoderPriority.name(),
+                    icon = NextIcons.Priority,
+                    onClick = { onEvent(PlayerPreferencesUiEvent.ShowDialog(PlayerPreferenceDialog.DecoderPriorityDialog)) },
+                    isFirstItem = true,
+                )
                 PreferenceSwitch(
                     title = "隧道播放",
                     description = "交给设备硬件协调音视频同步；需设备和媒体支持",
                     icon = NextIcons.Play,
                     isChecked = uiState.preferences.tunneledPlayback,
                     onClick = { onEvent(PlayerPreferencesUiEvent.UpdatePreferences { it.copy(tunneledPlayback = !it.tunneledPlayback) }) },
-                    isFirstItem = true,
                 )
                 PreferenceSwitch(
                     title = "优先 AAC 音轨",
@@ -306,6 +313,23 @@ private fun PlayerPreferencesContent(
 
         uiState.showDialog?.let { showDialog ->
             when (showDialog) {
+                PlayerPreferenceDialog.DecoderPriorityDialog -> {
+                    OptionsDialog(
+                        text = stringResource(R.string.decoder_priority),
+                        onDismissClick = { onEvent(PlayerPreferencesUiEvent.ShowDialog(null)) },
+                    ) {
+                        items(DecoderPriority.entries) { priority ->
+                            RadioTextButton(
+                                text = priority.name(),
+                                selected = priority == uiState.preferences.decoderPriority,
+                                onClick = {
+                                    onEvent(PlayerPreferencesUiEvent.UpdatePreferences { it.copy(decoderPriority = priority) })
+                                    onEvent(PlayerPreferencesUiEvent.ShowDialog(null))
+                                },
+                            )
+                        }
+                    }
+                }
                 PlayerPreferenceDialog.ResumeDialog -> {
                     OptionsDialog(
                         text = stringResource(id = R.string.resume),

@@ -40,7 +40,7 @@ fun SettingsScreen(
         val groups = remember {
             listOf(
                 R.string.settings_group_interface to listOf(SettingRow.APPEARANCE, SettingRow.MEDIA_LIBRARY),
-                R.string.settings_group_playback to listOf(SettingRow.PLAYER, SettingRow.GESTURES, SettingRow.AUDIO, SettingRow.SUBTITLE, SettingRow.DECODER),
+                R.string.settings_group_playback to listOf(SettingRow.PLAYER, SettingRow.GESTURES, SettingRow.AUDIO, SettingRow.SUBTITLE),
                 R.string.settings_group_content to listOf(SettingRow.AUDIOBOOK, SettingRow.WEBDAV, SettingRow.OPENLIST),
                 R.string.settings_group_data to listOf(SettingRow.GENERAL, SettingRow.ABOUT),
             )
@@ -98,7 +98,6 @@ enum class Setting {
     MEDIA_LIBRARY,
     PLAYER,
     GESTURES,
-    DECODER,
     AUDIO,
     AUDIOBOOK,
     SUBTITLE,
@@ -137,12 +136,6 @@ private enum class SettingRow(
         descriptionResId = R.string.gestures_description,
         icon = NextIcons.SwipeHorizontal,
         setting = Setting.GESTURES,
-    ),
-    DECODER(
-        titleResId = R.string.decoder,
-        descriptionResId = R.string.decoder_desc,
-        icon = NextIcons.Decoder,
-        setting = Setting.DECODER,
     ),
     AUDIO(
         titleResId = R.string.audio,

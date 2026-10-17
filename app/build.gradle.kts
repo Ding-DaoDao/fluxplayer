@@ -10,6 +10,8 @@ plugins {
 
 android {
     namespace = "com.fluxplayer.app"
+    // 可选择共存测试版运行设备测试，避免覆盖正式版及其数据。
+    testBuildType = providers.gradleProperty("testBuildType").getOrElse("debug")
 
     compileSdk = libs.versions.android.compileSdk.get().toInt()
     defaultConfig {
@@ -127,6 +129,7 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:media"))
     implementation(project(":core:model"))
+    implementation(project(":core:tingshu"))
     implementation(project(":core:ui"))
     implementation(project(":feature:videopicker"))
     implementation(project(":feature:player"))
@@ -168,6 +171,9 @@ dependencies {
     androidTestImplementation(project(":core:tingshu"))
     androidTestImplementation(libs.androidx.media3.exoplayer)
     androidTestImplementation(libs.androidx.media3.session)
+    androidTestImplementation(libs.androidx.media3.ui)
+    androidTestImplementation(libs.okhttp.core)
+    androidTestImplementation(project(":core:database"))
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.androidx.compose.ui.test)
     debugImplementation(libs.androidx.compose.ui.tooling)

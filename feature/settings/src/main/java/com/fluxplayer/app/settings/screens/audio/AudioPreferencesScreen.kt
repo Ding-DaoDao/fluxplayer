@@ -76,10 +76,10 @@ private fun AudioPreferencesContent(
                 )
                 HorizontalDivider()
                 PreferenceSwitch(
-                    title = stringResource(R.string.require_audio_focus),
-                    description = stringResource(R.string.require_audio_focus_desc),
+                    title = stringResource(R.string.allow_simultaneous_audio),
+                    description = stringResource(R.string.allow_simultaneous_audio_desc),
                     icon = NextIcons.Focus,
-                    isChecked = uiState.preferences.requireAudioFocus,
+                    isChecked = !uiState.preferences.requireAudioFocus,
                     onClick = { onEvent(AudioPreferencesUiEvent.ToggleRequireAudioFocus) },
                 )
                 HorizontalDivider()

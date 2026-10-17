@@ -52,37 +52,38 @@ class BilibiliDanmakuFetcher(
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                Log.w(TAG, "HTTP ${response.code} for $danmakuUrl")
-                return null
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "HTTP ${response.code} for $danmakuUrl")
+                    return null
+                }
+
+                val contentType = response.header("Content-Type", "?")
+                Log.d(TAG, "Response Content-Type: $contentType")
+
+                val bodyBytes = response.body?.bytes()
+                if (bodyBytes == null || bodyBytes.size < 2) return null
+
+                val firstByte = bodyBytes[0].toInt() and 0xFF
+                val secondByte = bodyBytes[1].toInt() and 0xFF
+
+                if (firstByte == 0x1F && secondByte == 0x8B) {
+                    Log.d(TAG, "Response is gzip-compressed, decompressing (${bodyBytes.size} bytes)")
+                    return GZIPInputStream(ByteArrayInputStream(bodyBytes))
+                }
+
+                if (bodyBytes[0].toInt() == 0x3C) {
+                    Log.d(TAG, "Response is XML (${bodyBytes.size} bytes)")
+                    return ByteArrayInputStream(bodyBytes)
+                }
+
+                Log.w(TAG, "XML endpoint returned non-XML (content-type=$contentType, first=0x${firstByte.toString(16)}, size=${bodyBytes.size}), trying alternatives")
+
+                val listXml = fetchDanmakuListXml(cid)
+                if (listXml != null) return listXml
+
+                fetchDanmakuProtobuf(cid)
             }
-
-            val contentType = response.header("Content-Type", "?")
-            Log.d(TAG, "Response Content-Type: $contentType")
-
-            val bodyBytes = response.body?.bytes()
-            if (bodyBytes == null || bodyBytes.size < 2) return null
-
-            val firstByte = bodyBytes[0].toInt() and 0xFF
-            val secondByte = bodyBytes[1].toInt() and 0xFF
-
-            if (firstByte == 0x1F && secondByte == 0x8B) {
-                Log.d(TAG, "Response is gzip-compressed, decompressing (${bodyBytes.size} bytes)")
-                return GZIPInputStream(ByteArrayInputStream(bodyBytes))
-            }
-
-            if (bodyBytes[0].toInt() == 0x3C) {
-                Log.d(TAG, "Response is XML (${bodyBytes.size} bytes)")
-                return ByteArrayInputStream(bodyBytes)
-            }
-
-            Log.w(TAG, "XML endpoint returned non-XML (content-type=$contentType, first=0x${firstByte.toString(16)}, size=${bodyBytes.size}), trying alternatives")
-
-            val listXml = fetchDanmakuListXml(cid)
-            if (listXml != null) return listXml
-
-            fetchDanmakuProtobuf(cid)
         } catch (e: Exception) {
             Log.e(TAG, "fetchDanmaku failed for $url", e)
             null
@@ -101,22 +102,23 @@ class BilibiliDanmakuFetcher(
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                Log.w(TAG, "list.so HTTP ${response.code}")
-                return null
-            }
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "list.so HTTP ${response.code}")
+                    return null
+                }
 
-            val bodyBytes = response.body?.bytes()
-            if (bodyBytes == null || bodyBytes.size < 4) return null
+                val bodyBytes = response.body?.bytes()
+                if (bodyBytes == null || bodyBytes.size < 4) return null
 
-            if (bodyBytes[0].toInt() == 0x3C) {
-                Log.d(TAG, "list.so returned XML (${bodyBytes.size} bytes)")
-                ByteArrayInputStream(bodyBytes)
-            } else {
-                val first = bodyBytes[0].toInt() and 0xFF
-                Log.w(TAG, "list.so returned non-XML (first=0x${first.toString(16)}, size=${bodyBytes.size})")
-                null
+                if (bodyBytes[0].toInt() == 0x3C) {
+                    Log.d(TAG, "list.so returned XML (${bodyBytes.size} bytes)")
+                    ByteArrayInputStream(bodyBytes)
+                } else {
+                    val first = bodyBytes[0].toInt() and 0xFF
+                    Log.w(TAG, "list.so returned non-XML (first=0x${first.toString(16)}, size=${bodyBytes.size})")
+                    null
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "fetchDanmakuListXml failed for cid=$cid", e)
@@ -144,10 +146,9 @@ class BilibiliDanmakuFetcher(
                     .get()
                     .build()
 
-                val segResponse = client.newCall(segRequest).execute()
-                if (!segResponse.isSuccessful) break
-
-                val segBytes = segResponse.body?.bytes() ?: break
+                val segBytes = client.newCall(segRequest).execute().use { response ->
+                    if (response.isSuccessful) response.body?.bytes() else null
+                } ?: break
                 if (segBytes.isEmpty()) break
 
                 if (segment == 1) {
@@ -400,13 +401,14 @@ class BilibiliDanmakuFetcher(
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val body = response.body?.string() ?: return null
-                val json = JSONObject(body)
-                val cid = json.optJSONObject("data")?.optString("cid", "")
-                if (cid.isNullOrBlank()) null else cid
-            } else null
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return null
+                    val json = JSONObject(body)
+                    val cid = json.optJSONObject("data")?.optString("cid", "")
+                    if (cid.isNullOrBlank()) null else cid
+                } else null
+            }
         } catch (e: Exception) {
             Log.e(TAG, "resolveCidByAid failed", e)
             null
@@ -423,26 +425,27 @@ class BilibiliDanmakuFetcher(
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return null
-            val body = response.body?.string() ?: return null
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
 
-            val json = JSONObject(body)
-            val episodes = json.optJSONObject("result")?.optJSONArray("episodes")
-                ?: return null
+                val json = JSONObject(body)
+                val episodes = json.optJSONObject("result")?.optJSONArray("episodes")
+                    ?: return null
 
-            for (i in 0 until episodes.length()) {
-                val ep = episodes.optJSONObject(i) ?: continue
-                val link = ep.optString("link", "")
-                val epIdStr = ep.optString("ep_id", "")
-                if (link.contains(epid) || epIdStr.contains(epid)) {
-                    val cid = ep.optString("cid", "")
-                    return if (cid.isBlank()) null else cid
+                for (i in 0 until episodes.length()) {
+                    val ep = episodes.optJSONObject(i) ?: continue
+                    val link = ep.optString("link", "")
+                    val epIdStr = ep.optString("ep_id", "")
+                    if (link.contains(epid) || epIdStr.contains(epid)) {
+                        val cid = ep.optString("cid", "")
+                        return if (cid.isBlank()) null else cid
+                    }
                 }
-            }
 
-            val firstCid = episodes.optJSONObject(0)?.optString("cid", "")
-            if (firstCid.isNullOrBlank()) null else firstCid
+                val firstCid = episodes.optJSONObject(0)?.optString("cid", "")
+                if (firstCid.isNullOrBlank()) null else firstCid
+            }
         } catch (e: Exception) {
             Log.e(TAG, "resolveCidByEpId failed", e)
             null
@@ -459,17 +462,18 @@ class BilibiliDanmakuFetcher(
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val body = response.body?.string() ?: return null
-                val json = JSONObject(body)
-                val cid = json.optJSONObject("result")
-                    ?.optJSONObject("main_section")
-                    ?.optJSONArray("episodes")
-                    ?.optJSONObject(0)
-                    ?.optString("cid", "")
-                if (cid.isNullOrBlank()) null else cid
-            } else null
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return null
+                    val json = JSONObject(body)
+                    val cid = json.optJSONObject("result")
+                        ?.optJSONObject("main_section")
+                        ?.optJSONArray("episodes")
+                        ?.optJSONObject(0)
+                        ?.optString("cid", "")
+                    if (cid.isNullOrBlank()) null else cid
+                } else null
+            }
         } catch (e: Exception) {
             Log.e(TAG, "resolveCidBySeasonId failed", e)
             null
@@ -486,15 +490,16 @@ class BilibiliDanmakuFetcher(
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val body = response.body?.string() ?: return null
-                val json = JSONObject(body)
-                val seasonId = json.optJSONObject("result")
-                    ?.optJSONObject("media")
-                    ?.optString("season_id", "")
-                if (seasonId.isNullOrBlank()) null else seasonId
-            } else null
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return null
+                    val json = JSONObject(body)
+                    val seasonId = json.optJSONObject("result")
+                        ?.optJSONObject("media")
+                        ?.optString("season_id", "")
+                    if (seasonId.isNullOrBlank()) null else seasonId
+                } else null
+            }
         } catch (e: Exception) {
             Log.e(TAG, "getSeasonIdFromMediaId failed", e)
             null
@@ -569,54 +574,55 @@ class BilibiliDanmakuFetcher(
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            Log.d(TAG, "searchBiliSearchType: HTTP ${response.code}")
-            if (!response.isSuccessful) {
-                Log.w(TAG, "searchBiliSearchType: HTTP ${response.code} FAILED")
-                return emptyList()
-            }
+            client.newCall(request).execute().use { response ->
+                Log.d(TAG, "searchBiliSearchType: HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "searchBiliSearchType: HTTP ${response.code} FAILED")
+                    return emptyList()
+                }
 
-            val body = response.body?.string() ?: ""
-            if (body.isBlank()) {
-                Log.w(TAG, "searchBiliSearchType: empty body")
-                return emptyList()
-            }
-            Log.d(TAG, "searchBiliSearchType: body len=${body.length}, sample=${body.take(200)}")
+                val body = response.body?.string() ?: ""
+                if (body.isBlank()) {
+                    Log.w(TAG, "searchBiliSearchType: empty body")
+                    return emptyList()
+                }
+                Log.d(TAG, "searchBiliSearchType: body len=${body.length}, sample=${body.take(200)}")
 
-            val json = JSONObject(body)
-            val code = json.optInt("code", -1)
-            val message = json.optString("message", "")
-            Log.d(TAG, "searchBiliSearchType: code=$code message=$message")
+                val json = JSONObject(body)
+                val code = json.optInt("code", -1)
+                val message = json.optString("message", "")
+                Log.d(TAG, "searchBiliSearchType: code=$code message=$message")
 
-            val resultArray = json.optJSONObject("data")?.optJSONArray("result")
-            if (resultArray == null) {
-                Log.w(TAG, "searchBiliSearchType: no data.result, body keys=${json.keys().asSequence().toList()}")
-                return emptyList()
-            }
-            Log.d(TAG, "searchBiliSearchType: result array length=${resultArray.length()}")
+                val resultArray = json.optJSONObject("data")?.optJSONArray("result")
+                if (resultArray == null) {
+                    Log.w(TAG, "searchBiliSearchType: no data.result, body keys=${json.keys().asSequence().toList()}")
+                    return emptyList()
+                }
+                Log.d(TAG, "searchBiliSearchType: result array length=${resultArray.length()}")
 
-            val list = mutableListOf<AnimeMatch>()
-            for (i in 0 until resultArray.length()) {
-                val item = resultArray.optJSONObject(i) ?: continue
-                val seasonId = item.optString("season_id", "")
-                if (seasonId.isBlank()) continue
+                val list = mutableListOf<AnimeMatch>()
+                for (i in 0 until resultArray.length()) {
+                    val item = resultArray.optJSONObject(i) ?: continue
+                    val seasonId = item.optString("season_id", "")
+                    if (seasonId.isBlank()) continue
 
-                val title = Regex("<[^>]+>").replace(item.optString("title", ""), "")
-                val type = item.optString("type", "")
-                val episodeCount = item.optInt("episodes", 0)
-                val url = "https://www.bilibili.com/bangumi/play/ss$seasonId"
+                    val title = Regex("<[^>]+>").replace(item.optString("title", ""), "")
+                    val type = item.optString("type", "")
+                    val episodeCount = item.optInt("episodes", 0)
+                    val url = "https://www.bilibili.com/bangumi/play/ss$seasonId"
 
-                list.add(
-                    AnimeMatch(
-                        animeId = seasonId.toIntOrNull() ?: 0,
-                        title = title,
-                        type = type,
-                        episodeCount = episodeCount,
-                        url = url
+                    list.add(
+                        AnimeMatch(
+                            animeId = seasonId.toIntOrNull() ?: 0,
+                            title = title,
+                            type = type,
+                            episodeCount = episodeCount,
+                            url = url
+                        )
                     )
-                )
+                }
+                list
             }
-            list
         } catch (e: Exception) {
             Log.w(TAG, "searchBiliSearchType $searchType failed", e)
             emptyList()
@@ -632,33 +638,34 @@ class BilibiliDanmakuFetcher(
                 .get()
                 .build()
 
-            val navResponse = client.newCall(navRequest).execute()
-            val navBody = navResponse.body?.string() ?: return fallbackSign(params)
+            client.newCall(navRequest).execute().use { navResponse ->
+                val navBody = navResponse.body?.string() ?: return fallbackSign(params)
 
-            val navJson = JSONObject(navBody)
-            val wbiImg = navJson.optJSONObject("data")?.optJSONObject("wbi_img")
-                ?: return fallbackSign(params)
+                val navJson = JSONObject(navBody)
+                val wbiImg = navJson.optJSONObject("data")?.optJSONObject("wbi_img")
+                    ?: return fallbackSign(params)
 
-            val imgUrl = wbiImg.optString("img_url", "")
-            val subUrl = wbiImg.optString("sub_url", "")
+                val imgUrl = wbiImg.optString("img_url", "")
+                val subUrl = wbiImg.optString("sub_url", "")
 
-            if (imgUrl.isBlank() || subUrl.isBlank()) return fallbackSign(params)
+                if (imgUrl.isBlank() || subUrl.isBlank()) return fallbackSign(params)
 
-            val imgKey = imgUrl.substringAfterLast("/").substringBefore(".")
-            val subKey = subUrl.substringAfterLast("/").substringBefore(".")
-            val mixinKey = getMixinKey(imgKey + subKey)
+                val imgKey = imgUrl.substringAfterLast("/").substringBefore(".")
+                val subKey = subUrl.substringAfterLast("/").substringBefore(".")
+                val mixinKey = getMixinKey(imgKey + subKey)
 
-            val currentTime = (System.currentTimeMillis() / 1000).toString()
-            params["wts"] = currentTime
+                val currentTime = (System.currentTimeMillis() / 1000).toString()
+                params["wts"] = currentTime
 
-            val query = params.keys.sorted().joinToString("&") { key ->
-                "${URLEncoder.encode(key, "UTF-8")}=${
-                    URLEncoder.encode(params[key]!!, "UTF-8").replace("+", "%20")
-                }"
+                val query = params.keys.sorted().joinToString("&") { key ->
+                    "${URLEncoder.encode(key, "UTF-8")}=${
+                        URLEncoder.encode(params[key]!!, "UTF-8").replace("+", "%20")
+                    }"
+                }
+
+                val wbiSign = md5(query + mixinKey)
+                "$query&w_rid=$wbiSign"
             }
-
-            val wbiSign = md5(query + mixinKey)
-            "$query&w_rid=$wbiSign"
         } catch (e: Exception) {
             Log.w(TAG, "signWbi failed, using fallback", e)
             fallbackSign(params)
@@ -709,61 +716,62 @@ class BilibiliDanmakuFetcher(
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            Log.d(TAG, "getEpisodes: HTTP ${response.code}")
-            if (!response.isSuccessful) {
-                Log.w(TAG, "getEpisodes: HTTP ${response.code} FAILED")
-                return emptyList()
-            }
+            client.newCall(request).execute().use { response ->
+                Log.d(TAG, "getEpisodes: HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "getEpisodes: HTTP ${response.code} FAILED")
+                    return emptyList()
+                }
 
-            val body = response.body?.string() ?: ""
-            if (body.isBlank()) {
-                Log.w(TAG, "getEpisodes: empty body")
-                return emptyList()
-            }
-            Log.d(TAG, "getEpisodes: body len=${body.length}, sample=${body.take(200)}")
+                val body = response.body?.string() ?: ""
+                if (body.isBlank()) {
+                    Log.w(TAG, "getEpisodes: empty body")
+                    return emptyList()
+                }
+                Log.d(TAG, "getEpisodes: body len=${body.length}, sample=${body.take(200)}")
 
-            val json = JSONObject(body)
-            val code = json.optInt("code", -1)
-            val message = json.optString("message", "")
-            Log.d(TAG, "getEpisodes: code=$code message=$message")
+                val json = JSONObject(body)
+                val code = json.optInt("code", -1)
+                val message = json.optString("message", "")
+                Log.d(TAG, "getEpisodes: code=$code message=$message")
 
-            val episodes = json.optJSONObject("result")?.optJSONArray("episodes")
-            if (episodes == null) {
-                Log.w(TAG, "getEpisodes: no result.episodes, body keys=${json.keys().asSequence().toList()}")
-                return emptyList()
-            }
-            Log.d(TAG, "getEpisodes: episodes array length=${episodes.length()}")
+                val episodes = json.optJSONObject("result")?.optJSONArray("episodes")
+                if (episodes == null) {
+                    Log.w(TAG, "getEpisodes: no result.episodes, body keys=${json.keys().asSequence().toList()}")
+                    return emptyList()
+                }
+                Log.d(TAG, "getEpisodes: episodes array length=${episodes.length()}")
 
-            val list = mutableListOf<EpisodeInfo>()
-            for (i in 0 until episodes.length()) {
-                val ep = episodes.optJSONObject(i) ?: continue
-                val epId = ep.optInt("ep_id", 0)
-                if (epId <= 0) continue
+                val list = mutableListOf<EpisodeInfo>()
+                for (i in 0 until episodes.length()) {
+                    val ep = episodes.optJSONObject(i) ?: continue
+                    val epId = ep.optInt("ep_id", 0)
+                    if (epId <= 0) continue
 
-                val title = ep.optString("title", "")
-                val longTitle = ep.optString("long_title", "")
-                val epNum = ep.optString("ep_num", "")
-                val link = ep.optString("link", "")
+                    val title = ep.optString("title", "")
+                    val longTitle = ep.optString("long_title", "")
+                    val epNum = ep.optString("ep_num", "")
+                    val link = ep.optString("link", "")
 
-                val displayTitle = if (longTitle.isNotBlank()) {
-                    "$epNum $longTitle"
-                } else {
-                    title
-                }.ifBlank { "第${i + 1}集" }
+                    val displayTitle = if (longTitle.isNotBlank()) {
+                        "$epNum $longTitle"
+                    } else {
+                        title
+                    }.ifBlank { "第${i + 1}集" }
 
-                list.add(
-                    EpisodeInfo(
-                        episodeId = epId,
-                        animeId = seasonId,
-                        title = displayTitle,
-                        episodeNumber = i + 1,
-                        url = link
+                    list.add(
+                        EpisodeInfo(
+                            episodeId = epId,
+                            animeId = seasonId,
+                            title = displayTitle,
+                            episodeNumber = i + 1,
+                            url = link
+                        )
                     )
-                )
+                }
+                Log.d(TAG, "getEpisodes: parsed ${list.size} episodes")
+                list
             }
-            Log.d(TAG, "getEpisodes: parsed ${list.size} episodes")
-            list
         } catch (e: Exception) {
             Log.e(TAG, "getEpisodes: EXCEPTION ${e.javaClass.simpleName}: ${e.message}", e)
             emptyList()

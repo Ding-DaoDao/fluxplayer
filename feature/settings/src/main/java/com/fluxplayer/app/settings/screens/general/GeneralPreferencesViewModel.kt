@@ -2,7 +2,7 @@ package com.fluxplayer.app.settings.screens.general
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
+import com.fluxplayer.app.core.data.repository.AudiobookProgressRepository
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.media.sync.MediaInfoSynchronizer
 import com.fluxplayer.app.core.model.ApplicationPreferences
@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 class GeneralPreferencesViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
     private val mediaInfoSynchronizer: MediaInfoSynchronizer,
-    private val cloudDownloadRepository: CloudDownloadRepository,
+    private val audiobookProgressRepository: AudiobookProgressRepository,
 ) : ViewModel() {
 
     private val uiStateInternal = MutableStateFlow(GeneralPreferencesUiState())
@@ -27,7 +27,6 @@ class GeneralPreferencesViewModel @Inject constructor(
             preferencesRepository.applicationPreferences.collect { prefs ->
                 uiStateInternal.value = uiStateInternal.value.copy(
                     preferences = prefs,
-                    downloadPath = prefs.downloadPath,
                 )
             }
         }
@@ -39,6 +38,7 @@ class GeneralPreferencesViewModel @Inject constructor(
             is GeneralPreferencesUiEvent.ShowDialog -> showDialog(event.value)
             GeneralPreferencesUiEvent.ClearThumbnailCache -> clearThumbnailCache()
             GeneralPreferencesUiEvent.ResetSettings -> resetSettings()
+            GeneralPreferencesUiEvent.ClearLocalListeningProgress -> viewModelScope.launch { audiobookProgressRepository.clear() }
             is GeneralPreferencesUiEvent.ChangeDownloadPath -> changeDownloadPath(event.path)
             GeneralPreferencesUiEvent.ResetDownloadPath -> resetDownloadPath()
         }
@@ -62,13 +62,13 @@ class GeneralPreferencesViewModel @Inject constructor(
 
     private fun changeDownloadPath(path: String) {
         viewModelScope.launch {
-            cloudDownloadRepository.setDownloadPath(path)
+            preferencesRepository.updateApplicationPreferences { it.copy(downloadPath = path) }
         }
     }
 
     private fun resetDownloadPath() {
         viewModelScope.launch {
-            cloudDownloadRepository.setDownloadPath("/storage/emulated/0/Download/")
+            preferencesRepository.updateApplicationPreferences { it.copy(downloadPath = ApplicationPreferences().downloadPath) }
         }
     }
 }
@@ -76,11 +76,11 @@ class GeneralPreferencesViewModel @Inject constructor(
 data class GeneralPreferencesUiState(
     val showDialog: GeneralPreferencesDialog? = null,
     val preferences: ApplicationPreferences = ApplicationPreferences(),
-    val downloadPath: String = "/storage/emulated/0/Download/",
 )
 
 sealed interface GeneralPreferencesDialog {
     data object ClearThumbnailCacheDialog : GeneralPreferencesDialog
+    data object ClearLocalListeningProgressDialog : GeneralPreferencesDialog
     data object ResetSettingsDialog : GeneralPreferencesDialog
     data object ChangeDownloadPathDialog : GeneralPreferencesDialog
 }
@@ -89,6 +89,7 @@ sealed interface GeneralPreferencesUiEvent {
     data class UpdatePreferences(val transform: (ApplicationPreferences) -> ApplicationPreferences) : GeneralPreferencesUiEvent
     data class ShowDialog(val value: GeneralPreferencesDialog?) : GeneralPreferencesUiEvent
     data object ClearThumbnailCache : GeneralPreferencesUiEvent
+    data object ClearLocalListeningProgress : GeneralPreferencesUiEvent
     data object ResetSettings : GeneralPreferencesUiEvent
     data class ChangeDownloadPath(val path: String) : GeneralPreferencesUiEvent
     data object ResetDownloadPath : GeneralPreferencesUiEvent

@@ -185,7 +185,7 @@ class PlayerService : MediaSessionService() {
 
         override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
             // 听书被其他音频打断后明确暂停，使系统通知和续播操作保持一致。
-            if (isAudioSession && playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) {
+            if (isAudioSession && playerPreferences.requireAudioFocus && playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) {
                 mediaSession?.player?.pause()
             }
         }
@@ -869,15 +869,36 @@ class PlayerService : MediaSessionService() {
                 }
         }
 
+        // 音频共存开关即时更新现有播放器，本地听书和视频使用相同规则。
+        serviceScope.launch {
+            preferencesRepository.persistedPlayerPreferences
+                .map { it.pauseOnHeadsetDisconnect }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    (mediaSession?.player as? ExoPlayer)?.setHandleAudioBecomingNoisy(enabled)
+                }
+        }
+        serviceScope.launch {
+            preferencesRepository.persistedPlayerPreferences
+                .map { it.requireAudioFocus }
+                .distinctUntilChanged()
+                .collect { required ->
+                    loadedPlayerPreferences = loadedPlayerPreferences.copy(requireAudioFocus = required)
+                    (mediaSession?.player as? ExoPlayer)?.let { current ->
+                        current.setAudioAttributes(current.audioAttributes, required)
+                    }
+                }
+        }
+
         // 监听缓存开关变化，实时更新 MediaSourceFactory
         serviceScope.launch {
             preferencesRepository.playerPreferences
-                .map { it.playbackCacheEnabled }
+                .map { it.playbackCacheEnabled to it.playbackCacheMaxSize }
                 .distinctUntilChanged()
-                .collect { enabled ->
+                .collect { (enabled, maxSize) ->
                     if (enabled) {
                         mediaSourceFactory.updateCacheSettings(
-                            preferencesRepository.playerPreferences.value.playbackCacheMaxSize.bytes,
+                            maxSize.bytes,
                         )
                     } else {
                         mediaSourceFactory.disableCache()

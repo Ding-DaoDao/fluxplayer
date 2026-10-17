@@ -295,8 +295,8 @@
     <string name="delete_thumbnail_cache_description">删除存储空间中缓存的所有缩略图。打开媒体列表时会重新生成缩略图。</string>
     <string name="delete_thumbnail_cache_confirmation">您确定想要删除所有缩略图吗？</string>
     <string name="reset_settings">重置设置</string>
-    <string name="reset_settings_description">重置所有设置为默认状态</string>
-    <string name="reset_settings_confirmation">将恢复应用与播放器的默认设置，并清除听书进度。此操作无法撤销，是否继续？</string>
+    <string name="reset_settings_description">恢复应用与播放器偏好，保留收听进度；账号、备份及在线听书缓存设置单独管理</string>
+    <string name="reset_settings_confirmation">将恢复应用与播放器的默认偏好，保留收听进度和文件。账号、备份及在线听书缓存设置单独管理。是否继续？</string>
     <string name="backup_and_restore">备份与恢复</string>
     <string name="backup_and_restore_description">备份或恢复设置、WebDAV 服务器和 OpenList 配置</string>
     <string name="create_backup">创建备份</string>
@@ -566,4 +566,13 @@
     <string name="media_home_add_local">添加本地视频</string>
     <string name="media_home_cloud_desc">连接网盘，浏览云端内容</string>
     <string name="media_loading">正在加载…</string>
+    <string name="allow_simultaneous_audio">允许与其他音频同时播放</string>
+    <string name="allow_simultaneous_audio_desc">开启后，播放视频、本地听书或在线听书时，允许其他应用的音频继续播放。</string>
+    <string name="advanced_playback">高级播放</string>
+    <string name="shared_audio_settings_description">视频、本地听书和在线听书共用：音频共存与耳机断开暂停。</string>
+    <string name="clear_local_listening_progress">清除本地听书进度</string>
+    <string name="clear_local_listening_progress_description">删除本地听书续播位置和章节进度，保留书库与音频文件</string>
+    <string name="clear_local_listening_progress_confirmation">清除所有本地听书的续播位置和章节进度？书库文件、在线听书进度和设置会保留。此操作无法撤销。</string>
+    <string name="glass_settings_inactive">系统支持且至少开启一项玻璃效果时，下方参数才会生效。</string>
+    <string name="glass_nav_settings_hint">开启底栏玻璃时，同时启用悬浮胶囊底栏。</string>
 </resources>

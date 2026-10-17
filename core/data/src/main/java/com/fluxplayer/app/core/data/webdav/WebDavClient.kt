@@ -71,18 +71,19 @@ class WebDavClient(
                 .method("PROPFIND", PROPFIND_BODY.toRequestBody(MEDIA_TYPE_XML))
                 .build()
 
-            val response = client.newCall(request).execute()
+            client.newCall(request).execute().use { response ->
 
-            if (!response.isSuccessful) {
-                Log.w(TAG, "PROPFIND failed: HTTP ${response.code} for $url")
-                return@withContext Result.failure(
-                    WebDavException("HTTP ${response.code}: ${response.message}"),
-                )
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "PROPFIND failed: HTTP ${response.code} for $url")
+                    return@withContext Result.failure(
+                        WebDavException("HTTP ${response.code}: ${response.message}"),
+                    )
+                }
+
+                val body = response.body?.string() ?: return@withContext Result.success(emptyList())
+                val resources = parsePropfindResponse(body, normalizedBase, path)
+                Result.success(resources)
             }
-
-            val body = response.body?.string() ?: return@withContext Result.success(emptyList())
-            val resources = parsePropfindResponse(body, normalizedBase, path)
-            Result.success(resources)
         } catch (e: Exception) {
             Log.e(TAG, "listDirectory failed for path=$path", e)
             Result.failure(e)
@@ -108,11 +109,12 @@ class WebDavClient(
                 .method("OPTIONS", null)
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                Result.success(true)
-            } else {
-                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    Result.success(true)
+                } else {
+                    Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "testConnection failed", e)
@@ -288,11 +290,12 @@ class WebDavClient(
                 .method("MKCOL", null)
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful || response.code == 201) {
-                Result.success(Unit)
-            } else {
-                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful || response.code == 201) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "createFolder failed for path=$path", e)
@@ -318,11 +321,12 @@ class WebDavClient(
                 .delete()
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful || response.code == 204) {
-                Result.success(Unit)
-            } else {
-                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful || response.code == 204) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "delete failed for path=$path", e)
@@ -353,11 +357,12 @@ class WebDavClient(
                 .method("MOVE", null)
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful || response.code in 200..299) {
-                Result.success(Unit)
-            } else {
-                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful || response.code in 200..299) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "move failed from $sourcePath to $destinationPath", e)
@@ -388,11 +393,12 @@ class WebDavClient(
                 .method("COPY", null)
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful || response.code in 200..299) {
-                Result.success(Unit)
-            } else {
-                Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful || response.code in 200..299) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(WebDavException("HTTP ${response.code}: ${response.message}"))
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "copy failed from $sourcePath to $destinationPath", e)

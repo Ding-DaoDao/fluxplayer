@@ -183,11 +183,9 @@ fun MediaPickerRoute(
         onPlayVideos = onPlayVideos,
         onNavigateUp = onNavigateUp,
         onPlayVideo = { uri, title ->
-            viewModel.folderPath?.let { viewModel.recordFootprint(it, uri.toString()) }
             onPlayVideo(uri, title)
         },
         onFolderClick = { folderPath ->
-            viewModel.folderPath?.let { viewModel.recordFootprint(it, folderPath) }
             onFolderClick(folderPath, selectedTab)
         },
         onSettingsClick = onSettingsClick,

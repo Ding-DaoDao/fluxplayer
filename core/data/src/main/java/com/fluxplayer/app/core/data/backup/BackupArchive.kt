@@ -68,7 +68,7 @@ internal object BackupArchiveCodec {
 
     private fun decodePlain(bytes: ByteArray): BackupArchive {
         if (bytes.size < 4 || bytes[0] != 'P'.code.toByte() || bytes[1] != 'K'.code.toByte()) {
-            require(bytes.toString(Charsets.UTF_8).trimStart().startsWith("{")) { "不支持该备份格式，请选择未加密的 ZIP 或 JSON 备份" }
+            require(bytes.toString(Charsets.UTF_8).removePrefix("\uFEFF").trimStart().startsWith("{")) { "不支持该备份格式，请选择未加密的 ZIP 或 JSON 备份" }
             return BackupArchive(decodeJson(bytes))
         }
         var data: BackupData? = null

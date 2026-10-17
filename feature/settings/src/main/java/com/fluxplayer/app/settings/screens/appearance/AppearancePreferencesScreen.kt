@@ -99,6 +99,7 @@ fun AppearancePreferencesScreen(onNavigateUp: () -> Unit, viewModel: AppearanceP
 private fun AppearanceContent(state: AppearancePreferencesUiState, event: (AppearancePreferencesEvent) -> Unit, onBack: () -> Unit) {
     val p = state.preferences
     val supportsGlass = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    val glassActive = supportsGlass && (p.glassControlsEnabled || (p.useLiquidGlass && p.useFloatingBottomBar && p.navStyle == NavStyle.DOCK))
     val isCustom = p.themeColorSource == ThemeColorSource.CUSTOM
     var colorDialog by remember { mutableStateOf(false) }
     var blur by remember(p.glassBlurDp) { mutableStateOf(p.glassBlurDp) }
@@ -139,16 +140,18 @@ private fun AppearanceContent(state: AppearancePreferencesUiState, event: (Appea
                 SettingsCard(SettingsCardPosition.MIDDLE) {
                     SettingsSwitchRow(stringResource(R.string.avbox_theme_nav_bar), p.useLiquidGlass, enabled = supportsGlass) { checked -> update { it.copy(useLiquidGlass = checked, useFloatingBottomBar = if (checked) true else it.useFloatingBottomBar, navStyle = if (checked) NavStyle.DOCK else it.navStyle) } }
                 }
+                Text(stringResource(R.string.glass_nav_settings_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!glassActive) Text(stringResource(R.string.glass_settings_inactive), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 SettingsCard(SettingsCardPosition.MIDDLE) { SettingsSwitchRow(stringResource(R.string.avbox_theme_app_controls), p.glassControlsEnabled, enabled = supportsGlass) { checked -> update { it.copy(glassControlsEnabled = checked) } } }
-                SettingsCard(SettingsCardPosition.MIDDLE) { GlassSliderRow(stringResource(R.string.avbox_theme_blur), blur, 0f..40f, { blur = it }, { update { it.copy(glassBlurDp = blur) } }) }
-                SettingsCard(SettingsCardPosition.MIDDLE) { GlassSliderRow(stringResource(R.string.avbox_theme_distortion), distortion, 0f..30f, { distortion = it }, { update { it.copy(glassDistortionDp = distortion) } }) }
-                SettingsCard(SettingsCardPosition.MIDDLE) { GlassSliderRow(stringResource(R.string.avbox_theme_translucency), translucency, 0f..1f, { translucency = it }, { update { it.copy(glassTranslucency = translucency) } }, "${(translucency * 100f).roundToInt()}%") }
-                SettingsCard(SettingsCardPosition.LAST) { SettingsSwitchRow(stringResource(R.string.avbox_theme_dispersion), p.glassDispersion, enabled = supportsGlass && p.glassDistortionDp > 0f) { checked -> update { it.copy(glassDispersion = checked) } } }
+                SettingsCard(SettingsCardPosition.MIDDLE) { GlassSliderRow(stringResource(R.string.avbox_theme_blur), blur, 0f..40f, { blur = it }, { update { it.copy(glassBlurDp = blur) } }, enabled = glassActive) }
+                SettingsCard(SettingsCardPosition.MIDDLE) { GlassSliderRow(stringResource(R.string.avbox_theme_distortion), distortion, 0f..30f, { distortion = it }, { update { it.copy(glassDistortionDp = distortion) } }, enabled = glassActive) }
+                SettingsCard(SettingsCardPosition.MIDDLE) { GlassSliderRow(stringResource(R.string.avbox_theme_translucency), translucency, 0f..1f, { translucency = it }, { update { it.copy(glassTranslucency = translucency) } }, "${(translucency * 100f).roundToInt()}%", enabled = glassActive) }
+                SettingsCard(SettingsCardPosition.LAST) { SettingsSwitchRow(stringResource(R.string.avbox_theme_dispersion), p.glassDispersion, enabled = glassActive && p.glassDistortionDp > 0f) { checked -> update { it.copy(glassDispersion = checked) } } }
             }
             ListSectionTitle(text = "导航与布局")
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 PreferenceSwitch(stringResource(R.string.floating_bottom_bar), isChecked = p.useFloatingBottomBar, onClick = { update { it.copy(useFloatingBottomBar = !it.useFloatingBottomBar) } }, isFirstItem = true)
-                ClickablePreferenceItem(stringResource(R.string.nav_style), description = p.navStyle.label, onClick = { event(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.NavStyle)) })
+                ClickablePreferenceItem(stringResource(R.string.nav_style), description = p.navStyle.label, enabled = p.useFloatingBottomBar, onClick = { event(AppearancePreferencesEvent.ShowDialog(AppearancePreferenceDialog.NavStyle)) })
                 PreferenceSwitch("导航切换动画", isChecked = p.navAnimationsEnabled, onClick = { update { it.copy(navAnimationsEnabled = !it.navAnimationsEnabled) } })
                 PreferenceSwitch("底栏拖动切换", description = "仅在悬浮胶囊底栏生效", enabled = p.useFloatingBottomBar && p.navStyle == NavStyle.DOCK, isChecked = p.navGesturesEnabled, onClick = { update { it.copy(navGesturesEnabled = !it.navGesturesEnabled) } })
                 PreferenceSwitch("隐藏状态栏", description = "应用页面生效，播放器设置保持独立", isChecked = p.hideStatusBar, onClick = { update { it.copy(hideStatusBar = !it.hideStatusBar) } }, isLastItem = true)
@@ -175,12 +178,6 @@ private fun AppearanceContent(state: AppearancePreferencesUiState, event: (Appea
     state.showDialog?.let { dialog ->
         com.fluxplayer.app.settings.composables.OptionsDialog(if (dialog == AppearancePreferenceDialog.NavStyle) "底栏样式" else "启动页", { event(AppearancePreferencesEvent.ShowDialog(null)) }) {
             when (dialog) {
-                AppearancePreferenceDialog.Theme -> items(ThemeConfig.entries) { mode ->
-                    com.fluxplayer.app.core.ui.components.RadioTextButton(mode.name, mode == p.themeConfig, onClick = {
-                        event(AppearancePreferencesEvent.UpdateThemeConfig(mode))
-                        event(AppearancePreferencesEvent.ShowDialog(null))
-                    })
-                }
                 AppearancePreferenceDialog.NavStyle -> items(NavStyle.entries) { style ->
                     com.fluxplayer.app.core.ui.components.RadioTextButton(style.label, style == p.navStyle, onClick = {
                         event(AppearancePreferencesEvent.UpdateNavStyle(style))
@@ -246,6 +243,7 @@ private fun GlassSliderRow(
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,
     valueText: String = value.roundToInt().toString(),
+    enabled: Boolean = true,
 ) {
     Column(
         modifier = Modifier
@@ -279,6 +277,7 @@ private fun GlassSliderRow(
             onValueChangeFinished = onValueChangeFinished,
             valueRange = valueRange,
             steps = 0,
+            enabled = enabled,
             colors = SliderDefaults.colors(
                 thumbColor = MaterialTheme.colorScheme.primary,
                 activeTrackColor = MaterialTheme.colorScheme.primary,

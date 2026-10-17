@@ -53,4 +53,65 @@ interface MediumStateDao {
         ON CONFLICT(uri) DO UPDATE SET intro_ms = :introMs, outro_ms = :outroMs, last_played_time = :lastPlayedTime""",
     )
     suspend fun upsertIntroOutro(uri: String, introMs: Long, outroMs: Long, lastPlayedTime: Long)
+
+    /** 各设置只更新自己的字段，避免并发保存进度时覆盖其他状态。 */
+    @Query(
+        """INSERT INTO media_state (uri, intro_ms, outro_ms, playback_position, last_played_time, external_subs, video_scale, subtitle_delay, subtitle_speed)
+        VALUES (:uri, -1, -1, 0, :lastPlayedTime, '', 1.0, 0, 1.0)
+        ON CONFLICT(uri) DO UPDATE SET last_played_time = :lastPlayedTime""",
+    )
+    suspend fun upsertLastPlayedTime(uri: String, lastPlayedTime: Long)
+
+    @Query(
+        """INSERT INTO media_state (uri, intro_ms, outro_ms, playback_position, last_played_time, external_subs, video_scale, subtitle_delay, subtitle_speed, playback_speed)
+        VALUES (:uri, -1, -1, 0, :lastPlayedTime, '', 1.0, 0, 1.0, :playbackSpeed)
+        ON CONFLICT(uri) DO UPDATE SET playback_speed = :playbackSpeed, last_played_time = :lastPlayedTime""",
+    )
+    suspend fun upsertPlaybackSpeed(uri: String, playbackSpeed: Float, lastPlayedTime: Long)
+
+    @Query(
+        """INSERT INTO media_state (uri, intro_ms, outro_ms, playback_position, last_played_time, external_subs, video_scale, subtitle_delay, subtitle_speed, audio_track_index)
+        VALUES (:uri, -1, -1, 0, :lastPlayedTime, '', 1.0, 0, 1.0, :audioTrackIndex)
+        ON CONFLICT(uri) DO UPDATE SET audio_track_index = :audioTrackIndex, last_played_time = :lastPlayedTime""",
+    )
+    suspend fun upsertAudioTrack(uri: String, audioTrackIndex: Int, lastPlayedTime: Long)
+
+    @Query(
+        """INSERT INTO media_state (uri, intro_ms, outro_ms, playback_position, last_played_time, external_subs, video_scale, subtitle_delay, subtitle_speed, subtitle_track_index)
+        VALUES (:uri, -1, -1, 0, :lastPlayedTime, '', 1.0, 0, 1.0, :subtitleTrackIndex)
+        ON CONFLICT(uri) DO UPDATE SET subtitle_track_index = :subtitleTrackIndex, last_played_time = :lastPlayedTime""",
+    )
+    suspend fun upsertSubtitleTrack(uri: String, subtitleTrackIndex: Int, lastPlayedTime: Long)
+
+    @Query(
+        """INSERT INTO media_state (uri, intro_ms, outro_ms, playback_position, last_played_time, external_subs, video_scale, subtitle_delay, subtitle_speed)
+        VALUES (:uri, -1, -1, 0, :lastPlayedTime, '', :zoom, 0, 1.0)
+        ON CONFLICT(uri) DO UPDATE SET video_scale = :zoom, last_played_time = :lastPlayedTime""",
+    )
+    suspend fun upsertZoom(uri: String, zoom: Float, lastPlayedTime: Long)
+
+    @Query(
+        """INSERT INTO media_state (uri, intro_ms, outro_ms, playback_position, last_played_time, external_subs, video_scale, subtitle_delay, subtitle_speed)
+        VALUES (:uri, -1, -1, 0, :lastPlayedTime, '', 1.0, :delay, 1.0)
+        ON CONFLICT(uri) DO UPDATE SET subtitle_delay = :delay, last_played_time = :lastPlayedTime""",
+    )
+    suspend fun upsertSubtitleDelay(uri: String, delay: Long, lastPlayedTime: Long)
+
+    @Query(
+        """INSERT INTO media_state (uri, intro_ms, outro_ms, playback_position, last_played_time, external_subs, video_scale, subtitle_delay, subtitle_speed)
+        VALUES (:uri, -1, -1, 0, :lastPlayedTime, '', 1.0, 0, :speed)
+        ON CONFLICT(uri) DO UPDATE SET subtitle_speed = :speed, last_played_time = :lastPlayedTime""",
+    )
+    suspend fun upsertSubtitleSpeed(uri: String, speed: Float, lastPlayedTime: Long)
+
+    /** 字幕地址先编码，使用分隔符判断完整条目，原子追加且不重复。 */
+    @Query(
+        """INSERT INTO media_state (uri, intro_ms, outro_ms, playback_position, last_played_time, external_subs, video_scale, subtitle_delay, subtitle_speed)
+        VALUES (:uri, -1, -1, 0, :lastPlayedTime, :encodedSubtitle, 1.0, 0, 1.0)
+        ON CONFLICT(uri) DO UPDATE SET
+        external_subs = CASE WHEN external_subs = '' THEN :encodedSubtitle ELSE external_subs || ',' || :encodedSubtitle END,
+        last_played_time = :lastPlayedTime
+        WHERE instr(',' || external_subs || ',', ',' || :encodedSubtitle || ',') = 0""",
+    )
+    suspend fun appendExternalSubtitle(uri: String, encodedSubtitle: String, lastPlayedTime: Long)
 }

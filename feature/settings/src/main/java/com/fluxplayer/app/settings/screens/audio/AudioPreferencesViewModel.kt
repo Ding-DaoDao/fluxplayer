@@ -3,9 +3,9 @@ package com.fluxplayer.app.settings.screens.audio
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dagger.hilt.android.lifecycle.HiltViewModel
 import com.fluxplayer.app.core.data.repository.PreferencesRepository
 import com.fluxplayer.app.core.model.PlayerPreferences
+import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +45,10 @@ class AudioPreferencesViewModel @Inject constructor(
         }
     }
 
+    private fun updatePreferences(transform: (PlayerPreferences) -> PlayerPreferences) {
+        viewModelScope.launch { preferencesRepository.updatePlayerPreferences(transform) }
+    }
+
     private fun showDialog(value: AudioPreferenceDialog?) {
         uiStateInternal.update {
             it.copy(showDialog = value)
@@ -52,42 +56,32 @@ class AudioPreferencesViewModel @Inject constructor(
     }
 
     private fun updateAudioLanguage(value: String) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(preferredAudioLanguage = value)
-            }
+        updatePreferences {
+            it.copy(preferredAudioLanguage = value)
         }
     }
 
     private fun togglePauseOnHeadsetDisconnect() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(pauseOnHeadsetDisconnect = !it.pauseOnHeadsetDisconnect)
-            }
+        updatePreferences {
+            it.copy(pauseOnHeadsetDisconnect = !it.pauseOnHeadsetDisconnect)
         }
     }
 
     private fun toggleShowSystemVolumePanel() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(showSystemVolumePanel = !it.showSystemVolumePanel)
-            }
+        updatePreferences {
+            it.copy(showSystemVolumePanel = !it.showSystemVolumePanel)
         }
     }
 
     private fun toggleRequireAudioFocus() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(requireAudioFocus = !it.requireAudioFocus)
-            }
+        updatePreferences {
+            it.copy(requireAudioFocus = !it.requireAudioFocus)
         }
     }
 
     private fun toggleVolumeBoost() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(enableVolumeBoost = !it.enableVolumeBoost)
-            }
+        updatePreferences {
+            it.copy(enableVolumeBoost = !it.enableVolumeBoost)
         }
     }
 }

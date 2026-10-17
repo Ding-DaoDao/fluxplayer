@@ -55,6 +55,10 @@ class GesturePreferencesViewModel @Inject constructor(
         }
     }
 
+    private fun updatePreferences(transform: (PlayerPreferences) -> PlayerPreferences) {
+        viewModelScope.launch { preferencesRepository.updatePlayerPreferences(transform) }
+    }
+
     private fun showDialog(value: GesturePreferenceDialog?) {
         uiStateInternal.update {
             it.copy(showDialog = value)
@@ -62,126 +66,96 @@ class GesturePreferencesViewModel @Inject constructor(
     }
 
     private fun updateDoubleTapGesture(gesture: DoubleTapGesture) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(doubleTapGesture = gesture)
-            }
+        updatePreferences {
+            it.copy(doubleTapGesture = gesture)
         }
     }
 
     private fun toggleDoubleTapGesture() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(
-                    doubleTapGesture = if (it.doubleTapGesture == DoubleTapGesture.NONE) {
-                        DoubleTapGesture.FAST_FORWARD_AND_REWIND
-                    } else {
-                        DoubleTapGesture.NONE
-                    },
-                )
-            }
+        updatePreferences {
+            it.copy(
+                doubleTapGesture = if (it.doubleTapGesture == DoubleTapGesture.NONE) {
+                    DoubleTapGesture.FAST_FORWARD_AND_REWIND
+                } else {
+                    DoubleTapGesture.NONE
+                },
+            )
         }
     }
 
     private fun toggleEnableBrightnessSwipeGesture() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(enableBrightnessSwipeGesture = !it.enableBrightnessSwipeGesture)
-            }
+        updatePreferences {
+            it.copy(enableBrightnessSwipeGesture = !it.enableBrightnessSwipeGesture)
         }
     }
 
     private fun toggleEnableVolumeSwipeGesture() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(enableVolumeSwipeGesture = !it.enableVolumeSwipeGesture)
-            }
+        updatePreferences {
+            it.copy(enableVolumeSwipeGesture = !it.enableVolumeSwipeGesture)
         }
     }
 
     private fun toggleUseSeekControls() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(useSeekControls = !it.useSeekControls)
-            }
+        updatePreferences {
+            it.copy(useSeekControls = !it.useSeekControls)
         }
     }
 
     private fun toggleUseZoomControls() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(useZoomControls = !it.useZoomControls)
-            }
+        updatePreferences {
+            it.copy(useZoomControls = !it.useZoomControls)
         }
     }
 
     private fun toggleEnablePanGesture() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(enablePanGesture = !it.enablePanGesture)
-            }
+        updatePreferences {
+            it.copy(enablePanGesture = !it.enablePanGesture)
         }
     }
 
     private fun toggleUseDynamicLongPressSpeed() {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(useDynamicLongPressSpeed = !it.useDynamicLongPressSpeed)
-            }
+        updatePreferences {
+            it.copy(useDynamicLongPressSpeed = !it.useDynamicLongPressSpeed)
         }
     }
 
     private fun updateDynamicLongPressMultiplier(value: Float) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(dynamicLongPressMultiplier = value.coerceIn(1.1f, 5.0f).round(1))
-            }
+        updatePreferences {
+            it.copy(dynamicLongPressMultiplier = value.coerceIn(1.1f, 5.0f).round(1))
         }
     }
 
     private fun updateLongPressControlsSpeed(value: Float) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences { it.copy(longPressControlsSpeed = value.coerceIn(1.5f, 4.0f).round(1)) }
-        }
+        updatePreferences { it.copy(longPressControlsSpeed = value.coerceIn(1.5f, 4.0f).round(1)) }
     }
 
     private fun updateSeekIncrement(value: Int) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(seekIncrement = value)
-            }
+        updatePreferences {
+            it.copy(seekIncrement = value)
         }
     }
 
     private fun updateSeekSensitivity(value: Float) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(seekSensitivity = value.round(2))
-            }
+        updatePreferences {
+            it.copy(seekSensitivity = value.round(2))
         }
     }
 
     private fun updateVolumeGestureSensitivity(value: Float) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(volumeGestureSensitivity = value.round(2))
-            }
+        updatePreferences {
+            it.copy(volumeGestureSensitivity = value.round(2))
         }
     }
 
     private fun updateBrightnessGestureSensitivity(value: Float) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(brightnessGestureSensitivity = value.round(2))
-            }
+        updatePreferences {
+            it.copy(brightnessGestureSensitivity = value.round(2))
         }
     }
 
     private fun updateHapticFeedbackStrength(value: Float) {
-        viewModelScope.launch {
-            preferencesRepository.updatePlayerPreferences {
-                it.copy(hapticFeedbackStrength = value.round(2))
-            }
+        updatePreferences {
+            it.copy(hapticFeedbackStrength = value.round(2))
         }
     }
 }
