@@ -1557,13 +1557,29 @@ private fun BottomFunctionRow(
             onClick = onPlaylistClick,
             modifier = Modifier.weight(1f),
         )
-        downloadAction?.invoke()
+        if (downloadAction != null) {
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                downloadAction()
+            }
+        }
     }
 }
 
 @Composable
 fun AudioDownloadButton(onClick: () -> Unit) {
-    TextButton(onClick = onClick, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 56.dp)) { Text("下载") }
+    FunctionButton(
+        icon = {
+            Icon(
+                painter = painterResource(R.drawable.ic_player_download_btn),
+                contentDescription = null,
+                tint = FluxTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                modifier = Modifier.size(28.dp),
+            )
+        },
+        label = "下载",
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable

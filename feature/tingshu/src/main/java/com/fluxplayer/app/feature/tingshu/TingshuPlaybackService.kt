@@ -178,6 +178,11 @@ class TingshuPlaybackService : MediaSessionService() {
                 }
 
                 override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                    if (playWhenReady) {
+                        com.fluxplayer.app.feature.player.PlaybackCoordinator.shared.claim(this@TingshuPlaybackService) {
+                            player.pause()
+                        }
+                    }
                     if (ListeningPlayback.state.value.resolving) return
                     if (playWhenReady && ListeningPlayback.state.value.error != null) {
                         val state = ListeningPlayback.state.value
@@ -571,6 +576,7 @@ class TingshuPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        com.fluxplayer.app.feature.player.PlaybackCoordinator.shared.release(this)
         destroying = true
         preferences.edit().putFloat("speed", player.playbackParameters.speed).apply()
         saveProgress()

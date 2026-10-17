@@ -397,6 +397,12 @@ class PlayerService : MediaSessionService() {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             super.onPlayWhenReadyChanged(playWhenReady, reason)
 
+            if (playWhenReady) {
+                com.fluxplayer.app.feature.player.PlaybackCoordinator.shared.claim(this@PlayerService) {
+                    mediaSession?.player?.pause()
+                }
+            }
+
             if (isAudioSession && playWhenReady && nextAfterAudioSleep) {
                 nextAfterAudioSleep = false
                 mediaSession?.player?.takeIf { it.hasNextMediaItem() }?.seekToNextMediaItem()
@@ -1008,6 +1014,7 @@ class PlayerService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        com.fluxplayer.app.feature.player.PlaybackCoordinator.shared.release(this)
         super.onDestroy()
 
         mediaSession?.player?.let(::publishLocalAudiobook)
