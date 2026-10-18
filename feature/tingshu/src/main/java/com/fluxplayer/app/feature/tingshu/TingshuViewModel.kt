@@ -374,6 +374,16 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         mutableState.update { it.copy(configItems = repository.config(source.id), configRevision = it.configRevision + 1, loginState = repository.isLoggedIn(source.id)) }
     }
 
+    fun completeWebLogin(sourceId: String, tokenJson: String) {
+        if (state.value.source?.id != sourceId) return
+        operation {
+            repository.completeWebLogin(sourceId, tokenJson)
+            mutableState.update {
+                it.copy(configItems = repository.config(sourceId), configRevision = it.configRevision + 1, loginState = repository.isLoggedIn(sourceId), configMessage = "阿里云盘登录成功，凭证已自动保存")
+            }
+        }
+    }
+
     fun dismissConfig() = mutableState.update { it.copy(configItems = null, loginState = null, configMessage = null) }
 
     /**

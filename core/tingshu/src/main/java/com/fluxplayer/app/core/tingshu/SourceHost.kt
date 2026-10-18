@@ -9,6 +9,7 @@ import android.webkit.CookieManager
 import android.widget.Toast
 import com.github.eprendre.tingshu.sources.ILogin
 import com.github.eprendre.tingshu.sources.TingShu
+import com.github.eprendre.tingshu.sources.WebLoginTokenSource
 import com.github.eprendre.tingshu.utils.Book
 import java.io.File
 import org.json.JSONObject
@@ -90,6 +91,9 @@ object SourceHost {
         val login = source as? ILogin ?: return null
         val url = runCatching { login.getLoginUrl() }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
         val desktop = runCatching { login.isLoginDesktop() }.getOrDefault(false)
+        if (source is WebLoginTokenSource && AliyunWebLogin.isLoginUrl(url)) {
+            return LoginInfo(url, if (desktop) DESKTOP_UA else MOBILE_UA, "https://www.alipan.com/", emptyList())
+        }
         val (domain, markers) = loginMarker(url) ?: return null
         return LoginInfo(url, if (desktop) DESKTOP_UA else MOBILE_UA, domain, markers)
     }

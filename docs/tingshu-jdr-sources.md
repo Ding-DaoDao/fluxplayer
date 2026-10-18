@@ -79,6 +79,12 @@ return {
 
 网页登录使用完整登录 Activity，支持 DOM 存储、第三方 Cookie 和网页重载；加载主页面失败时显示错误，也可切换手机／电脑版。点击「完成」后回传 Cookie，返回键仅关闭页面，不提交登录。登录后重新读取源写回的配置，避免旧表单覆盖新凭证。`params.state` 保持 JSON 对象；`params.config` 与 `host.settings.all()` 一致，保留开关的布尔类型及源保存的隐藏凭证。
 
+阿里云盘网页登录支持额外的 `params.webToken`：仅当登录起点和当前页面均属于官方
+HTTPS `alipan.com`，且当前路径为 `/drive` 时，宿主读取该站点 `localStorage.token`。
+在 `action=webComplete` 时把完整 JSON 字符串回传给当前源；可用且与令牌匹配时合并设备请求头。
+脚本应请求官方账号接口验证成功后再写入配置，失败时保留已有账号；不能仅因拿到字符串就宣称登录成功。
+这需要支持该功能的新版 App，旧 App 只回传 Cookie。取消登录不会提交凭证。
+
 ### 网盘目录和分页
 
 实现 `async browse({directoryId, page, limit})`，页码从 1 开始，limit 为 100：

@@ -41,8 +41,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.fluxplayer.app.core.tingshu.AliyunWebLogin
 import com.fluxplayer.app.core.tingshu.SourceHost
 import com.fluxplayer.app.core.ui.components.MediaLoadingRow
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 书源 WebView 登录页。
@@ -58,6 +60,34 @@ import com.fluxplayer.app.core.ui.components.MediaLoadingRow
 class SourceLoginActivity : ComponentActivity() {
 
     private var webView: WebView? = null
+    private var readingToken = false
+    private var tokenReturned = false
+    private val requestHeaders = AtomicReference<Map<String, String>>(emptyMap())
+    private val tokenReader = object : Runnable {
+        override fun run() {
+            val web = webView ?: return
+            if (isFinishing || isDestroyed || tokenReturned) return
+            readAliyunToken(web)
+            web.postDelayed(this, 1000)
+        }
+    }
+
+    private fun readAliyunToken(web: WebView) {
+        val loginUrl = intent.getStringExtra(EXTRA_URL).orEmpty()
+        if (readingToken || !AliyunWebLogin.canReadToken(loginUrl, web.url.orEmpty())) return
+        readingToken = true
+        web.evaluateJavascript("(function(){try{return localStorage.getItem('token')||'';}catch(e){return '';}})()") { result ->
+            readingToken = false
+            if (isFinishing || isDestroyed || tokenReturned || !AliyunWebLogin.canReadToken(loginUrl, web.url.orEmpty())) return@evaluateJavascript
+            val token = AliyunWebLogin.tokenFromJavascript(result.orEmpty()) ?: return@evaluateJavascript
+            val headers = requestHeaders.get()
+            val complete = AliyunWebLogin.tokenWithRequestHeaders(token, headers["authorization"].orEmpty(), headers["x-device-id"].orEmpty(), headers["x-signature"].orEmpty())
+            tokenReturned = true
+            CookieManager.getInstance().flush()
+            setResult(RESULT_OK, Intent().putExtra(EXTRA_TOKEN, complete))
+            finish()
+        }
+    }
 
     companion object {
         /** 便于 `adb logcat -s SourceLogin` 观察页面加载与 JS 报错 */
@@ -65,6 +95,9 @@ class SourceLoginActivity : ComponentActivity() {
         private const val EXTRA_URL = "url"
         private const val EXTRA_UA = "ua"
         private const val EXTRA_SOURCE_NAME = "name"
+        private const val EXTRA_TOKEN = "aliyun_web_token"
+
+        fun tokenFromResult(data: Intent?): String = data?.getStringExtra(EXTRA_TOKEN).orEmpty()
 
         fun intent(context: Context, sourceName: String, url: String, userAgent: String): Intent {
             Log.i(LOG_TAG, "启动登录页 source=$sourceName url=$url desktopUA=${userAgent == SourceHost.DESKTOP_UA}")
@@ -108,11 +141,18 @@ class SourceLoginActivity : ComponentActivity() {
                         url = url,
                         userAgent = userAgent,
                         onClose = {
+                            if (AliyunWebLogin.isLoginUrl(url)) {
+                                webView?.let(::readAliyunToken)
+                                return@LoginPage
+                            }
                             CookieManager.getInstance().flush()
                             setResult(RESULT_OK)
                             finish()
                         },
-                        onWebViewReady = { webView = it },
+                        onWebViewReady = {
+                            webView = it
+                            if (AliyunWebLogin.isLoginUrl(url)) it.post(tokenReader)
+                        },
                     )
                 }
             }
@@ -158,6 +198,9 @@ class SourceLoginActivity : ComponentActivity() {
                         loadUrl(url)
                     }
                 }) { Text(if (desktop) "切换手机版" else "切换电脑版") }
+            }
+            if (AliyunWebLogin.isLoginUrl(url)) {
+                Text("完成阿里云盘网页登录后会自动获取凭证并返回，无需复制 Token。", modifier = Modifier.padding(horizontal = 8.dp))
             }
             pageError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
 
@@ -212,22 +255,33 @@ class SourceLoginActivity : ComponentActivity() {
                     }
                     webChromeClient = object : WebChromeClient() {
                         override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
-                            Log.i(LOG_TAG, "console[${msg.messageLevel()}] ${msg.message()} @${msg.lineNumber()}")
+                            if (!AliyunWebLogin.isLoginUrl(url)) Log.i(LOG_TAG, "console[${msg.messageLevel()}] ${msg.message()} @${msg.lineNumber()}")
                             return true
                         }
                     }
                     webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                            request ?: return null
+                            val uri = request.url
+                            if (AliyunWebLogin.isLoginUrl(url) && uri.scheme == "https" && uri.host in setOf("api.aliyundrive.com", "user.aliyundrive.com")) {
+                                val headers = request.requestHeaders.mapKeys { it.key.lowercase() }
+                                if (!headers["authorization"].isNullOrBlank()) requestHeaders.set(headers.filterKeys { it in setOf("authorization", "x-device-id", "x-signature") })
+                            }
+                            return null
+                        }
+
                         override fun onPageStarted(view: WebView?, u: String?, favicon: Bitmap?) {
-                            Log.i(LOG_TAG, "pageStarted $u")
+                            if (!AliyunWebLogin.isLoginUrl(url)) Log.i(LOG_TAG, "pageStarted $u")
                             onLoadingChange(true)
                             onError(null)
                         }
 
                         override fun onPageFinished(view: WebView?, u: String?) {
-                            Log.i(LOG_TAG, "pageFinished $u")
+                            if (!AliyunWebLogin.isLoginUrl(url)) Log.i(LOG_TAG, "pageFinished $u")
                             onLoadingChange(false)
                             // 登录完成后立刻落盘，不等进程被杀
                             CookieManager.getInstance().flush()
+                            if (view != null && AliyunWebLogin.isLoginUrl(url)) readAliyunToken(view)
                         }
 
                         override fun onReceivedError(
@@ -288,6 +342,7 @@ class SourceLoginActivity : ComponentActivity() {
     override fun onDestroy() {
         CookieManager.getInstance().flush()
         webView?.let { web ->
+            web.removeCallbacks(tokenReader)
             web.stopLoading()
             (web.parent as? ViewGroup)?.removeView(web)
             web.destroy()

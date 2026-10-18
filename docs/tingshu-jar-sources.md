@@ -18,6 +18,11 @@ Flux Player 的「听书」首页以本地书库主卡片、在线书库网格�
 
 支持 `com.github.eprendre.<文件名去掉.jar>.SourceEntry.getSources()` 入口，以及「我的听书」的 `TingShu`、书籍、章节、分类、配置和请求头接口。
 
+阿里云盘网页令牌源可实现 `WebLoginTokenSource : ILogin`。源提供官方登录地址，
+宿主在登录后的阿里云盘 `/drive` 页面读取 `localStorage.token`，调用
+`onWebLoginToken(tokenJson)`；书源负责验证账号成功后保存，失败时保留旧凭证。
+`isWebLoggedIn()` 用于显示登录状态。凭证只回传发起登录的源，其他网盘仍走原 Cookie 流程。
+
 第一版实现以下地址提取器：
 
 - `AudioUrlDirectExtractor`

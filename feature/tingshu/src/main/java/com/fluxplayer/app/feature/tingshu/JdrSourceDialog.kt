@@ -1,5 +1,6 @@
 package com.fluxplayer.app.feature.tingshu
 
+import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -59,15 +60,16 @@ internal fun JdrSourceDialog(source: ListeningSource, repository: TingshuReposit
             busy = false
         }
     }
-    val loginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+    val loginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val started = webLogin
         webLogin = null
-        if (started != null) {
+        if (started != null && result.resultCode == Activity.RESULT_OK) {
             scope.launch {
                 runAction {
                     val cookies = SourceHost.cookie(started.cookieUrl.ifBlank { started.webUrl }).orEmpty()
-                    if (cookies.isNotBlank()) {
-                        login = repository.jdrLogin(source.id, "webComplete", started.state, cookies)
+                    val webToken = SourceLoginActivity.tokenFromResult(result.data)
+                    if (cookies.isNotBlank() || webToken.isNotBlank()) {
+                        login = repository.jdrLogin(source.id, "webComplete", started.state, cookies, webToken)
                         message = login.message
                     } else {
                         login = repository.jdrLogin(source.id, "status")

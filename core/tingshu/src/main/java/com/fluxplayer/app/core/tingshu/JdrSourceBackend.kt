@@ -213,12 +213,12 @@ internal class JdrSourceBackend(private val context: Context) {
         }
     }
 
-    suspend fun login(id: String, action: String, state: JsonObject = JsonObject(emptyMap()), cookies: String = ""): SourceLogin {
+    suspend fun login(id: String, action: String, state: JsonObject = JsonObject(emptyMap()), cookies: String = "", webToken: String = ""): SourceLogin {
         require(action in setOf("status", "login", "poll", "webComplete", "logout")) { "未知登录操作" }
         // 同样要带 config：源在 status/webComplete 里靠它判断「凭证是否已填写」
         val params = params(
             id,
-            mapOf("action" to action, "state" to state, "cookies" to cookies),
+            mapOf("action" to action, "state" to state, "cookies" to cookies, "webToken" to webToken),
         )
         if (action == "logout") {
             val previous = webLogins[id] ?: netdiskWebLogin(requireSource(id).metadata.id, SourceLogin())

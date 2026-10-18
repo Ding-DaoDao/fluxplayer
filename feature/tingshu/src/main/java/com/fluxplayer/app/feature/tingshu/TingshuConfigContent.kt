@@ -1,5 +1,6 @@
 package com.fluxplayer.app.feature.tingshu
 
+import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -26,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,9 +49,20 @@ import com.github.eprendre.tingshu.utils.ConfigItem
 fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val webLoginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { viewModel.refreshLoginState() }
+    var loginSourceId by rememberSaveable { mutableStateOf<String?>(null) }
+    val webLoginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val sourceId = loginSourceId
+        loginSourceId = null
+        val token = SourceLoginActivity.tokenFromResult(result.data)
+        if (result.resultCode == Activity.RESULT_OK && sourceId != null && token.isNotBlank()) {
+            viewModel.completeWebLogin(sourceId, token)
+        } else {
+            viewModel.refreshLoginState()
+        }
+    }
     LaunchedEffect(state.pendingLogin) {
         state.pendingLogin?.let { login ->
+            loginSourceId = login.sourceId
             viewModel.consumePendingLogin()
             webLoginLauncher.launch(SourceLoginActivity.intent(context, login.sourceName, login.url, login.userAgent))
         }

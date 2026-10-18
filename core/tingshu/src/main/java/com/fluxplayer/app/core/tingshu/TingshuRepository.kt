@@ -7,6 +7,7 @@ import com.github.eprendre.tingshu.sources.AudioUrlExtraHeaders
 import com.github.eprendre.tingshu.sources.ConfigurableSource
 import com.github.eprendre.tingshu.sources.CoverUrlExtraHeaders
 import com.github.eprendre.tingshu.sources.TingShu
+import com.github.eprendre.tingshu.sources.WebLoginTokenSource
 import com.github.eprendre.tingshu.utils.Book
 import com.github.eprendre.tingshu.utils.BookDetail
 import com.github.eprendre.tingshu.utils.Category
@@ -374,8 +375,8 @@ class TingshuRepository private constructor(private val context: Context) {
         }
     }
     suspend fun saveJdrConfiguration(id: String, values: Map<String, String>) = withContext(dispatcher) { jdr.saveConfiguration(id, values) }
-    suspend fun jdrLogin(id: String, action: String, state: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap()), cookies: String = "") =
-        withContext(dispatcher) { jdr.login(id, action, state, cookies) }
+    suspend fun jdrLogin(id: String, action: String, state: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap()), cookies: String = "", webToken: String = "") =
+        withContext(dispatcher) { jdr.login(id, action, state, cookies, webToken) }
     suspend fun jdrConfigAction(id: String, action: String, values: Map<String, String>) = withContext(dispatcher) { jdr.configAction(id, action, values) }
     suspend fun browseJdr(id: String, directory: String?, page: Int = 1) = withContext(dispatcher) { jdr.browse(id, directory, page) }
 
@@ -392,8 +393,14 @@ class TingshuRepository private constructor(private val context: Context) {
     /** 探测书源登录态；返回 null 表示该源不在已知网盘之列、状态未知。 */
     suspend fun isLoggedIn(sourceId: String): Boolean? = withContext(dispatcher) {
         if (jdr.handles(sourceId)) return@withContext null
+        (source(sourceId) as? WebLoginTokenSource)?.let { return@withContext runCatching { it.isWebLoggedIn() }.getOrNull() }
         val info = runCatching { SourceHost.loginInfo(source(sourceId)) }.getOrNull() ?: return@withContext null
         runCatching { SourceHost.isLoggedIn(info) }.getOrNull()
+    }
+
+    suspend fun completeWebLogin(sourceId: String, tokenJson: String) = withContext(dispatcher) {
+        val source = source(sourceId) as? WebLoginTokenSource ?: error("该书源不支持网页登录凭证")
+        source.onWebLoginToken(tokenJson)
     }
 
     suspend fun config(sourceId: String): List<ConfigItem> = withContext(dispatcher) {
