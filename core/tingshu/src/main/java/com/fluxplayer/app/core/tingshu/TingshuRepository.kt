@@ -3,6 +3,7 @@ package com.fluxplayer.app.core.tingshu
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.fluxplayer.app.core.common.ListeningHistoryReset
 import com.github.eprendre.tingshu.sources.AudioUrlExtraHeaders
 import com.github.eprendre.tingshu.sources.ConfigurableSource
 import com.github.eprendre.tingshu.sources.CoverUrlExtraHeaders
@@ -65,6 +66,7 @@ class TingshuRepository private constructor(private val context: Context) {
     private val directory = File(context.filesDir, "tingshu/packages").apply { mkdirs() }
     private val bookDirectory = File(context.filesDir, "tingshu/books").apply { mkdirs() }
     private val prefs = context.getSharedPreferences("tingshu_library", Context.MODE_PRIVATE)
+    private val progressLock = Any()
     private val loaded = linkedMapOf<String, TingShu>()
     private val jdr = JdrSourceBackend(context)
     private val packageMutex = Mutex()
@@ -354,11 +356,31 @@ class TingshuRepository private constructor(private val context: Context) {
 
     fun lastPlayedAt(key: String): Long = prefs.getLong("playedAt.$key", 0L)
 
-    suspend fun markPlayed(book: ListeningBook) = withContext(dispatcher) {
-        prefs.edit().putLong("playedAt.${book.key}", System.currentTimeMillis()).apply()
-        val books = (listOf(book) + _recentBooks.value.filter { it.key != book.key }).take(20)
-        prefs.edit().putString("recentBooks", JSONArray(books.map { it.key }).toString()).apply()
-        _recentBooks.value = books
+    suspend fun markPlayed(book: ListeningBook, playedAt: Long = System.currentTimeMillis()) = withContext(dispatcher) {
+        synchronized(progressLock) {
+            if (!ListeningHistoryReset.accepts(playedAt, ListeningHistoryReset.cutoff(context, book.key))) return@synchronized
+            prefs.edit().putLong("playedAt.${book.key}", playedAt).apply()
+            val books = (listOf(book) + _recentBooks.value.filter { it.key != book.key }).take(20)
+            prefs.edit().putString("recentBooks", JSONArray(books.map { it.key }).toString()).apply()
+            _recentBooks.value = books
+        }
+    }
+
+    suspend fun clearHistory(key: String? = null, now: Long = System.currentTimeMillis()) = withContext(dispatcher) {
+        synchronized(progressLock) {
+            ListeningHistoryReset.record(context, key, now)
+            val editor = prefs.edit()
+            if (key == null) {
+                prefs.all.keys.filter { it.startsWith("progress.") || it.startsWith("chapters.") || it.startsWith("playedAt.") }.forEach(editor::remove)
+                _progresses.value = emptyMap()
+                _recentBooks.value = emptyList()
+            } else {
+                editor.remove("progress.$key").remove("chapters.$key").remove("playedAt.$key")
+                _progresses.value = _progresses.value - key
+                _recentBooks.value = _recentBooks.value.filter { it.key != key }
+            }
+            check(editor.putString("recentBooks", JSONArray(_recentBooks.value.map { it.key }).toString()).commit()) { "清除收听进度失败" }
+        }
     }
 
     private fun readRecentKeys(): List<String> {
@@ -468,7 +490,8 @@ class TingshuRepository private constructor(private val context: Context) {
         }.toMap()
     }
 
-    fun saveProgress(key: String, progress: ListeningProgress) {
+    fun saveProgress(key: String, progress: ListeningProgress, playedAt: Long = System.currentTimeMillis()) = synchronized(progressLock) {
+        if (!ListeningHistoryReset.accepts(playedAt, ListeningHistoryReset.cutoff(context, key))) return@synchronized
         val chapters = JSONObject(prefs.getString("chapters.$key", "{}") ?: "{}")
         chapters.put(progress.episodeUrl, JSONObject().put("position", progress.position.coerceAtLeast(0)).put("duration", progress.duration.coerceAtLeast(0)))
         prefs.edit().putString("chapters.$key", chapters.toString()).apply()

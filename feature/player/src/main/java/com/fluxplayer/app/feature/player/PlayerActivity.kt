@@ -215,12 +215,13 @@ class PlayerActivity : ComponentActivity() {
                                         }
                                     },
                                     onSaveResume = { providedIndex, pos, dur ->
+                                        val playedAt = LocalAudiobookPlayback.state.value.takeIf { it.bookPath == bookPath }?.lastPlayedAt ?: 0L
                                         lifecycleScope.launch {
                                             val bkPath = bookPath
                                             // 保存回调提供的章节标识，避免切章后把上一章进度写入下一章。
                                             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                                                 // 页面保存上一章的完成度，不覆盖服务保存的当前续播位置。
-                                                audiobookProgressRepository.save(bkPath, providedIndex, pos, dur, chapterUri = audioBookChapterPaths.getOrNull(providedIndex)?.let { localListeningUri(it).toString() }, updateResume = false)
+                                                audiobookProgressRepository.save(bkPath, providedIndex, pos, dur, lastPlayedAt = playedAt, chapterUri = audioBookChapterPaths.getOrNull(providedIndex)?.let { localListeningUri(it).toString() }, updateResume = false)
                                             }
                                         }
                                     },

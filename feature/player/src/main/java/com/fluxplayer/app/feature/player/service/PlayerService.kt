@@ -853,6 +853,23 @@ class PlayerService : MediaSessionService() {
 
         buildMediaSession(player)
 
+        com.fluxplayer.app.feature.player.ListeningHistorySessions.register(
+            this,
+            key = { if (isAudioSession) localListeningBookPath(mediaSession?.player?.currentMediaItem)?.let { "local:$it" } else null },
+            reset = {
+                isAudioSession = false
+                localProgressSaveJob?.cancel()
+                mediaSession?.player?.apply {
+                    pause()
+                    clearMediaItems()
+                    stop()
+                }
+                LocalAudiobookPlayback.mutableState.value = LocalAudiobookPlaybackState()
+                AudioSleepTimer.cancel()
+                nextAfterAudioSleep = false
+            },
+        )
+
         serviceScope.launch {
             AudioSleepTimer.state.collect { timer ->
                 (mediaSession?.player as? ExoPlayer)?.pauseAtEndOfMediaItems =
@@ -1014,6 +1031,7 @@ class PlayerService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        com.fluxplayer.app.feature.player.ListeningHistorySessions.unregister(this)
         com.fluxplayer.app.feature.player.PlaybackCoordinator.shared.release(this)
         super.onDestroy()
 

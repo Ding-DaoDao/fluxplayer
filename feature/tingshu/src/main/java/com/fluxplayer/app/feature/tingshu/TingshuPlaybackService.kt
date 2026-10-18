@@ -123,6 +123,24 @@ class TingshuPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         repository = TingshuRepository.get(this)
+        com.fluxplayer.app.feature.player.ListeningHistorySessions.register(
+            this,
+            key = { ListeningPlayback.state.value.book?.key ?: activeBook?.key },
+            reset = {
+                resolveJob?.cancel()
+                refreshJob?.cancel()
+                artworkJob?.cancel()
+                preload?.cancel()
+                activeBook = null
+                player.pause()
+                player.clearMediaItems()
+                player.stop()
+                sleepSeconds = 0
+                sleepEpisodes = 0
+                nextAfterSleep = false
+                ListeningPlayback.mutableState.value = ListeningPlaybackState()
+            },
+        )
         val audioFocusPreferences = (application as? ListeningAudioPreferencesProvider)?.listeningRequireAudioFocus ?: flowOf(true)
         val headsetPreferences = (application as? ListeningAudioPreferencesProvider)?.listeningPauseOnHeadsetDisconnect ?: flowOf(true)
         val initialPreferences = runBlocking(Dispatchers.IO) { audioFocusPreferences.first() to headsetPreferences.first() }
@@ -170,7 +188,8 @@ class TingshuPlaybackService : MediaSessionService() {
                     if (ListeningPlayback.state.value.resolving) return
                     if (isPlaying) {
                         ListeningPlayback.mutableState.value = ListeningPlayback.state.value.copy(lastPlayedAt = System.currentTimeMillis())
-                        activeBook?.let { book -> scope.launch { repository.markPlayed(book) } }
+                        val playedAt = ListeningPlayback.state.value.lastPlayedAt
+                        activeBook?.let { book -> scope.launch { repository.markPlayed(book, playedAt) } }
                     }
                     updateState()
                     // 开始播放就保存当前章节，避免首次记录等待周期保存才补齐进度。
@@ -408,7 +427,7 @@ class TingshuPlaybackService : MediaSessionService() {
                 preload?.cancel()
                 preload = null
                 preloadKey = null
-                repository.markPlayed(book)
+                repository.markPlayed(book, ListeningPlayback.state.value.lastPlayedAt)
                 // 缓存未命中时才访问书源，并保留每个请求的鉴权头。
                 val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(resource.headers)
                     .setConnectTimeoutMs(20_000).setReadTimeoutMs(20_000).setAllowCrossProtocolRedirects(true)
@@ -510,6 +529,7 @@ class TingshuPlaybackService : MediaSessionService() {
         repository.saveProgress(
             book.key,
             ListeningProgress(book.episodes[activeIndex].url, player.currentPosition, player.duration),
+            ListeningPlayback.state.value.lastPlayedAt,
         )
     }
 
@@ -576,6 +596,7 @@ class TingshuPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        com.fluxplayer.app.feature.player.ListeningHistorySessions.unregister(this)
         com.fluxplayer.app.feature.player.PlaybackCoordinator.shared.release(this)
         destroying = true
         preferences.edit().putFloat("speed", player.playbackParameters.speed).apply()

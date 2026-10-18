@@ -3,6 +3,7 @@ package com.fluxplayer.app.core.data.repository
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.room.withTransaction
+import com.fluxplayer.app.core.common.ListeningHistoryReset
 import com.fluxplayer.app.core.common.LocalListeningLibrary
 import com.fluxplayer.app.core.database.MediaDatabase
 import com.fluxplayer.app.core.database.entities.AudiobookChapterProgressEntity
@@ -50,6 +51,7 @@ class AudiobookProgressRepository @Inject constructor(
         if (bookPath.isBlank() || index < 0 || duration <= 0) return
         mutex.withLock {
             migrateLocked()
+            if (!ListeningHistoryReset.accepts(lastPlayedAt, ListeningHistoryReset.cutoff(context, "local:$bookPath"))) return@withLock
             val book = withContext(Dispatchers.IO) { LocalListeningLibrary.find(context, bookPath) }
             val identity = LocalListeningLibrary.chapterIdentity(chapterUri ?: book?.chapters?.getOrNull(index)?.uri?.toString().orEmpty())
             val stableIndex = book?.chapters?.indexOfFirst { LocalListeningLibrary.chapterIdentity(it.uri.toString()) == identity } ?: index
@@ -82,6 +84,12 @@ class AudiobookProgressRepository @Inject constructor(
     suspend fun clear() = mutex.withLock {
         migrateLocked()
         dao.clear()
+    }
+
+    suspend fun clearHistory(bookPath: String? = null, now: Long = System.currentTimeMillis()) = mutex.withLock {
+        migrateLocked()
+        ListeningHistoryReset.record(context, bookPath?.let { "local:$it" }, now)
+        if (bookPath == null) dao.clear() else dao.clearBook(bookPath)
     }
 
     suspend fun exportTo(settings: ApplicationPreferences): ApplicationPreferences = mutex.withLock {

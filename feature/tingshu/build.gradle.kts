@@ -35,6 +35,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(project(":core:tingshu"))
+    implementation(project(":core:common"))
     implementation(project(":core:ui"))
     implementation(project(":core:model"))
     implementation(project(":feature:player"))

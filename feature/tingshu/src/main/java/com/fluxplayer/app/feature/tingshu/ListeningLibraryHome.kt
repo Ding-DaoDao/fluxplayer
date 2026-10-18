@@ -39,6 +39,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,11 +76,15 @@ import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.core.ui.theme.LocalMediaPreferences
 import com.fluxplayer.app.core.ui.theme.LocalMediaScrollBottomPadding
+import com.fluxplayer.app.feature.player.ListeningHistorySessions
 import com.fluxplayer.app.feature.player.LocalAudiobookPlayback
+import com.fluxplayer.app.feature.player.LocalListeningHistory
 import com.fluxplayer.app.feature.player.PlayerActivity
 import com.fluxplayer.app.feature.player.model.AudioBook
 import com.fluxplayer.app.feature.player.service.PlayerService
 import com.github.eprendre.tingshu.utils.Episode
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 private val HomeShapeLarge = RoundedCornerShape(28.dp)
 private val HomeShapeMedium = RoundedCornerShape(20.dp)
@@ -112,6 +117,9 @@ fun ListeningLibraryHome(
             .filterIsInstance<androidx.activity.ComponentActivity>().first()
     }
     val backgroundPlayer: ListeningBackgroundPlayer = androidx.lifecycle.viewmodel.compose.viewModel(viewModelStoreOwner = activity)
+    val repository = remember { TingshuRepository.get(context) }
+    val historyScope = rememberCoroutineScope()
+    var historyClearing by remember { mutableStateOf(false) }
     val preferences = remember { context.getSharedPreferences("listening_home", android.content.Context.MODE_PRIVATE) }
     var grid by rememberSaveable { mutableStateOf(preferences.getBoolean("grid", true)) }
     var historyVisibility by remember {
@@ -129,38 +137,50 @@ fun ListeningLibraryHome(
     if (removingBook != null || clearingHistory) {
         AlertDialog(
             onDismissRequest = {
-                removingBook = null
-                clearingHistory = false
-            },
-            title = { Text(if (clearingHistory) "清空最近听过？" else "删除收听记录？") },
-            text = { Text(if (clearingHistory) "所有最近收听记录将被清空，书籍和收听进度会保留。" else "从最近听过中移除“${removingBook?.title}”，书籍和收听进度会保留。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    val now = System.currentTimeMillis()
-                    if (clearingHistory) {
-                        historyVisibility = historyVisibility.clear(now)
-                        val editor = preferences.edit().putLong("historyClearedAt", now)
-                        preferences.all.keys.filter { it.startsWith("removed.") }.forEach(editor::remove)
-                        editor.apply()
-                    } else {
-                        removingBook?.key?.let { key ->
-                            historyVisibility = historyVisibility.remove(key, now)
-                            preferences.edit().putLong("removed.$key", now).apply()
-                        }
-                    }
+                if (!historyClearing) {
                     removingBook = null
                     clearingHistory = false
-                }) { Text(if (clearingHistory) "清空" else "删除") }
+                }
+            },
+            title = { Text(if (clearingHistory) "清空最近听过？" else "删除收听记录？") },
+            text = { Text(if (clearingHistory) "清空全部最近收听、续播位置和章节进度，重新收听将从头开始。书籍与下载保留；正在收听的书籍会停止播放。" else "删除“${removingBook?.title}”的收听记录、续播位置和章节进度，重新收听将从头开始。书籍与下载保留。") },
+            confirmButton = {
+                TextButton(enabled = !historyClearing, onClick = {
+                    val now = System.currentTimeMillis()
+                    val key = if (clearingHistory) null else removingBook?.key ?: return@TextButton
+                    historyClearing = true
+                    historyScope.launch {
+                        try {
+                            com.fluxplayer.app.core.common.ListeningHistoryReset.record(context, key, now)
+                            historyVisibility = if (key == null) historyVisibility.clear(now) else historyVisibility.remove(key, now)
+                            ListeningHistorySessions.reset(key)
+                            when {
+                                key == null -> {
+                                    LocalListeningHistory.clear(context, now = now)
+                                    repository.clearHistory(now = now)
+                                }
+                                key.startsWith("local:") -> LocalListeningHistory.clear(context, key.removePrefix("local:"), now)
+                                else -> repository.clearHistory(key, now)
+                            }
+                            removingBook = null
+                            clearingHistory = false
+                        } catch (error: Exception) {
+                            if (error is CancellationException) throw error
+                            backgroundPlayer.reportError(com.fluxplayer.app.core.tingshu.ListeningErrors.describe(error, "清除收听记录失败"))
+                        } finally {
+                            historyClearing = false
+                        }
+                    }
+                }) { Text(if (historyClearing) "清除中…" else if (clearingHistory) "清空" else "删除") }
             },
             dismissButton = {
-                TextButton(onClick = {
+                TextButton(enabled = !historyClearing, onClick = {
                     removingBook = null
                     clearingHistory = false
                 }) { Text("取消") }
             },
         )
     }
-    val repository = remember { TingshuRepository.get(context) }
     val resumeBook: (AudioBook?, ListeningBook) -> Unit = resume@{ local, source ->
         if (local != null) {
             val saved = localResume[local.folderPath].orEmpty()

@@ -1,6 +1,6 @@
 package com.fluxplayer.app.core.tingshu
 
-/** 删除记录只影响最近收听列表，再次收听后自动恢复，续播进度保持不变。 */
+/** 删除时间控制列表可见性；相应续播与章节进度由仓库同步清除，再次收听会生成新记录。 */
 data class ListeningHistoryVisibility(
     val removedAt: Map<String, Long> = emptyMap(),
     val clearedAt: Long = -1L,

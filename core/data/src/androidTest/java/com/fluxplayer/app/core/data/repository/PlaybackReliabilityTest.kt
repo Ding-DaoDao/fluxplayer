@@ -1,6 +1,7 @@
 package com.fluxplayer.app.core.data.repository
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.net.Uri
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.DataStoreFactory
@@ -171,6 +172,33 @@ class PlaybackReliabilityTest {
         assertEquals("3|900", repository.progress.first().resumeStates["/books/A"])
         assertEquals(900L to 2000L, repository.chapterProgress("/books/A").first()[3])
         assertFalse(settings.data.first().audiobookChapterProgress.isNotEmpty())
+    }
+
+    @Test
+    fun deletingListeningHistoryResetsResumeAndChaptersAndRejectsOldSessionSaves() = runBlocking {
+        val history = context.getSharedPreferences("history-reset-${UUID.randomUUID()}", Context.MODE_PRIVATE)
+        val isolated = object : ContextWrapper(context) {
+            override fun getSharedPreferences(name: String?, mode: Int) = if (name == "listening_home") history else super.getSharedPreferences(name, mode)
+        }
+        val repository = AudiobookProgressRepository(database, settings, isolated)
+        repository.save("/books/A", 3, 900, 2000, 100)
+        repository.save("/books/B", 1, 500, 2000, 110)
+        repository.clearHistory("/books/A", 200)
+        assertFalse(repository.progress.first().resumeStates.containsKey("/books/A"))
+        assertTrue(repository.chapterProgress("/books/A").first().isEmpty())
+        assertEquals("1|500", repository.progress.first().resumeStates["/books/B"])
+        // 模拟清除前已经排队的服务保存与页面回调，不能复活旧进度。
+        repository.save("/books/A", 3, 950, 2000, 100)
+        repository.save("/books/A", 3, 950, 2000, updateResume = false)
+        assertTrue(repository.chapterProgress("/books/A").first().isEmpty())
+        repository.save("/books/A", 0, 0, 2000, 201)
+        assertEquals("0|0", repository.progress.first().resumeStates["/books/A"])
+        assertEquals(setOf(0), repository.chapterProgress("/books/A").first().keys)
+        repository.clearHistory(now = 300)
+        repository.save("/books/B", 1, 550, 2000, 110)
+        val reopened = AudiobookProgressRepository(database, settings, isolated)
+        assertTrue(reopened.progress.first().resumeStates.isEmpty())
+        assertTrue(reopened.progress.first().chapterProgress.isEmpty())
     }
 
     @Test

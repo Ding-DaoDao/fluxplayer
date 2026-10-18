@@ -45,6 +45,9 @@ abstract class AudiobookProgressDao {
     @Query("DELETE FROM audiobook_resume")
     abstract suspend fun clearResumes()
 
+    @Query("DELETE FROM audiobook_resume WHERE bookPath = :bookPath")
+    abstract suspend fun clearResume(bookPath: String)
+
     @Query("DELETE FROM audiobook_chapter_progress")
     abstract suspend fun clearChapters()
 
@@ -71,5 +74,11 @@ abstract class AudiobookProgressDao {
     open suspend fun clear() {
         clearResumes()
         clearChapters()
+    }
+
+    @Transaction
+    open suspend fun clearBook(bookPath: String) {
+        clearResume(bookPath)
+        clearChapters(bookPath)
     }
 }
