@@ -91,14 +91,14 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
             }
         }
         packages.forEach { pkg ->
-            val entries = sources.filter { it.packageEntry == pkg.entry }
+            val entries = pkg.sources
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(32.dp), colors = CardDefaults.cardColors(containerColor = FluxTheme.colorScheme.surfaceContainerLow)) {
                 Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Surface(shape = RoundedCornerShape(14.dp), color = FluxTheme.colorScheme.primaryContainer) {
                         Icon(NextIcons.Headset, null, Modifier.padding(12.dp).size(24.dp), tint = FluxTheme.colorScheme.onPrimaryContainer)
                     }
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(if (entries.size == 1) entries.single().name else if (pkg.entry.startsWith("jdr:")) "网盘书源" else "听书源包", style = FluxTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(pkg.displayName, style = FluxTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(if (pkg.enabled) "已启用 · ${entries.size} 个书源" else "已停用", style = FluxTheme.typography.bodySmall, color = FluxTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(pkg.enabled, { viewModel.enable(pkg.entry, it) }, enabled = !state.loading)
@@ -108,10 +108,10 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
                     HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = FluxTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     ListItem(
                         headlineContent = { Text(source.name, style = FluxTheme.typography.bodyLarge) },
-                        supportingContent = { Text("账号、目录与偏好", style = FluxTheme.typography.bodySmall) },
-                        trailingContent = { Icon(NextIcons.Settings, "配置", tint = FluxTheme.colorScheme.onSurfaceVariant) },
+                        supportingContent = { Text(if (pkg.enabled) "账号、目录与偏好" else "已停用，启用源包后可配置", style = FluxTheme.typography.bodySmall) },
+                        trailingContent = { if (pkg.enabled) Icon(NextIcons.Settings, "配置", tint = FluxTheme.colorScheme.onSurfaceVariant) },
                         colors = ListItemDefaults.colors(containerColor = FluxTheme.colorScheme.surfaceContainerLow),
-                        modifier = Modifier.clickable(enabled = !state.loading) { configuringSource = source }.padding(horizontal = 4.dp),
+                        modifier = Modifier.clickable(enabled = pkg.enabled && pkg.error == null && !state.loading) { configuringSource = source }.padding(horizontal = 4.dp),
                     )
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.End) {

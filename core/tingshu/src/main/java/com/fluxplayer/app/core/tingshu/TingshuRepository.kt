@@ -39,7 +39,11 @@ data class SourcePackage(
     val file: String,
     val enabled: Boolean = true,
     val error: String? = null,
-)
+    val name: String = "",
+    val sources: List<ListeningSource> = emptyList(),
+) {
+    val displayName: String get() = name.ifBlank { sources.singleOrNull()?.name ?: entry.removePrefix("jdr:") }
+}
 
 data class ListeningSource(val id: String, val name: String, val description: String, val packageEntry: String, val capabilities: Set<String> = emptySet())
 
@@ -571,14 +575,34 @@ class TingshuRepository private constructor(private val context: Context) {
         jdr.clear()
         val sources = mutableListOf<ListeningSource>()
         _packages.value = packages.map { pkg ->
-            if (!pkg.enabled) return@map pkg
+            if (!pkg.enabled) {
+                // 停用只卸载运行实例，设置页仍保留包名及内部源的本地快照。
+                if (pkg.file.endsWith(".jdr")) {
+                    return@map runCatching {
+                        val archive = voice.core.extension.engine.JdrArchive.parse(packageFile(pkg).readBytes())
+                        pkg.copy(
+                            name = archive.manifest.name,
+                            sources = archive.manifest.sources.map { ListeningSource("jdr:${it.id}", it.name, archive.manifest.description, pkg.entry, it.capabilities.toSet()) },
+                        )
+                    }.getOrDefault(pkg)
+                }
+                if (pkg.sources.isEmpty()) {
+                    // 旧版没有保存停用包的名称，只补读一次入口元数据，不注册为可用书源。
+                    return@map runCatching {
+                        val metadata = loadPackage(pkg).map { it.first }
+                        pkg.copy(name = metadata.singleOrNull()?.name ?: pkg.entry, sources = metadata)
+                    }.getOrDefault(pkg)
+                }
+                return@map pkg
+            }
             try {
                 if (pkg.file.endsWith(".jdr")) {
                     val file = packageFile(pkg)
                     val entries = jdr.load(pkg.entry, file.readBytes())
                     require(entries.none { it.id in loaded || sources.any { existing -> existing.id == it.id } }) { "书源 ID 重复" }
                     sources.addAll(entries)
-                    return@map pkg.copy(error = null)
+                    val archive = voice.core.extension.engine.JdrArchive.parse(file.readBytes())
+                    return@map pkg.copy(error = null, name = archive.manifest.name, sources = entries)
                 }
                 val entries = loadPackage(pkg)
                 require(entries.none { entry -> entry.first.id in loaded || sources.any { it.id == entry.first.id } }) { "书源 ID 重复" }
@@ -586,7 +610,8 @@ class TingshuRepository private constructor(private val context: Context) {
                     loaded[metadata.id] = source
                     sources.add(metadata)
                 }
-                pkg.copy(error = null)
+                val metadata = entries.map { it.first }
+                pkg.copy(error = null, name = metadata.singleOrNull()?.name ?: pkg.entry, sources = metadata)
             } catch (error: LinkageError) {
                 pkg.copy(error = "缺少兼容接口：${error.javaClass.simpleName}")
             } catch (error: Exception) {
@@ -594,20 +619,36 @@ class TingshuRepository private constructor(private val context: Context) {
             }
         }
         _sources.value = sources
+        persistPackages(_packages.value)
     }
 
     private fun readPackages(): List<SourcePackage> {
         val data = JSONArray(prefs.getString("packages", "[]"))
         return List(data.length()) { index ->
             val item = data.getJSONObject(index)
-            SourcePackage(item.getString("entry"), item.getString("file"), item.optBoolean("enabled", true))
+            val entry = item.getString("entry")
+            val metadata = item.optJSONArray("sources") ?: JSONArray()
+            SourcePackage(
+                entry,
+                item.getString("file"),
+                item.optBoolean("enabled", true),
+                name = item.optString("name", ""),
+                sources = List(metadata.length()) { sourceIndex ->
+                    val source = metadata.getJSONObject(sourceIndex)
+                    ListeningSource(source.getString("id"), source.getString("name"), source.optString("description", ""), entry)
+                },
+            )
         }
     }
 
     private fun persistPackages(packages: List<SourcePackage>) {
         val data = JSONArray()
         packages.forEach {
-            data.put(JSONObject().put("entry", it.entry).put("file", it.file).put("enabled", it.enabled))
+            val metadata = JSONArray()
+            it.sources.forEach { source ->
+                metadata.put(JSONObject().put("id", source.id).put("name", source.name).put("description", source.description))
+            }
+            data.put(JSONObject().put("entry", it.entry).put("file", it.file).put("enabled", it.enabled).put("name", it.name).put("sources", metadata))
         }
         check(prefs.edit().putString("packages", data.toString()).commit()) { "书源列表保存失败" }
     }

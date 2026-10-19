@@ -56,6 +56,7 @@ internal class JdrSourceBackend(private val context: Context) {
     private val coverRequests = mutableMapOf<Pair<String, String>, Deferred<ListeningResource?>>()
     private val coverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val coverPermits = Semaphore(4)
+    private val idleCoverEngines = mutableListOf<Pair<String, JsSourceEngine>>()
     private var coverRevision = 0L
     private val client = OkHttpClient()
     private val mutex = Mutex()
@@ -90,7 +91,7 @@ internal class JdrSourceBackend(private val context: Context) {
         val canResolveCover = supportsCover(id)
         val searchPage = SourceContract.parseSearchPage(result, page)
         return searchPage.items.map { item ->
-            Book(coverReference(canResolveCover, item.id, item.extra, item.cover), item.id, item.title, item.author, "").apply {
+            Book(coverReference(canResolveCover && (id != "jdr:bilibili" || item.cover.isBlank()), item.id, item.extra, item.cover), item.id, item.title, item.author, "").apply {
                 sourceId = id
                 intro = item.intro
                 jdrExtras = item.extra.toString()
@@ -267,7 +268,7 @@ internal class JdrSourceBackend(private val context: Context) {
             val bookId = if (requireSource(id).archive.isLegacyNetdisk() && !item.id.startsWith("D_")) "D_${item.id}" else item.id
             val extra = item.extra + mapOf("id" to JsonPrimitive(bookId), "bookTitle" to JsonPrimitive(item.name), "__fluxParentDirectory" to JsonPrimitive(selected), "__fluxBrowsePage" to JsonPrimitive(page))
             val parsed = SourceContract.parseSearchResults(JsonArray(listOf(JsonObject(extra))).toString()).single()
-            Book(coverReference(canResolveCover, parsed.id, parsed.extra, parsed.cover), parsed.id, parsed.title, parsed.author, "").apply {
+            Book(coverReference(canResolveCover && (id != "jdr:bilibili" || parsed.cover.isBlank()), parsed.id, parsed.extra, parsed.cover), parsed.id, parsed.title, parsed.author, "").apply {
                 sourceId = id
                 intro = parsed.intro
                 jdrExtras = parsed.extra.toString()
@@ -295,10 +296,15 @@ internal class JdrSourceBackend(private val context: Context) {
         covers.remove(id to reference)
         coverRequests.remove(id to reference)?.cancel()
         coverRevision++
+        idleCoverEngines.filter { it.first == id }.forEach { it.second.close() }
+        idleCoverEngines.removeAll { it.first == id }
     }
 
     suspend fun resolveCover(id: String, reference: String): ListeningResource? {
-        if (!reference.startsWith("jdr-cover:")) return ListeningResource(reference, emptyMap())
+        if (!reference.startsWith("jdr-cover:")) {
+            val headers = if (id == "jdr:bilibili") mapOf("Referer" to "https://www.bilibili.com/") else emptyMap()
+            return ListeningResource(reference, headers)
+        }
         val key = id to reference
         val request = mutex.withLock {
             covers[key]?.let { (expires, resource) ->
@@ -317,13 +323,38 @@ internal class JdrSourceBackend(private val context: Context) {
                         // 其他脚本保留原沙箱，兼容封面依赖 browse 内存状态的实现。
                         val result = coverPermits.withPermit {
                             if (source.archive.manifest.id == "com.timbre.tingshu-netdisk" && source.archive.manifest.version in setOf("1.1.4", "1.1.5")) {
-                                JsSourceEngine.create(
+                                val engine = mutex.withLock {
+                                    val index = idleCoverEngines.indexOfLast { it.first == id }
+                                    if (index >= 0) {
+                                        idleCoverEngines.removeAt(index).second
+                                    } else {
+                                        // 新建前先释放其它源的空闲环境，避免总内存随源数量增长。
+                                        if (idleCoverEngines.isNotEmpty()) idleCoverEngines.removeAt(0).second.close()
+                                        null
+                                    }
+                                } ?: JsSourceEngine.create(
                                     source.metadata.id,
                                     coverScript(source),
                                     source.metadata.script,
                                     OkHttpSandboxHttp(httpClient(source.archive.manifest.allowInsecure)),
                                     host = host,
-                                ).use { engine -> engine.invoke("cover", parameters, 30_000) }
+                                )
+                                var reusable = false
+                                try {
+                                    engine.invoke("cover", parameters, 30_000).also { reusable = true }
+                                } finally {
+                                    // 只复用成功且配置未变的环境；运行中的环境不会被其它查询同时使用。
+                                    withContext(NonCancellable) {
+                                        mutex.withLock {
+                                            if (reusable && coverRevision == revision && sources[id] === source) {
+                                                if (idleCoverEngines.size == 4) idleCoverEngines.removeAt(0).second.close()
+                                                idleCoverEngines.add(id to engine)
+                                            } else {
+                                                engine.close()
+                                            }
+                                        }
+                                    }
+                                }
                             } else {
                                 invoke(id, "cover", parameters, 30_000)
                             }
@@ -359,6 +390,8 @@ internal class JdrSourceBackend(private val context: Context) {
         covers.clear()
         coverRequests.values.forEach { it.cancel() }
         coverRequests.clear()
+        idleCoverEngines.forEach { it.second.close() }
+        idleCoverEngines.clear()
     }
 
     private fun coverScript(source: Source): String {

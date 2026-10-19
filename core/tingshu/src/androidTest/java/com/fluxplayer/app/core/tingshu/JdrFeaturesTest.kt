@@ -50,7 +50,7 @@ class JdrFeaturesTest {
           {"id":"parallelcover","name":"并行封面","script":"source.js","capabilities":["browse","cover"]}]}"""
         val script = """
             registerSource({id:'parallelcover',
-              browse(){return {items:[1,2,3,4].map(i=>({id:String(i),name:'书'+i,type:'book'}))};},
+              browse(){return {items:[1,2,3,4,5,6].map(i=>({id:String(i),name:'书'+i,type:'book'}))};},
               async cover(p){
                 const r=await http.get('${server.url("/query/")}'+p.bookId);
                 if(r.status!==200) throw Error('请求失败');
@@ -72,12 +72,13 @@ class JdrFeaturesTest {
                 val requests = (books + books.first()).map { book -> async(Dispatchers.IO) { repository.resolveCover(id, book.coverUrl) } }
                 try {
                     assertTrue("四个封面查询应同时发出", arrived.await(5, TimeUnit.SECONDS))
-                    assertEquals(4, withTimeout(1500) { repository.browseJdr(id, null).books.size })
+                    assertEquals("其余查询应排队，不能超过四个", 4, server.requestCount)
+                    assertEquals(6, withTimeout(1500) { repository.browseJdr(id, null).books.size })
                 } finally {
                     release.countDown()
                 }
-                assertEquals(5, requests.awaitAll().size)
-                assertEquals(4, server.requestCount)
+                assertEquals(7, requests.awaitAll().size)
+                assertEquals(6, server.requestCount)
             }
         } finally {
             release.countDown()
