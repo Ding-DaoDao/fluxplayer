@@ -1,6 +1,7 @@
 package com.fluxplayer.app.feature.tingshu
 
 import android.app.Application
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,6 +20,27 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/**
+ * 书源列表的排序方式。
+ *
+ * [DEFAULT] 完全沿用源返回的顺序——jar 源可以在自己的配置里排好序，
+ * jdr 源按接口顺序返回，选中默认时不做任何二次排序。
+ *
+ * 维度对齐网盘网页版的排序菜单：名称 / 修改时间 / 大小，各给双向。
+ */
+enum class BookSortMode(val label: String) {
+    DEFAULT("默认顺序"),
+    NAME_ASC("名称 A-Z"),
+    NAME_DESC("名称 Z-A"),
+    NEWEST("最近更新"),
+    OLDEST("最早更新"),
+    LARGEST("大小 大→小"),
+    SMALLEST("大小 小→大"),
+}
+
+/** 书源列表的展示样式。 */
+enum class BookViewMode { GRID, LIST }
 
 data class SourceBrowseState(
     val source: ListeningSource? = null,
@@ -56,6 +78,10 @@ data class SourceBrowseState(
     val canGoBack: Boolean = false,
     /** 待启动的书源 WebView 登录页，UI 侧消费后调SourceLoginActivity 并清空 */
     val pendingLogin: PendingLogin? = null,
+    /** 列表排序方式（App 侧本地排序，切换即时生效，不需要重新请求） */
+    val sortMode: BookSortMode = BookSortMode.DEFAULT,
+    /** 网格 / 列表展示 */
+    val viewMode: BookViewMode = BookViewMode.GRID,
 )
 
 /** 书源 WebView 登录所需的全部信息，由 SourceHost.loginInfo() 提供 */
@@ -71,11 +97,41 @@ internal val ListeningSource.isCloudLibrary: Boolean
 
 class TingshuViewModel(application: Application) : AndroidViewModel(application) {
     val repository = TingshuRepository.get(application)
-    private val mutableState = MutableStateFlow(SourceBrowseState())
+
+    /** 列表展示偏好（网格/列表、排序规则）：跨会话记住，换源也保持。 */
+    private val listPreferences = application.getSharedPreferences(PREF_SOURCE_LIST, Context.MODE_PRIVATE)
+
+    private val mutableState = MutableStateFlow(freshState())
     val state = mutableState.asStateFlow()
     private val history = mutableListOf<SourceBrowseState>()
     private var loadJob: Job? = null
     private var retryAction: (suspend () -> Unit)? = null
+
+    /**
+     * 重建 state 时一律带上已保存的展示偏好。
+     * 换源、重进、从设置页返回都会整块重建 state，不带上的话用户选的网格/排序会被重置。
+     */
+    private fun freshState(
+        source: ListeningSource? = null,
+        title: String = "",
+        loading: Boolean = false,
+    ): SourceBrowseState = SourceBrowseState(
+        source = source,
+        title = title,
+        loading = loading,
+        sortMode = storedSortMode(),
+        viewMode = storedViewMode(),
+    )
+
+    private fun storedSortMode(): BookSortMode =
+        listPreferences.getString(KEY_SORT_MODE, null)
+            ?.let { name -> BookSortMode.values().firstOrNull { it.name == name } }
+            ?: BookSortMode.DEFAULT
+
+    private fun storedViewMode(): BookViewMode =
+        listPreferences.getString(KEY_VIEW_MODE, null)
+            ?.let { name -> BookViewMode.values().firstOrNull { it.name == name } }
+            ?: BookViewMode.GRID
 
     fun importSource(uri: Uri) = operation { repository.importSource(uri) }
 
@@ -85,10 +141,13 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
 
     fun open(source: ListeningSource) {
         history.clear()
-        mutableState.value = SourceBrowseState(source = source, title = source.name)
+        mutableState.value = freshState(source = source, title = source.name)
         operation {
             if ("browse" in source.capabilities) {
-                val page = repository.browseJdr(source.id, null)
+                // 带着已保存的排序进源，第一次拉取就由服务端排好，翻页顺序也就对着
+                val mode = storedSortMode()
+                val initialDirectory = if (mode == BookSortMode.DEFAULT) null else encodeSortId(mode, null)
+                val page = repository.browseJdr(source.id, initialDirectory)
                 mutableState.update { it.copy(books = page.books, folders = page.folders, shortcuts = page.shortcuts, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
                 return@operation
             }
@@ -136,6 +195,73 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
         }
+    }
+
+    /**
+     * 切换列表排序。
+     *
+     * 先在本地立即重排（不闪、不等待网络），再让源去服务端重拉一次——
+     * 服务端排序的意义是**翻页也带同一条规则**，只有这样才能保证跨页顺序正确。
+     */
+    fun setSortMode(mode: BookSortMode) {
+        listPreferences.edit().putString(KEY_SORT_MODE, mode.name).apply()
+        val current = mutableState.value
+        mutableState.update { it.copy(sortMode = mode) }
+
+        val source = current.source ?: return
+        // 搜索结果是 search() 一次性拿回来的，没有 directoryId 通道可以带排序参数；
+        // 这时候重新 browse 会把搜索结果换成目录列表，所以只做本地重排。
+        if (current.searchKeyword != null) return
+        if ("browse" !in source.capabilities || current.books.isEmpty()) return
+
+        val directory = encodeSortId(mode, current.directoryId)
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            try {
+                val page = repository.browseJdr(source.id, directory, 1)
+                mutableState.update {
+                    it.copy(
+                        books = page.books,
+                        folders = page.folders,
+                        shortcuts = page.shortcuts,
+                        directoryId = page.directoryId,
+                        browseNextPage = page.nextPage,
+                        page = 1,
+                    )
+                }
+            } catch (error: Throwable) {
+                if (error is CancellationException && error !is TimeoutCancellationException) throw error
+                // 本地排序已经生效，服务端这次没拿到就只提示，不动列表
+                mutableState.update { it.copy(error = ListeningErrors.describe(error, "排序失败")) }
+            }
+        }
+    }
+
+    /** 网格 / 列表来回切；选择会记住。 */
+    fun toggleViewMode() {
+        val next = if (mutableState.value.viewMode == BookViewMode.GRID) BookViewMode.LIST else BookViewMode.GRID
+        listPreferences.edit().putString(KEY_VIEW_MODE, next.name).apply()
+        mutableState.update { it.copy(viewMode = next) }
+    }
+
+    /**
+     * App 的排序 → 源能理解的 directoryId。
+     *
+     * 格式 `sort:<field>:<order>~<真实目录 id>`：源从里面拆出目录和排序，
+     * 转成网盘自己的 orderBy 参数。DEFAULT 返回纯目录，让源按默认序拉。
+     */
+    private fun encodeSortId(mode: BookSortMode, directoryId: String?): String {
+        val realDirectory = directoryId?.substringAfter('~', directoryId) ?: ""
+        val spec = when (mode) {
+            BookSortMode.NAME_ASC -> "name:asc"
+            BookSortMode.NAME_DESC -> "name:desc"
+            BookSortMode.NEWEST -> "time:desc"
+            BookSortMode.OLDEST -> "time:asc"
+            BookSortMode.LARGEST -> "size:desc"
+            BookSortMode.SMALLEST -> "size:asc"
+            BookSortMode.DEFAULT -> return realDirectory
+        }
+        return "sort:$spec~$realDirectory"
     }
 
     fun category(url: String, title: String, append: Boolean = false) {
@@ -220,7 +346,8 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         }
         operation {
             if ("browse" in source.capabilities) {
-                val page = repository.browseJdr(source.id, if (state.canGoBack || state.shortcuts.isNotEmpty()) state.directoryId else null)
+                // 直接沿用当前 directoryId：它可能是 sort:*~<目录>，丢掉就等于把排序重置了
+                val page = repository.browseJdr(source.id, state.directoryId)
                 mutableState.update { it.copy(books = page.books, folders = page.folders, shortcuts = page.shortcuts, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
                 return@operation
             }
@@ -320,7 +447,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
 
     fun openSavedBook(key: String) = operation {
         history.clear()
-        mutableState.value = SourceBrowseState(loading = true)
+        mutableState.value = freshState(loading = true)
         val book = repository.book(key)
         mutableState.update { it.copy(detail = book) }
     }
@@ -337,7 +464,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun configure(source: ListeningSource) {
-        mutableState.value = SourceBrowseState(source = source)
+        mutableState.value = freshState(source = source)
         configure()
     }
 
@@ -420,7 +547,7 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         when {
             state.value.detail != null -> mutableState.update { it.copy(detail = null, loading = false, error = null) }
             history.isNotEmpty() -> mutableState.value = history.removeAt(history.lastIndex)
-            else -> mutableState.value = SourceBrowseState()
+            else -> mutableState.value = freshState()
         }
     }
 
@@ -445,5 +572,11 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         }
+    }
+
+    private companion object {
+        const val PREF_SOURCE_LIST = "tingshu_source_list"
+        const val KEY_SORT_MODE = "sort_mode"
+        const val KEY_VIEW_MODE = "view_mode"
     }
 }

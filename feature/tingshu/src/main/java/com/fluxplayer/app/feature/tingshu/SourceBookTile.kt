@@ -1,5 +1,6 @@
 package com.fluxplayer.app.feature.tingshu
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,23 +11,31 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
 import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
-import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.github.eprendre.tingshu.utils.Book
+import kotlin.math.abs
 
 @Composable
 internal fun SourceBookTile(book: Book, cover: Any?, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val hasCover = book.coverUrl.isNotBlank() && cover != null
+    var failed by remember(book.bookUrl, book.coverUrl) { mutableStateOf(false) }
     Card(
         onClick = onClick,
         modifier = modifier,
@@ -35,14 +44,18 @@ internal fun SourceBookTile(book: Book, cover: Any?, modifier: Modifier = Modifi
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(0.75f), contentAlignment = Alignment.Center) {
-                Icon(NextIcons.Headset, contentDescription = null, tint = FluxTheme.colorScheme.onSurfaceVariant)
-                AsyncImage(
-                    model = cover,
-                    imageLoader = rememberBookCoverImageLoader(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                // 底色占位常驻最下层：加载中/失败/本来没封面，都不会留一块空灰
+                CoverLetterPlaceholder(book.title)
+                if (hasCover && !failed) {
+                    AsyncImage(
+                        model = cover,
+                        imageLoader = rememberBookCoverImageLoader(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        onState = { state -> if (state is AsyncImagePainter.State.Error) failed = true },
+                    )
+                }
             }
             Text(
                 book.title,
@@ -63,5 +76,32 @@ internal fun SourceBookTile(book: Book, cover: Any?, modifier: Modifier = Modifi
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+/**
+ * 没有封面时的占位：书名首字 + 由书名决定的柔和底色。
+ *
+ * 网盘里的"书"是文件夹，接口多数不给封面；拿不到时不显示空灰块，
+ * 至少让人一眼能认出书名。同一个书名永远同一个颜色（hash 取模）。
+ */
+@Composable
+private fun CoverLetterPlaceholder(title: String) {
+    val palette = listOf(
+        Color(0xFF6E7FA8),
+        Color(0xFF6F9A83),
+        Color(0xFFA98A6B),
+        Color(0xFF8E7CA8),
+        Color(0xFF648F99),
+        Color(0xFFA5768A),
+    )
+    val color = palette[abs(title.hashCode()) % palette.size]
+    Box(Modifier.fillMaxSize().background(color), contentAlignment = Alignment.Center) {
+        Text(
+            text = title.trim().take(1).ifEmpty { "书" },
+            color = Color.White,
+            fontSize = 30.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }

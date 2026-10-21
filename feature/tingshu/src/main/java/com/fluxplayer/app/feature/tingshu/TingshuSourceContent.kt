@@ -22,8 +22,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.request.ImageRequest
+import com.fluxplayer.app.core.common.NaturalOrder
 import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.tingshu.TingshuRepository
 import com.fluxplayer.app.core.ui.components.MediaPageLoading as AudiobookLoadingIndicator
@@ -56,6 +60,9 @@ import com.fluxplayer.app.feature.player.AudiobookBookCard
 import com.fluxplayer.app.feature.player.PlayConfirmDialog
 import com.fluxplayer.app.feature.player.model.AudioBook
 import com.github.eprendre.tingshu.utils.Book
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 @Composable
 fun TingshuSourceContent(
@@ -151,7 +158,12 @@ fun TingshuSourceContent(
             }
         }
         val listState = rememberLazyListState()
-        LaunchedEffect(state.searchKeyword, state.directoryId) { listState.scrollToItem(0) }
+        // 排序只是展示层重排：切规则不重新请求书源，翻页追加的数据也会一起参与排序
+        val visibleBooks = remember(state.books, state.sortMode) {
+            state.books.sortedForDisplay(state.sortMode)
+        }
+        // 换目录、换关键词、切排序或切视图都回到顶部：重排后停在中间会像「没生效」
+        LaunchedEffect(state.searchKeyword, state.directoryId, state.sortMode, state.viewMode) { listState.scrollToItem(0) }
         // 触底自动加载下一页：提前 3 项预加载，滚到底后不再触发
         LaunchedEffect(listState, state.books.size + state.folders.size, state.nextUrl, state.totalPages, state.browseNextPage, state.page, state.loading) {
             snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
@@ -185,6 +197,17 @@ fun TingshuSourceContent(
                                 )
                             }
                         }
+                        // 排序 / 视图切换只对书籍列表有意义，没有书时不占位置
+                        if (state.books.isNotEmpty()) {
+                            SourceSortButton(current = state.sortMode, onSelect = viewModel::setSortMode)
+                            IconButton(onClick = viewModel::toggleViewMode) {
+                                Icon(
+                                    imageVector = if (state.viewMode == BookViewMode.GRID) NextIcons.ViewAgenda else NextIcons.GridView,
+                                    contentDescription = if (state.viewMode == BookViewMode.GRID) "切换为列表" else "切换为网格",
+                                    tint = FluxTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }
                 state.menus.forEach { menu ->
@@ -210,8 +233,8 @@ fun TingshuSourceContent(
                         Text("目录 · ${folder.name}", modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE), maxLines = 1)
                     }
                 }
-                if (state.shortcuts.isNotEmpty()) {
-                    items(state.books.chunked(3), key = { row -> "books-${row.first().bookUrl}" }) { row ->
+                if (state.viewMode == BookViewMode.GRID) {
+                    items(visibleBooks.chunked(3), key = { row -> "books-${row.first().bookUrl}" }) { row ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             row.forEach { book ->
                                 SourceBookTile(
@@ -230,7 +253,7 @@ fun TingshuSourceContent(
                         }
                     }
                 } else {
-                    items(state.books) { book ->
+                    items(visibleBooks) { book ->
                         AudiobookBookCard(
                             book = AudioBook(book.title, book.bookUrl, null, 0, emptyList()),
                             coverModel = rememberSourceCover(state.source!!.id, book.coverUrl, viewModel.repository),
@@ -333,6 +356,75 @@ internal fun rememberSourceCover(sourceId: String, url: String, repository: Ting
                 }
             }
             .diskCacheKey("$sourceId:$url").memoryCacheKey("$sourceId:$url:$coverRevision")
-            .fetcherFactory(SourceCoverFetcher { repository.resolveCover(sourceId, url, forceRefresh = refreshRevision > 0) }).build()
+            .fetcherFactory(SourceCoverFetcher { retry -> repository.resolveCover(sourceId, url, forceRefresh = refreshRevision > 0 || retry) }).build()
     }
+}
+
+/**
+ * 「全部书籍」那一行右侧的排序入口：点开是下拉菜单，选中即生效。
+ * 高亮当前规则；DEFAULT 时图标用次要色，避免让人以为列表被强制排过。
+ */
+@Composable
+private fun SourceSortButton(current: BookSortMode, onSelect: (BookSortMode) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                imageVector = NextIcons.Sort,
+                contentDescription = "排序：${current.label}",
+                tint = if (current == BookSortMode.DEFAULT) FluxTheme.colorScheme.onSurfaceVariant else FluxTheme.colorScheme.primary,
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            BookSortMode.values().forEach { mode ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = mode.label,
+                            color = if (mode == current) FluxTheme.colorScheme.primary else FluxTheme.colorScheme.onSurface,
+                        )
+                    },
+                    onClick = {
+                        onSelect(mode)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 展示层排序，纯本地重排、不重新请求书源。
+ *
+ * DEFAULT 保持源返回顺序——jar 源可以在自己的配置里排好序，这里不去覆盖它。
+ * 其余规则只依赖 App 能拿到的字段：jdr 源把 sortSize/sortTime 塞在 jdrExtras 里，
+ * jar 源的 Book 没有这两个字段，取不到时按 0 参与排序（等于保持原序）。
+ *
+ * 注意：网盘里的"书"通常是文件夹，接口给的 size 多为 0，
+ * 所以「大小」这两项实际只对散落的单音频书有效——网盘网页版对文件夹也只显示 "-"。
+ */
+private fun List<Book>.sortedForDisplay(mode: BookSortMode): List<Book> = when (mode) {
+    BookSortMode.DEFAULT -> this
+    BookSortMode.NAME_ASC -> sortedWith(compareBy(NaturalOrder.fileNameComparator) { it.title })
+    BookSortMode.NAME_DESC -> sortedWith(compareByDescending(NaturalOrder.fileNameComparator) { it.title })
+    BookSortMode.NEWEST -> sortedByDescending { it.jdrSortValue("sortTime") }
+    BookSortMode.OLDEST -> sortedBy { it.jdrSortValue("sortTime") }
+    BookSortMode.LARGEST -> sortedByDescending { it.jdrSortValue("sortSize") }
+    BookSortMode.SMALLEST -> sortedBy { it.jdrSortValue("sortSize") }
+}
+
+/**
+ * 从 jdrExtras 里取排序元数据；jar 源没有这个字段，返回 0。
+ *
+ * JS 侧 `Number(...)` 序列化出来可能是 `1.7e12` 这种科学计数法或带小数点，
+ * 所以先按整数读，失败再按浮点读，两个都不行才算 0。
+ */
+private fun Book.jdrSortValue(key: String): Long {
+    if (jdrExtras.isBlank() || jdrExtras == "{}") return 0L
+    return runCatching {
+        val obj = Json.parseToJsonElement(jdrExtras) as? JsonObject ?: return@runCatching 0L
+        val raw = (obj[key] as? JsonPrimitive)?.content ?: return@runCatching 0L
+        raw.toLongOrNull() ?: raw.toDoubleOrNull()?.toLong() ?: 0L
+    }.getOrDefault(0L)
 }

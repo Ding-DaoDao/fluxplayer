@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.FolderOff
 import androidx.compose.material.icons.rounded.FontDownload
 import androidx.compose.material.icons.rounded.FormatBold
 import androidx.compose.material.icons.rounded.FormatSize
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Headset
 import androidx.compose.material.icons.rounded.HeadsetOff
 import androidx.compose.material.icons.rounded.HideSource
@@ -77,6 +78,7 @@ import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.Swipe
 import androidx.compose.material.icons.rounded.SwipeVertical
+import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Title
 import androidx.compose.material.icons.rounded.TouchApp
@@ -174,6 +176,10 @@ object NextIcons {
     val Star = Icons.Rounded.Star
     val StarOutline = Icons.Rounded.StarBorder
     val ViewAgenda = Icons.Rounded.ViewAgenda
+    /** 列表页「排序」入口 */
+    val Sort = Icons.Rounded.SwapVert
+    /** 列表页「网格视图」 */
+    val GridView = Icons.Rounded.GridView
 
     // ── 底栏双态：outline 用于未选中，filled（rounded）用于选中 ──
     val VideoOutline = Icons.Outlined.Movie

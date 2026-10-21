@@ -38,6 +38,7 @@ import voice.core.extension.engine.OkHttpSandboxHttp
 import voice.core.extension.engine.Pan123ScriptCompatibility
 import voice.core.extension.engine.SourceContract
 import voice.core.extension.engine.SourceFeatures
+import voice.core.extension.engine.SourceHostBridge
 import voice.core.extension.engine.SourceLogin
 import voice.core.extension.engine.SourceSetting
 
@@ -45,6 +46,9 @@ import voice.core.extension.engine.SourceSetting
 data class JdrConfiguration(val fields: List<SourceSetting>, val values: Map<String, String>, val canLogin: Boolean, val canBrowse: Boolean, val initialDirectory: String)
 data class JdrFolder(val id: String, val name: String)
 data class JdrBrowserPage(val directoryId: String, val folders: List<JdrFolder>, val books: List<Book>, val nextPage: Int?, val shortcuts: List<JdrFolder> = emptyList())
+
+/** 源脚本里 log() 的输出统一打到 logcat 的这个 tag 下，方便排查。 */
+private const val SOURCE_LOG_TAG = "JdrSource"
 
 internal class JdrSourceBackend(private val context: Context) {
     private data class Source(val archive: JdrArchive, val metadata: ExtensionSourceMeta, var fields: List<SourceSetting> = metadata.declaredSettings().ifEmpty { commonSettings })
@@ -55,8 +59,10 @@ internal class JdrSourceBackend(private val context: Context) {
     private val covers = linkedMapOf<Pair<String, String>, Pair<Long, ListeningResource?>>()
     private val coverRequests = mutableMapOf<Pair<String, String>, Deferred<ListeningResource?>>()
     private val coverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val coverPermits = Semaphore(4)
+    // 封面是逐本解析的（每本一次目录请求），并发低会让首屏出图很慢
+    private val coverPermits = Semaphore(6)
     private val idleCoverEngines = mutableListOf<Pair<String, JsSourceEngine>>()
+    private val freshCoverRequests = mutableSetOf<Pair<String, String>>()
     private var coverRevision = 0L
     private val client = OkHttpClient()
     private val mutex = Mutex()
@@ -168,6 +174,8 @@ internal class JdrSourceBackend(private val context: Context) {
         source.metadata.script,
         OkHttpSandboxHttp(httpClient(source.archive.manifest.allowInsecure)),
         host = preferences(source),
+        // 源脚本里的 log() 之前被吞掉了，排查封面/登录问题只能靠猜
+        log = { Log.d(SOURCE_LOG_TAG, "${source.metadata.id}: $it") },
     ).also { engines[id] = it }
     suspend fun configuration(id: String): JdrConfiguration = mutex.withLock {
         val source = requireSource(id)
@@ -293,11 +301,13 @@ internal class JdrSourceBackend(private val context: Context) {
 
     /** 手动刷新只失效当前封面，防止短期的空结果或旧地址阻止重试。 */
     suspend fun invalidateCover(id: String, reference: String) = mutex.withLock {
+        if (!reference.startsWith("jdr-cover:")) return@withLock
         covers.remove(id to reference)
         coverRequests.remove(id to reference)?.cancel()
         coverRevision++
         idleCoverEngines.filter { it.first == id }.forEach { it.second.close() }
         idleCoverEngines.removeAll { it.first == id }
+        freshCoverRequests.add(id to reference)
     }
 
     suspend fun resolveCover(id: String, reference: String): ListeningResource? {
@@ -313,10 +323,19 @@ internal class JdrSourceBackend(private val context: Context) {
             coverRequests.getOrPut(key) {
                 val source = requireSource(id)
                 val host = preferences(source)
+                val refresh = freshCoverRequests.remove(key)
+                // 只在本次刷新中跳过书源图片缓存，保留登录态，也不清空其它书的缓存。
+                val coverHost = if (refresh) {
+                    object : SourceHostBridge by host {
+                        override fun get(key: String): String? = if (key.startsWith("cache:")) null else host.get(key)
+                    }
+                } else {
+                    host
+                }
                 val revision = coverRevision
                 val uri = Uri.parse(reference)
                 val bookId = uri.getQueryParameter("bookId") ?: return null
-                val parameters = params(id, mapOf("bookId" to bookId), uri.getQueryParameter("extras") ?: "{}")
+                val parameters = params(id, mapOf("bookId" to bookId, "refreshCover" to refresh), uri.getQueryParameter("extras") ?: "{}")
                 coverScope.async(start = CoroutineStart.LAZY) {
                     try {
                         // 已核对的网盘脚本从持久状态恢复会话，可用独立沙箱并行查询。
@@ -324,7 +343,7 @@ internal class JdrSourceBackend(private val context: Context) {
                         val result = coverPermits.withPermit {
                             if (source.archive.manifest.id == "com.timbre.tingshu-netdisk" && source.archive.manifest.version in setOf("1.1.4", "1.1.5")) {
                                 val engine = mutex.withLock {
-                                    val index = idleCoverEngines.indexOfLast { it.first == id }
+                                    val index = if (refresh) -1 else idleCoverEngines.indexOfLast { it.first == id }
                                     if (index >= 0) {
                                         idleCoverEngines.removeAt(index).second
                                     } else {
@@ -337,17 +356,18 @@ internal class JdrSourceBackend(private val context: Context) {
                                     coverScript(source),
                                     source.metadata.script,
                                     OkHttpSandboxHttp(httpClient(source.archive.manifest.allowInsecure)),
-                                    host = host,
+                                    host = coverHost,
+                                    log = { Log.d(SOURCE_LOG_TAG, "${source.metadata.id}: $it") },
                                 )
                                 var reusable = false
                                 try {
-                                    engine.invoke("cover", parameters, 30_000).also { reusable = true }
+                                    engine.invoke("cover", parameters, 30_000).also { reusable = !refresh }
                                 } finally {
                                     // 只复用成功且配置未变的环境；运行中的环境不会被其它查询同时使用。
                                     withContext(NonCancellable) {
                                         mutex.withLock {
                                             if (reusable && coverRevision == revision && sources[id] === source) {
-                                                if (idleCoverEngines.size == 4) idleCoverEngines.removeAt(0).second.close()
+                                                if (idleCoverEngines.size == 6) idleCoverEngines.removeAt(0).second.close()
                                                 idleCoverEngines.add(id to engine)
                                             } else {
                                                 engine.close()
@@ -392,6 +412,7 @@ internal class JdrSourceBackend(private val context: Context) {
         coverRequests.clear()
         idleCoverEngines.forEach { it.second.close() }
         idleCoverEngines.clear()
+        freshCoverRequests.clear()
     }
 
     private fun coverScript(source: Source): String {

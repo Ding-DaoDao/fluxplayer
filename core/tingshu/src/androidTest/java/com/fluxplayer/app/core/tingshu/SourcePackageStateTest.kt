@@ -18,6 +18,51 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class SourcePackageStateTest {
     @Test
+    fun refreshingCoverBypassesNullAndExpiredScriptCacheWithoutClearingOtherBooks(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val repository = TingshuRepository.get(context)
+        val entry = "jdr:com.timbre.tingshu-netdisk"
+        val id = "jdr:coverrefresh"
+        val file = File(context.cacheDir, "fresh-cover.jdr")
+        val manifest = """{"id":"com.timbre.tingshu-netdisk","name":"封面刷新测试","version":"1.1.5","sources":[
+          {"id":"coverrefresh","name":"刷新测试","script":"source.js","capabilities":["browse","cover"]}]}"""
+        val script = """
+            registerSource({id:'coverrefresh',
+              browse(){return {items:[1,2].map(i=>({id:String(i),name:'书'+i,type:'book'}))};},
+              cover(p){
+                var key='cover:'+p.bookId;
+                var cached=host.cache.get(key,null);
+                if(cached) return cached.url;
+                var count=storage.get('count:'+p.bookId,0)+1;
+                storage.set('count:'+p.bookId,count);
+                var url=p.bookId==='1'&&count===1?null:'https://example.com/'+p.bookId+'/'+count+'.jpg';
+                host.cache.set(key,{url:url},300);
+                return url;
+              }
+            });
+        """.trimIndent()
+        ZipOutputStream(file.outputStream()).use { output ->
+            mapOf("manifest.json" to manifest, "source.js" to script).forEach { (name, content) ->
+                output.putNextEntry(ZipEntry(name))
+                output.write(content.toByteArray())
+                output.closeEntry()
+            }
+        }
+        try {
+            repository.importSource(Uri.fromFile(file))
+            val books = repository.browseJdr(id, null).books
+            assertEquals(null, repository.resolveCover(id, books[0].coverUrl))
+            assertEquals("https://example.com/2/1.jpg", repository.resolveCover(id, books[1].coverUrl)?.url)
+            assertEquals("https://example.com/1/2.jpg", repository.resolveCover(id, books[0].coverUrl, forceRefresh = true)?.url)
+            assertEquals("https://example.com/1/3.jpg", repository.resolveCover(id, books[0].coverUrl, forceRefresh = true)?.url)
+            assertEquals("https://example.com/2/1.jpg", repository.resolveCover(id, books[1].coverUrl)?.url)
+        } finally {
+            repository.remove(entry)
+            file.delete()
+        }
+    }
+
+    @Test
     fun bilibiliUsesInlineCoverWithoutInvokingCoverScript(): Unit = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val repository = TingshuRepository.get(context)

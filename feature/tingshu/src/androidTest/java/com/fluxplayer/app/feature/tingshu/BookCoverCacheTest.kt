@@ -6,12 +6,14 @@ import androidx.test.platform.app.InstrumentationRegistry
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.CachePolicy
+import coil3.request.ErrorResult
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.toBitmap
 import com.fluxplayer.app.core.tingshu.ListeningResource
 import com.fluxplayer.app.core.ui.cache.BookCoverCache
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
@@ -24,6 +26,87 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class BookCoverCacheTest {
+    @Test
+    fun initiallyMissingCoverCanRecoverWithoutReopeningPage(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val server = MockWebServer()
+        val image = ByteArrayOutputStream().apply {
+            Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, this)
+        }.toByteArray()
+        server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(image)))
+        server.start()
+        val attempts = mutableListOf<Boolean>()
+        try {
+            val request = ImageRequest.Builder(context).data(SourceCover("initially-missing-cover"))
+                .memoryCachePolicy(CachePolicy.DISABLED).diskCachePolicy(CachePolicy.DISABLED)
+                .fetcherFactory(
+                    SourceCoverFetcher { fresh ->
+                        attempts.add(fresh)
+                        if (fresh) ListeningResource(server.url("/cover.png").toString(), emptyMap()) else null
+                    },
+                ).build()
+            assertTrue(BookCoverCache.imageLoader(context).execute(request) is SuccessResult)
+            assertEquals(listOf(false, true), attempts)
+            assertEquals(1, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun transientFailureRetriesWithFreshResolutionAndCachesSuccessfulImage(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val server = MockWebServer()
+        val image = ByteArrayOutputStream().apply {
+            Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, this)
+        }.toByteArray()
+        server.enqueue(MockResponse().setResponseCode(403))
+        server.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(image)))
+        server.start()
+        val enabled = BookCoverCache.enabled(context).value
+        val resolutions = mutableListOf<Boolean>()
+        try {
+            BookCoverCache.clear(context)
+            BookCoverCache.setEnabled(context, true)
+            val loader = BookCoverCache.imageLoader(context)
+            val factory = SourceCoverFetcher { fresh ->
+                resolutions.add(fresh)
+                ListeningResource(server.url(if (fresh) "/new.png" else "/expired.png").toString(), emptyMap())
+            }
+            val request = ImageRequest.Builder(context).data(SourceCover("expired-image-test"))
+                .fetcherFactory(factory).diskCacheKey("retry-image-test").memoryCachePolicy(CachePolicy.DISABLED).build()
+            assertTrue(loader.execute(request) is SuccessResult)
+            assertEquals(listOf(false, true), resolutions)
+            assertEquals("/expired.png", server.takeRequest().path)
+            val retry = server.takeRequest()
+            assertEquals("/new.png", retry.path)
+            assertEquals("no-cache", retry.getHeader("Cache-Control"))
+            assertTrue(loader.execute(request.newBuilder().networkCachePolicy(CachePolicy.DISABLED).build()) is SuccessResult)
+            assertEquals(2, resolutions.size)
+        } finally {
+            BookCoverCache.clear(context)
+            BookCoverCache.setEnabled(context, enabled)
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun resolutionFailureRetriesOnceAndPermanentFailureStops(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val loader = BookCoverCache.imageLoader(context)
+        val attempts = mutableListOf<Boolean>()
+        val request = ImageRequest.Builder(context).data(SourceCover("permanent-failure"))
+            .memoryCachePolicy(CachePolicy.DISABLED).diskCachePolicy(CachePolicy.DISABLED)
+            .fetcherFactory(
+                SourceCoverFetcher { fresh ->
+                    attempts.add(fresh)
+                    throw IOException("模拟暂时不可用")
+                },
+            ).build()
+        assertTrue(loader.execute(request) is ErrorResult)
+        assertEquals(listOf(false, true), attempts)
+    }
+
     @Test
     fun manualRefreshReplacesCoverAtSameAddressAndKeepsOfflineCache(): Unit = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
