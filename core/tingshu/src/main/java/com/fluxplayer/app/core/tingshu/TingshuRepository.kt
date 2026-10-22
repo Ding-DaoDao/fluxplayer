@@ -47,6 +47,13 @@ data class SourcePackage(
 
 data class ListeningSource(val id: String, val name: String, val description: String, val packageEntry: String, val capabilities: Set<String> = emptySet())
 
+/** 集合包里已经校验通过、等待一起提交的单个 JAR。 */
+private class StagedPackage(
+    val entry: String,
+    val file: File,
+    val sources: List<Pair<ListeningSource, TingShu>>,
+)
+
 data class ListeningBook(
     val key: String,
     val sourceId: String,
@@ -107,6 +114,10 @@ class TingshuRepository private constructor(private val context: Context) {
             importJdr(uri)
             return@managePackages
         }
+        if (filename.endsWith(".zip", ignoreCase = true)) {
+            importBundle(uri)
+            return@managePackages
+        }
         val entry = filename.removeSuffix(".jar")
         require(filename.endsWith(".jar") && entry.matches(Regex("[A-Za-z_][A-Za-z0-9_]*"))) {
             "请选择 Timbre .jdr 或保留原文件名的 JAR，例如 sources_by_pan123.jar"
@@ -115,18 +126,7 @@ class TingshuRepository private constructor(private val context: Context) {
         try {
             context.contentResolver.openInputStream(uri).use { input ->
                 requireNotNull(input) { "无法读取所选文件" }
-                FileOutputStream(destination).use { output ->
-                    check(destination.setReadOnly()) { "无法设置书源文件的只读属性" }
-                    val buffer = ByteArray(8192)
-                    var total = 0L
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        total += count
-                        require(total <= MAX_JAR_SIZE) { "书源包不能超过 20 MB" }
-                        output.write(buffer, 0, count)
-                    }
-                }
+                writeJarFile(input, destination, MAX_JAR_SIZE, "书源包不能超过 20 MB")
             }
             validateDex(destination)
             val imported = loadPackage(SourcePackage(entry, destination.name))
@@ -413,15 +413,9 @@ class TingshuRepository private constructor(private val context: Context) {
      */
     suspend fun loginInfo(sourceId: String): SourceHost.LoginInfo? = withContext(dispatcher) {
         if (jdr.handles(sourceId)) return@withContext null
-        runCatching { SourceHost.loginInfo(source(sourceId)) }.getOrNull()
-    }
-
-    /** 探测书源登录态；返回 null 表示该源不在已知网盘之列、状态未知。 */
-    suspend fun isLoggedIn(sourceId: String): Boolean? = withContext(dispatcher) {
-        if (jdr.handles(sourceId)) return@withContext null
-        (source(sourceId) as? WebLoginTokenSource)?.let { return@withContext runCatching { it.isWebLoggedIn() }.getOrNull() }
-        val info = runCatching { SourceHost.loginInfo(source(sourceId)) }.getOrNull() ?: return@withContext null
-        runCatching { SourceHost.isLoggedIn(info) }.getOrNull()
+        // 139/189 的 getLoginUrl() 里会 showToast 提示「登录成功后返回 App」，
+        // 那是点进登录页之后的提示；这里只是探测有没有登录入口，不该提前弹给用户。
+        runCatching { SourceHost.captureMessages { SourceHost.loginInfo(source(sourceId)) } }.getOrNull()
     }
 
     suspend fun completeWebLogin(sourceId: String, tokenJson: String) = withContext(dispatcher) {
@@ -518,6 +512,112 @@ class TingshuRepository private constructor(private val context: Context) {
         require(file.canonicalFile.parentFile == directory.canonicalFile && file.isFile) { "书源文件不存在" }
         require(file.length() <= MAX_JAR_SIZE) { "书源包不能超过 20 MB" }
         return file
+    }
+
+    /**
+     * 导入书源集合包：一个 .zip 里放多个 `sources_by_*.jar`。
+     *
+     * 每个 JAR 都要过和单包导入完全一样的校验（保留原名、20 MB 上限、DEX 有效、书源 ID 不重复），
+     * 全部通过才一起落盘；任何一个不合法就整体回滚，不会留下「导了一半」的书源列表。
+     * 压缩包允许带子目录（例如 `jars/sources_by_quark.jar`），只按文件名判断包名。
+     */
+    private suspend fun importBundle(uri: Uri) {
+        val workspace = File(context.cacheDir, "source-bundle-${UUID.randomUUID()}").apply { mkdirs() }
+        val staged = mutableListOf<StagedPackage>()
+        try {
+            val archive = File(workspace, "bundle.zip")
+            copyUri(uri, archive, MAX_BUNDLE_SIZE, "书源集合包不能超过 ${MAX_BUNDLE_SIZE / (1024 * 1024)} MB")
+            ZipFile(archive).use { zip ->
+                val members = zip.entries().asSequence()
+                    .filter { !it.isDirectory }
+                    // macOS 打包会在每层目录塞 __MACOSX/._xxx.jar，不排除会当成坏包
+                    .filter { !it.name.contains("__MACOSX") }
+                    .filter { jarBaseName(it.name).endsWith(".jar", ignoreCase = true) }
+                    .toList()
+                require(members.isNotEmpty()) { "压缩包里没有找到 JAR 书源（需要 sources_by_xxx.jar）" }
+                require(members.size <= MAX_BUNDLE_JARS) { "集合包最多包含 $MAX_BUNDLE_JARS 个 JAR" }
+                val seen = mutableSetOf<String>()
+                for (member in members) {
+                    val base = jarBaseName(member.name)
+                    val entry = base.dropLast(4)
+                    require(entry.matches(Regex("[A-Za-z_][A-Za-z0-9_]*"))) {
+                        "集合包里的 $base 需要保留 sources_by_xxx.jar 这样的原名"
+                    }
+                    require(seen.add(entry)) { "集合包里重复出现 $base" }
+                    require(member.size <= MAX_JAR_SIZE) { "$base 超过 20 MB" }
+                    val destination = File(directory, "$entry-${UUID.randomUUID()}.jar")
+                    try {
+                        zip.getInputStream(member).use { input ->
+                            writeJarFile(input, destination, MAX_JAR_SIZE, "$base 超过 20 MB")
+                        }
+                        val imported = runCatching {
+                            validateDex(destination)
+                            loadPackage(SourcePackage(entry, destination.name))
+                        }.getOrElse { error -> throw IllegalArgumentException("$base 导入失败：${error.message}", error) }
+                        staged += StagedPackage(entry, destination, imported)
+                    } catch (error: Throwable) {
+                        destination.delete()
+                        throw error
+                    }
+                }
+            }
+            val entries = staged.map { it.entry }.toSet()
+            val previous = readPackages()
+            // 包里要替换掉的旧包先排除，否则「重导同一集合包」会被自己判成 ID 冲突
+            val otherIds = _sources.value.filter { it.packageEntry !in entries }.map { it.id }.toSet()
+            val bundleIds = mutableSetOf<String>()
+            staged.forEach { item ->
+                item.sources.forEach { (source, _) ->
+                    require(source.id !in otherIds) { "书源 ID ${source.id} 与已导入的其他包重复" }
+                    require(bundleIds.add(source.id)) { "集合包里重复出现书源 ID ${source.id}" }
+                }
+            }
+            val updated = previous.filter { it.entry !in entries } + staged.map { SourcePackage(it.entry, it.file.name) }
+            persistPackages(updated)
+            reload(updated)
+            previous.filter { it.entry in entries }.forEach { File(directory, it.file).delete() }
+        } catch (error: Throwable) {
+            staged.forEach { it.file.delete() }
+            throw error
+        } finally {
+            workspace.deleteRecursively()
+        }
+    }
+
+    /** 取压缩包内成员的纯文件名；少量打包工具会用反斜杠当分隔符。 */
+    private fun jarBaseName(path: String): String = path.substringAfterLast('/').substringAfterLast('\\')
+
+    /** 写入单个 JAR：先设只读再写（Android 14 动态加载要求文件落盘后不可写）。 */
+    private fun writeJarFile(input: java.io.InputStream, destination: File, limit: Long, tooLarge: String) {
+        FileOutputStream(destination).use { output ->
+            check(destination.setReadOnly()) { "无法设置书源文件的只读属性" }
+            val buffer = ByteArray(8192)
+            var total = 0L
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                total += count
+                require(total <= limit) { tooLarge }
+                output.write(buffer, 0, count)
+            }
+        }
+    }
+
+    /** 把选中的文件整份复制到缓存目录，用于解压前落地。 */
+    private fun copyUri(uri: Uri, destination: File, limit: Long, tooLarge: String) {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(destination).use { output ->
+                val buffer = ByteArray(8192)
+                var total = 0L
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    require(total <= limit) { tooLarge }
+                    output.write(buffer, 0, count)
+                }
+            }
+        } ?: error("无法读取所选文件")
     }
 
     private suspend fun importJdr(uri: Uri) {
@@ -667,6 +767,12 @@ class TingshuRepository private constructor(private val context: Context) {
 
     companion object {
         private const val MAX_JAR_SIZE = 20L * 1024 * 1024
+
+        /** 集合包（.zip）本身的大小上限；包里每个 JAR 仍按 20 MB 单独校验 */
+        private const val MAX_BUNDLE_SIZE = 64L * 1024 * 1024
+
+        /** 集合包最多带多少个 JAR，避免一次性解出上百个包 */
+        private const val MAX_BUNDLE_JARS = 50
 
         @Volatile
         private var instance: TingshuRepository? = null

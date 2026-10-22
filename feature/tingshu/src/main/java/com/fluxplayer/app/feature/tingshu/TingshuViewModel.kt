@@ -10,6 +10,7 @@ import com.fluxplayer.app.core.tingshu.ListeningBook
 import com.fluxplayer.app.core.tingshu.ListeningErrors
 import com.fluxplayer.app.core.tingshu.ListeningSource
 import com.fluxplayer.app.core.tingshu.TingshuRepository
+import com.fluxplayer.app.core.tingshu.WebLoginWarmUp
 import com.github.eprendre.tingshu.utils.Book
 import com.github.eprendre.tingshu.utils.CategoryMenu
 import com.github.eprendre.tingshu.utils.ConfigItem
@@ -72,8 +73,6 @@ data class SourceBrowseState(
     val error: String? = null,
     val configItems: List<ConfigItem>? = null,
     val configRevision: Int = 0,
-    /** 配置对话框里展示的登录态；null = 该源不在已知网盘之列，状态未知 */
-    val loginState: Boolean? = null,
     val webLoginAvailable: Boolean = false,
     val canGoBack: Boolean = false,
     /** 待启动的书源 WebView 登录页，UI 侧消费后调SourceLoginActivity 并清空 */
@@ -151,22 +150,26 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
                 mutableState.update { it.copy(books = page.books, folders = page.folders, shortcuts = page.shortcuts, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
                 return@operation
             }
-            val menus = repository.menus(source.id)
+            val menus = repository.menus(source.id).filter { it.tabs.isNotEmpty() }
             val tabs = menus.flatMap { it.tabs }
-            // 云盘源的单入口代表配置的根目录，直接加载，不把隐藏入口显示为书籍。
-            if (source.isCloudLibrary && tabs.size == 1) {
-                val category = repository.category(source.id, tabs.single().url)
+            // 直接加载第一个入口：只有一个入口的源不再多一层「浏览书籍」，
+            // 多入口的源则把入口留成顶部分类条，同时立刻显示第一类的内容。
+            if (tabs.isNotEmpty()) {
+                val selected = tabs.first()
+                val category = repository.category(source.id, selected.url)
                 mutableState.update {
                     it.copy(
                         books = category.list,
                         page = category.currentPage,
                         totalPages = category.totalPage,
                         nextUrl = category.nextUrl,
-                        currentCategoryUrl = tabs.single().url,
+                        currentCategoryUrl = selected.url,
+                        title = selected.title.ifBlank { source.name },
+                        menus = if (tabs.size > 1) menus else emptyList(),
                     )
                 }
             } else {
-                mutableState.update { it.copy(menus = menus.filter { menu -> menu.tabs.isNotEmpty() }) }
+                mutableState.update { it.copy(menus = menus) }
             }
         }
     }
@@ -272,13 +275,39 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
             if (!append) history.add(previous.copy(loading = false, error = null))
             mutableState.update {
                 it.copy(
-                    books = if (append) it.books + category.list else category.list,
-                    menus = emptyList(),
+                    books = if (append) (it.books + category.list).distinctBy { book -> book.bookUrl } else category.list,
+                    menus = if (append) it.menus else emptyList(),
+                    title = title,
+                    page = category.currentPage,
+                    totalPages = category.totalPage,
+                    nextUrl = category.nextUrl,
+                    // 翻页时 url 是 nextUrl，不能覆盖分类入口，否则下拉刷新和分类高亮都会跑到下一页。
+                    currentCategoryUrl = if (append) it.currentCategoryUrl else url,
+                    canGoBack = history.isNotEmpty(),
+                )
+            }
+        }
+    }
+
+    /**
+     * 顶部分类条切分类：保留分类条，不把这一次切换塞进返回栈。
+     * 翻页/刷新仍复用 [category]，只是不经过「先回首页再点卡片」的中间层。
+     */
+    fun selectCategory(url: String, title: String) {
+        val source = state.value.source ?: return
+        if (state.value.currentCategoryUrl == url && state.value.books.isNotEmpty()) return
+        operation {
+            val category = repository.category(source.id, url)
+            mutableState.update {
+                it.copy(
+                    books = category.list,
+                    folders = emptyList(),
                     title = title,
                     page = category.currentPage,
                     totalPages = category.totalPage,
                     nextUrl = category.nextUrl,
                     currentCategoryUrl = url,
+                    searchKeyword = null,
                     canGoBack = history.isNotEmpty(),
                 )
             }
@@ -351,28 +380,29 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
                 mutableState.update { it.copy(books = page.books, folders = page.folders, shortcuts = page.shortcuts, directoryId = page.directoryId, browseNextPage = page.nextPage, page = 1) }
                 return@operation
             }
-            val refreshed = when {
-                state.canGoBack -> repository.category(source.id, state.currentCategoryUrl).let { it.list to it.totalPage }
-                else -> {
-                    val menus = repository.menus(source.id)
-                    val tabs = menus.flatMap { it.tabs }
-                    if (source.isCloudLibrary && tabs.size == 1) {
-                        val category = repository.category(source.id, tabs.single().url)
-                        category.list to category.totalPage
-                    } else {
-                        mutableState.update { it.copy(menus = menus.filter { menu -> menu.tabs.isNotEmpty() }) }
-                        return@operation
-                    }
-                }
+            // 已经进过分类就刷新当前分类；还在入口层则重新加载第一个入口。
+            var menus = state.menus
+            var target = state.currentCategoryUrl
+            if (target.isBlank()) {
+                menus = repository.menus(source.id).filter { it.tabs.isNotEmpty() }
+                target = menus.flatMap { it.tabs }.firstOrNull()?.url.orEmpty()
             }
+            if (target.isBlank()) {
+                mutableState.update { it.copy(menus = menus) }
+                return@operation
+            }
+            val category = repository.category(source.id, target)
+            val tabTitle = menus.flatMap { it.tabs }.firstOrNull { it.url == target }?.title.orEmpty()
             mutableState.update {
                 it.copy(
-                    books = refreshed.first,
-                    page = 1,
-                    totalPages = refreshed.second,
-                    nextUrl = if (state.canGoBack) it.nextUrl else "",
-                    menus = if (state.canGoBack) it.menus else emptyList(),
-                    canGoBack = state.canGoBack,
+                    books = category.list,
+                    page = category.currentPage,
+                    totalPages = category.totalPage,
+                    nextUrl = category.nextUrl,
+                    currentCategoryUrl = target,
+                    title = tabTitle.ifBlank { it.title },
+                    menus = if (menus.flatMap { menu -> menu.tabs }.size > 1) menus else emptyList(),
+                    canGoBack = history.isNotEmpty(),
                 )
             }
         }
@@ -472,15 +502,17 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         val source = state.value.source ?: return
         operation {
             val items = repository.config(source.id)
-            mutableState.update { it.copy(configItems = items, loginState = repository.isLoggedIn(source.id), webLoginAvailable = repository.loginInfo(source.id) != null) }
+            mutableState.update { it.copy(configItems = items, webLoginAvailable = repository.loginInfo(source.id) != null) }
         }
     }
 
-    fun saveConfig(values: Map<String, String>) {
+    /** 保存配置；成功后再回调 [onSaved]（例如关闭面板），失败时面板留着并显示错误。 */
+    fun saveConfig(values: Map<String, String>, onSaved: () -> Unit = {}) {
         val source = state.value.source ?: return
         operation {
             repository.saveConfig(source.id, values)
-            mutableState.update { it.copy(configItems = null, loginState = null) }
+            mutableState.update { it.copy(configItems = null) }
+            onSaved()
         }
     }
 
@@ -489,16 +521,23 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         repository.saveConfig(source.id, values)
         val message = repository.configAction(action)
         val items = repository.config(source.id)
-        // 「清除登录痕迹」等动作会改动登录态，一并刷新状态显示
         mutableState.update {
-            it.copy(configItems = items, configRevision = it.configRevision + 1, loginState = repository.isLoggedIn(source.id), configMessage = message)
+            it.copy(configItems = items, configRevision = it.configRevision + 1, configMessage = message)
         }
     }
 
-    /** 登录页返回后重新探测登录态 */
-    fun refreshLoginState() = operation {
+    /**
+     * 登录页返回后把配置项整份重读一遍：
+     * 阿里云这类源会把读到的令牌写回配置项，重读之后输入框里能直接看到；
+     * 其余网盘源把 Cookie 存在书源内部，输入框仍是空。
+     * 不再猜「是否已登录」——Cookie 存在不代表凭证可用，判断交给书源自己。
+     */
+    fun reloadConfigAfterLogin() = operation {
         val source = state.value.source ?: return@operation
-        mutableState.update { it.copy(configItems = repository.config(source.id), configRevision = it.configRevision + 1, loginState = repository.isLoggedIn(source.id)) }
+        val items = repository.config(source.id)
+        mutableState.update {
+            it.copy(configItems = items, configRevision = it.configRevision + 1, configMessage = "已从登录页返回，配置项已刷新")
+        }
     }
 
     fun completeWebLogin(sourceId: String, tokenJson: String) {
@@ -506,12 +545,12 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
         operation {
             repository.completeWebLogin(sourceId, tokenJson)
             mutableState.update {
-                it.copy(configItems = repository.config(sourceId), configRevision = it.configRevision + 1, loginState = repository.isLoggedIn(sourceId), configMessage = "阿里云盘登录成功，凭证已自动保存")
+                it.copy(configItems = repository.config(sourceId), configRevision = it.configRevision + 1, configMessage = "已读取阿里云盘令牌")
             }
         }
     }
 
-    fun dismissConfig() = mutableState.update { it.copy(configItems = null, loginState = null, configMessage = null) }
+    fun dismissConfig() = mutableState.update { it.copy(configItems = null, configMessage = null) }
 
     /**
      * 打开书源 WebView 登录页。
@@ -531,6 +570,18 @@ class TingshuViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 mutableState.update { it.copy(pendingLogin = PendingLogin(source.id, source.name, info.url, info.userAgent)) }
             }
+        }
+    }
+
+    /**
+     * 预热登录页：配置面板一打开就先把 WebView 提供者和登录页拉起来，
+     * 等用户点「打开网页登录」时只剩渲染时间。失败不影响后续流程。
+     */
+    fun warmUpWebLogin(source: ListeningSource) {
+        if (source.id.startsWith("jdr:")) return
+        viewModelScope.launch {
+            val info = repository.loginInfo(source.id) ?: return@launch
+            WebLoginWarmUp.warm(getApplication(), info.url, info.userAgent)
         }
     }
 

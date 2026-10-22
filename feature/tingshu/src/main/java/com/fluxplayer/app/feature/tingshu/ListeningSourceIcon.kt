@@ -11,6 +11,7 @@ internal fun listeningSourceIcon(source: ListeningSource): Int {
     val name = source.name.lowercase()
     fun matches(vararg aliases: String): Boolean = aliases.any { it in identifiers || name.contains(it) }
     return when {
+        matches("fanqie", "番茄") -> R.drawable.ic_source_fanqie
         matches("bilibili", "b站", "哔哩哔哩") -> R.drawable.ic_source_bilibili
         matches("alipan", "aliyun", "阿里云盘", "阿里网盘") -> UiR.drawable.ic_provider_alipan
         matches("pan123", "123pan", "123云盘", "123网盘") -> UiR.drawable.ic_provider_pan123

@@ -8,5 +8,7 @@
         <activity android:name="com.fluxplayer.app.feature.tingshu.JdrDiscoveryPreviewActivity" android:exported="true" />
         <activity android:name="com.fluxplayer.app.feature.tingshu.ListeningHomePreviewActivity" android:exported="true" />
         <activity android:name="com.fluxplayer.app.feature.tingshu.ListeningControlsPreviewActivity" android:exported="true" />
+        <activity android:name="com.fluxplayer.app.feature.tingshu.SourceWebLoginPanelPreviewActivity" android:exported="true" />
+        <activity android:name="com.fluxplayer.app.feature.tingshu.SourceWebLoginSettingsPreviewActivity" android:exported="true" />
     </application>
 </manifest>

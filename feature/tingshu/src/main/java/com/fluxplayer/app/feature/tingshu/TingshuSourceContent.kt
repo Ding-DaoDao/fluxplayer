@@ -152,6 +152,32 @@ fun TingshuSourceContent(
                 }
             }
         }
+        // 多入口书源：把入口摊平成分类条，首屏已经自动加载第一类，不再多一层「浏览书籍」。
+        val categoryEntries = state.menus.flatMap { menu -> menu.tabs.map { menu.title to it } }
+        if (categoryEntries.isNotEmpty() && state.searchKeyword == null && pendingBook == null) {
+            val multipleMenus = state.menus.size > 1
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(categoryEntries, key = { "${it.first}|${it.second.url}" }) { (menuTitle, tab) ->
+                    FilterChip(
+                        selected = state.currentCategoryUrl == tab.url,
+                        onClick = {
+                            if (!state.loading && state.currentCategoryUrl != tab.url) {
+                                viewModel.selectCategory(tab.url, tab.title.ifBlank { menuTitle })
+                            }
+                        },
+                        enabled = !state.loading,
+                        label = {
+                            Text(
+                                if (multipleMenus && tab.title.isNotBlank()) "$menuTitle · ${tab.title}" else tab.title.ifBlank { menuTitle },
+                            )
+                        },
+                    )
+                }
+            }
+        }
         if (pendingBook == null) {
             state.error?.let { message ->
                 SourceErrorNotice(message, Modifier.padding(horizontal = 16.dp), onRetry = viewModel::retry, onDismiss = viewModel::dismissError)
@@ -162,8 +188,8 @@ fun TingshuSourceContent(
         val visibleBooks = remember(state.books, state.sortMode) {
             state.books.sortedForDisplay(state.sortMode)
         }
-        // 换目录、换关键词、切排序或切视图都回到顶部：重排后停在中间会像「没生效」
-        LaunchedEffect(state.searchKeyword, state.directoryId, state.sortMode, state.viewMode) { listState.scrollToItem(0) }
+        // 换目录、换分类、换关键词、切排序或切视图都回到顶部：重排后停在中间会像「没生效」
+        LaunchedEffect(state.searchKeyword, state.directoryId, state.currentCategoryUrl, state.sortMode, state.viewMode) { listState.scrollToItem(0) }
         // 触底自动加载下一页：提前 3 项预加载，滚到底后不再触发
         LaunchedEffect(listState, state.books.size + state.folders.size, state.nextUrl, state.totalPages, state.browseNextPage, state.page, state.loading) {
             snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
@@ -188,7 +214,12 @@ fun TingshuSourceContent(
                             TextButton(onClick = viewModel::back) { Text("上一级") }
                         }
                         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                            Text(if (state.canGoBack) state.title else state.shortcuts.firstOrNull { it.id == state.directoryId }?.name ?: "全部书籍", style = FluxTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = FluxTheme.colorScheme.onSurface)
+                            val heading = when {
+                                state.canGoBack -> state.title
+                                state.menus.isNotEmpty() -> state.title
+                                else -> state.shortcuts.firstOrNull { it.id == state.directoryId }?.name.orEmpty()
+                            }
+                            Text(heading.ifBlank { "全部书籍" }, style = FluxTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = FluxTheme.colorScheme.onSurface)
                             if (state.books.isNotEmpty()) {
                                 Text(
                                     "已加载 ${state.books.size} 本",
@@ -208,24 +239,6 @@ fun TingshuSourceContent(
                                 )
                             }
                         }
-                    }
-                }
-                state.menus.forEach { menu ->
-                    item(key = "menu-${menu.title}") {
-                        Text(
-                            text = menu.title,
-                            style = FluxTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = FluxTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
-                        )
-                    }
-                    items(menu.tabs) { tab ->
-                        AudiobookBookCard(
-                            book = AudioBook(tab.title.ifBlank { "书源目录" }, tab.url, null, 0, emptyList()),
-                            subtitle = "浏览书籍",
-                            onClick = { if (!state.loading) viewModel.category(tab.url, tab.title.ifBlank { "书源目录" }) },
-                        )
                     }
                 }
                 items(state.folders, key = { "folder-${it.id}" }) { folder ->
@@ -267,7 +280,7 @@ fun TingshuSourceContent(
                         )
                     }
                 }
-                if (state.books.isEmpty() && state.folders.isEmpty() && state.menus.isEmpty() && !state.loading) {
+                if (state.books.isEmpty() && state.folders.isEmpty() && !state.loading && state.error == null) {
                     item {
                         Column(
                             Modifier.fillMaxWidth().padding(vertical = 48.dp),

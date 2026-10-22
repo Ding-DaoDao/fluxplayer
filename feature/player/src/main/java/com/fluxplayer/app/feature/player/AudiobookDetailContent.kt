@@ -77,7 +77,6 @@ import coil3.request.ImageRequest
 import coil3.toBitmap
 import com.fluxplayer.app.core.ui.R as coreUiR
 import com.fluxplayer.app.core.ui.components.ChapterDragScrollbar
-import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.model.AudioBook
 import com.fluxplayer.app.feature.player.model.AudioChapter
@@ -298,12 +297,7 @@ fun AudiobookDetailContent(
                                 modifier = Modifier.fillMaxSize(),
                             )
                         } else {
-                            Icon(
-                                imageVector = NextIcons.Audio,
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp),
-                                tint = fluxColors.onSurfaceVariant.copy(alpha = 0.5f),
-                            )
+                            ListeningDefaultCover(book.title, modifier = Modifier.fillMaxSize())
                         }
                     }
 

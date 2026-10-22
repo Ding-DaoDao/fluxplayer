@@ -23,6 +23,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.fluxplayer.app.core.tingshu.ListeningSource
 import com.fluxplayer.app.core.tingshu.SourceHost
+import com.fluxplayer.app.core.tingshu.WebLoginWarmUp
 import com.fluxplayer.app.core.ui.components.MediaAlertDialog as AlertDialog
 import com.fluxplayer.app.core.ui.components.MediaGroupSpacer as HorizontalDivider
 import com.fluxplayer.app.core.ui.components.MediaLoadingRow
@@ -48,25 +50,6 @@ import com.github.eprendre.tingshu.utils.ConfigItem
 @Composable
 fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    var loginSourceId by rememberSaveable { mutableStateOf<String?>(null) }
-    val webLoginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val sourceId = loginSourceId
-        loginSourceId = null
-        val token = SourceLoginActivity.tokenFromResult(result.data)
-        if (result.resultCode == Activity.RESULT_OK && sourceId != null && token.isNotBlank()) {
-            viewModel.completeWebLogin(sourceId, token)
-        } else {
-            viewModel.refreshLoginState()
-        }
-    }
-    LaunchedEffect(state.pendingLogin) {
-        state.pendingLogin?.let { login ->
-            loginSourceId = login.sourceId
-            viewModel.consumePendingLogin()
-            webLoginLauncher.launch(SourceLoginActivity.intent(context, login.sourceName, login.url, login.userAgent))
-        }
-    }
     val sources by viewModel.repository.sources.collectAsStateWithLifecycle()
     val packages by viewModel.repository.packages.collectAsStateWithLifecycle()
     var configuringSource by remember { mutableStateOf<ListeningSource?>(null) }
@@ -87,7 +70,7 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
         if (state.configItems == null) state.error?.let { SourceErrorNotice(it, onRetry = viewModel::retry, onDismiss = viewModel::dismissError) }
         if (packages.isEmpty()) {
             ListeningSettingsCard("添加第一个书源", "导入书源后，就能在听书首页浏览和收听。") {
-                Text("支持 JDR 和 JAR 书源文件", style = FluxTheme.typography.bodyMedium)
+                Text("支持 JDR、JAR 书源文件和 JAR 集合包（.zip）", style = FluxTheme.typography.bodyMedium)
             }
         }
         packages.forEach { pkg ->
@@ -126,7 +109,12 @@ fun TingshuConfigContent(modifier: Modifier = Modifier, viewModel: TingshuViewMo
         AlertDialog(
             onDismissRequest = { showImportInfo = false },
             title = { Text("导入听书书源") },
-            text = { Text("支持 Timbre 的 .jdr 源包和听书 JAR。JAR 文件需保留原名，例如 sources_by_pan123.jar。重新导入同一包会更新书源。") },
+            text = {
+                Text(
+                    "支持三种：Timbre 的 .jdr 源包、单个听书 JAR、以及把多个 JAR 打成一个 .zip 的书源集合包。\n\n" +
+                        "JAR 需保留原名，例如 sources_by_pan123.jar（集合包里允许带子目录）。重新导入同名包会更新书源，配置和进度保留。",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     showImportInfo = false
@@ -174,6 +162,9 @@ fun TingshuSourceConfigPanel(
     onDismiss: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // 网页登录的 ActivityResult 必须挂在「两处入口都会走到」的组件上：
+    // 设置 → 听书配置 与 听书首页长按书源 都渲染这个面板，缺了它点击只会写 pendingLogin 而没人启动页面。
+    WebLoginHost(viewModel, source)
     LaunchedEffect(source?.id) {
         val target = source ?: return@LaunchedEffect
         if (!target.id.startsWith("jdr:")) viewModel.configure(target)
@@ -186,26 +177,76 @@ fun TingshuSourceConfigPanel(
 
     val active = state.source
     val items = state.configItems
-    if (source != null && !source.id.startsWith("jdr:") && active != null && active.id == source.id && items != null) {
+    // 选中书源就立刻弹面板：配置项可能还在读（书源调用排在单线程队列里），
+    // 之前要等 items 到位才弹，队列一忙就像「点了没反应」。现在先出面板 + 加载条，
+    // 失败时错误也显示在面板里，不再需要单独的失败弹窗。
+    if (source != null && !source.id.startsWith("jdr:") && active != null && active.id == source.id) {
         SourceConfigDialog(
             active.id,
             active.name,
-            items,
+            items.orEmpty(),
             state.loading,
             onDismiss = {
                 viewModel.dismissConfig()
                 onDismiss()
             },
-            onSave = viewModel::saveConfig,
+            onSave = { values ->
+                // 保存成功才关面板；失败时留着面板显示错误
+                viewModel.saveConfig(values) {
+                    viewModel.dismissConfig()
+                    onDismiss()
+                }
+            },
             onAction = viewModel::configAction,
             revision = state.configRevision,
             error = state.error,
-            loginState = state.loginState,
             message = state.configMessage,
             onRetry = viewModel::retry,
             onWebLogin = { viewModel.startWebLogin(active) },
             canWebLogin = state.webLoginAvailable,
         )
+    }
+}
+
+/**
+ * 承载 JAR 书源的 WebView 登录页。
+ *
+ * [TingshuViewModel.startWebLogin] 只负责把登录信息写进 [TingshuUiState.pendingLogin]，
+ * 真正启动 [SourceLoginActivity] 需要 ActivityResult 启动器；阿里云这类「网页令牌」源还要
+ * 从返回结果里取 token。所以这个宿主必须和配置面板一起组合，否则点「打开网页登录」没有任何反应。
+ */
+@Composable
+private fun WebLoginHost(viewModel: TingshuViewModel, source: ListeningSource?) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(source?.id, state.webLoginAvailable) {
+        val target = source ?: return@LaunchedEffect
+        if (!state.webLoginAvailable) return@LaunchedEffect
+        // 面板一打开就预热：WebView 提供者冷启动 + 登录页首屏都提前做掉
+        viewModel.warmUpWebLogin(target)
+    }
+    // 面板关闭或换源时把预热用的离屏 WebView 归还内存（没关的话 2 分钟后自动释放）
+    DisposableEffect(source?.id) {
+        onDispose { WebLoginWarmUp.release() }
+    }
+    val context = LocalContext.current
+    var loginSourceId by rememberSaveable { mutableStateOf<String?>(null) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val sourceId = loginSourceId
+        loginSourceId = null
+        val token = SourceLoginActivity.tokenFromResult(result.data)
+        if (result.resultCode == Activity.RESULT_OK && sourceId != null && token.isNotBlank()) {
+            viewModel.completeWebLogin(sourceId, token)
+        } else {
+            viewModel.reloadConfigAfterLogin()
+        }
+    }
+    LaunchedEffect(state.pendingLogin) {
+        state.pendingLogin?.let { login ->
+            loginSourceId = login.sourceId
+            viewModel.consumePendingLogin()
+            WebLoginWarmUp.release()
+            launcher.launch(SourceLoginActivity.intent(context, login.sourceName, login.url, login.userAgent))
+        }
     }
 }
 
@@ -220,7 +261,6 @@ private fun SourceConfigDialog(
     onAction: (() -> Unit, Map<String, String>) -> Unit,
     revision: Int,
     error: String?,
-    loginState: Boolean?,
     message: String?,
     onRetry: () -> Unit,
     onWebLogin: () -> Unit,
@@ -243,13 +283,16 @@ private fun SourceConfigDialog(
     fun update(key: String, value: String) {
         values = values + (key to value)
     }
-    SourceSettingsSheet(title = sourceName, busy = busy, onDismiss = onDismiss, onSave = { onSave(values) }) {
+    SourceSettingsSheet(
+        title = sourceName,
+        busy = busy,
+        onDismiss = onDismiss,
+        onSave = { onSave(values) },
+        canSave = items.isNotEmpty(),
+    ) {
         error?.let { SourceErrorNotice(it, onRetry = onRetry.takeUnless { busy }) }
         message?.let { SourceStatusCard("书源提示", it) }
-        if (loginState != null) {
-            SourceStatusCard(if (loginState) "已登录" else "尚未登录")
-        }
-        if (items.isEmpty()) Text("该书源没有配置项", color = FluxTheme.colorScheme.onSurfaceVariant)
+        if (items.isEmpty() && !busy && error == null) Text("该书源没有配置项", color = FluxTheme.colorScheme.onSurfaceVariant)
         if (canWebLogin) {
             OutlinedButton(onClick = onWebLogin, enabled = !busy, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("打开网页登录") }
         }

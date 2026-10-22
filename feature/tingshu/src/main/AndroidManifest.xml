@@ -5,7 +5,11 @@
     <application>
         <activity android:name=".TingshuPlayerActivity" android:exported="false" android:theme="@style/NextPlayer" />
         <!-- 书源 WebView 登录页：加载网盘登录页，让 Cookie 落进系统 CookieManager -->
-        <activity android:name=".SourceLoginActivity" android:exported="false" android:theme="@style/NextPlayer" />
+        <!-- 登录页是浅色 Compose 界面：用浅色主题，避免启动窗口/首帧前出现一块黑 -->
+        <activity
+            android:name=".SourceLoginActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <service
             android:name=".TingshuPlaybackService"
             android:exported="false"

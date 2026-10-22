@@ -47,12 +47,12 @@ class TingshuBrowseTest {
                 assertEquals(root.books, model.state.value.books)
                 assertFalse(model.state.value.canGoBack)
             }
-            // 普通书源仍保留分类与搜索流程。
+            // 普通书源若也只提供一个入口，同样直接展示该入口的内容。
             assertFalse(source.isCloudLibrary)
             instrumentation.runOnMainSync { model.open(source) }
             val regular = withTimeout(10_000) { model.state.first { !it.loading } }
-            assertTrue(regular.menus.isNotEmpty())
-            assertTrue(regular.books.isEmpty())
+            assertTrue(regular.menus.isEmpty())
+            assertEquals(1, regular.books.size)
         } finally {
             instrumentation.runOnMainSync { store.clear() }
         }

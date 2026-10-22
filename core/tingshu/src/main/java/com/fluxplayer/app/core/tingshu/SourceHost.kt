@@ -1,7 +1,6 @@
 package com.fluxplayer.app.core.tingshu
 
 import android.content.Context
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -91,54 +90,16 @@ object SourceHost {
         val login = source as? ILogin ?: return null
         val url = runCatching { login.getLoginUrl() }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
         val desktop = runCatching { login.isLoginDesktop() }.getOrDefault(false)
-        if (source is WebLoginTokenSource && AliyunWebLogin.isLoginUrl(url)) {
-            return LoginInfo(url, if (desktop) DESKTOP_UA else MOBILE_UA, "https://www.alipan.com/", emptyList())
-        }
-        val (domain, markers) = loginMarker(url) ?: return null
-        return LoginInfo(url, if (desktop) DESKTOP_UA else MOBILE_UA, domain, markers)
+        // 只看能不能打开登录页；是否真的登录成功交给书源自己判断，
+        // 宿主不再用 cookie 名去猜（Cookie 存在 ≠ 凭证可用）。
+        if (source is WebLoginTokenSource && !AliyunWebLogin.isLoginUrl(url)) return null
+        return LoginInfo(url, if (desktop) DESKTOP_UA else MOBILE_UA)
     }
 
     data class LoginInfo(
         val url: String,
         val userAgent: String,
-        /** 探测登录态用的 cookie 域，通常与登录页同域 */
-        val cookieDomain: String,
-        /** 判定「已登录」所需的关键 cookie 名，任一命中即视为已登录 */
-        val markerCookies: List<String>,
     )
-
-    /**
-     * 按登录页地址推导登录态判定规则。
-     *
-     * [ILogin] 只声明了登录页地址，没有状态查询方法，而登录态实际就落在系统
-     * CookieManager 里，所以这里按各家已验证的关键 cookie 名做探测：
-     * - 夸克 `pan.quark.cn`：核心 cookie `__puus`（挂在 `.quark.cn` 泛域）
-     * - 移动云盘 `yun.139.com`：`authorization`
-     * - 天翼 `cloud.189.cn`：登录后即有任意 cookie，其凭证是换来的
-     *   accessToken/sessionKey，不靠 cookie 判定
-     *
-     * 书源改用其他网盘时返回 null，UI 侧退化为不显示状态。
-     */
-    fun loginMarker(loginUrl: String): Pair<String, List<String>>? {
-        val host = Uri.parse(loginUrl).host?.lowercase() ?: return null
-        return when {
-            host.endsWith("quark.cn") -> "https://$host" to listOf("__puus")
-            host.endsWith("139.com") -> "https://$host" to listOf("authorization")
-            host.endsWith("189.cn") -> "https://$host" to emptyList()
-            else -> null
-        }
-    }
-
-    /** 依据登录态判定规则探测是否已登录；无规则时返回 null 表示未知。 */
-    fun isLoggedIn(info: LoginInfo): Boolean? {
-        // 直接读 CookieManager 而不走 cookie()，避免每次状态刷新都打一条日志
-        val raw = CookieManager.getInstance().getCookie(info.cookieDomain)
-        if (raw.isNullOrBlank()) return false
-        if (info.markerCookies.isEmpty()) return true
-        val names = raw.split(';')
-            .mapNotNull { part -> part.substringBefore('=').trim().takeIf { it.isNotEmpty() } }
-        return info.markerCookies.any { marker -> names.any { it.equals(marker, ignoreCase = true) } }
-    }
 
     fun toast(message: String) {
         capturedMessages.get()?.let {

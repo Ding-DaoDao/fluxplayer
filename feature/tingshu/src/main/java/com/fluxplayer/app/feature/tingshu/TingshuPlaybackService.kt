@@ -466,7 +466,7 @@ class TingshuPlaybackService : MediaSessionService() {
     private fun notificationMetadata(book: ListeningBook, title: String): MediaMetadata = MediaMetadata.Builder()
         .setTitle(title).setAlbumTitle(book.title).setArtist(book.title)
         .setArtworkData(
-            if (artworkKey == "${book.sourceId}:${book.coverUrl}") artworkBytes else ListeningNotificationArtwork.bytes,
+            if (artworkKey == "${book.sourceId}:${book.coverUrl}") artworkBytes else ListeningNotificationArtwork.bytesFor(book.title),
             MediaMetadata.PICTURE_TYPE_FRONT_COVER,
         ).build()
 
@@ -476,7 +476,7 @@ class TingshuPlaybackService : MediaSessionService() {
         if (artworkKey == key) return
         artworkJob?.cancel()
         artworkKey = key
-        artworkBytes = ListeningNotificationArtwork.bytes
+        artworkBytes = ListeningNotificationArtwork.bytesFor(book.title)
         if (book.coverUrl.isBlank()) return
         artworkJob = scope.launch {
             val bytes = try {
@@ -485,7 +485,7 @@ class TingshuPlaybackService : MediaSessionService() {
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                ListeningNotificationArtwork.bytes
+                ListeningNotificationArtwork.bytesFor(book.title)
             }
             if (artworkKey != key) return@launch
             artworkBytes = bytes

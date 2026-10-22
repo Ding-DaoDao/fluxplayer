@@ -22,6 +22,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,10 +34,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -133,6 +136,9 @@ class SourceLoginActivity : ComponentActivity() {
             },
         )
 
+        // LoginPage 用的是浅色 MaterialTheme，窗口底色也设成白色：
+        // 之前这里继承 android:Theme.Material（深色），首帧之前就是一整块黑。
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -170,6 +176,13 @@ class SourceLoginActivity : ComponentActivity() {
         var loading by remember { mutableStateOf(true) }
         var pageError by remember { mutableStateOf<String?>(null) }
         var desktop by remember { mutableStateOf(userAgent == SourceHost.DESKTOP_UA) }
+        // 首次 new WebView 要初始化系统 WebView 提供者，可能把主线程占住几百毫秒到几秒；
+        // 放在首帧之后，用户先看到标题和「正在打开登录页」，而不是一段黑屏/白屏。
+        var webViewReady by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            webViewReady = true
+        }
 
         Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
             Row(
@@ -208,13 +221,19 @@ class SourceLoginActivity : ComponentActivity() {
                 MediaLoadingRow(modifier = Modifier.fillMaxWidth())
             }
 
-            LoginWebView(
-                url = url,
-                userAgent = userAgent,
-                onWebViewReady = onWebViewReady,
-                onLoadingChange = { loading = it },
-                onError = { pageError = it },
-            )
+            if (webViewReady) {
+                LoginWebView(
+                    url = url,
+                    userAgent = userAgent,
+                    onWebViewReady = onWebViewReady,
+                    onLoadingChange = { loading = it },
+                    onError = { pageError = it },
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("正在打开登录页…", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
         }
     }
 

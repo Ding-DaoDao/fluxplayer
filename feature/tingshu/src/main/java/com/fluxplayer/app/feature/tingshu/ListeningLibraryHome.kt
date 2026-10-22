@@ -47,7 +47,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -76,6 +75,7 @@ import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.core.ui.theme.LocalMediaPreferences
 import com.fluxplayer.app.core.ui.theme.LocalMediaScrollBottomPadding
+import com.fluxplayer.app.feature.player.ListeningDefaultCover
 import com.fluxplayer.app.feature.player.ListeningHistorySessions
 import com.fluxplayer.app.feature.player.LocalAudiobookPlayback
 import com.fluxplayer.app.feature.player.LocalListeningHistory
@@ -552,7 +552,7 @@ private fun NowPlayingBanner(
             ) {
                 CoverBox(
                     coverModel = coverModel,
-                    fallbackIcon = NextIcons.Podcast,
+                    title = title,
                     size = 64.dp,
                     shape = HomeShapeMedium,
                 )
@@ -719,7 +719,7 @@ private fun RecentBookGridCard(
         Box {
             CoverBox(
                 coverModel = coverModel,
-                fallbackIcon = NextIcons.Headset,
+                title = book.title,
                 size = 104.dp,
                 shape = HomeShapeMedium,
                 modifier = Modifier.fillMaxWidth().aspectRatio(1f),
@@ -796,7 +796,7 @@ private fun RecentBookRow(
         ) {
             CoverBox(
                 coverModel = coverModel,
-                fallbackIcon = NextIcons.Headset,
+                title = book.title,
                 size = 80.dp,
                 shape = HomeShapeSmall,
             )
@@ -842,7 +842,7 @@ private fun RecentBookRow(
 @Composable
 private fun CoverBox(
     coverModel: Any?,
-    fallbackIcon: ImageVector,
+    title: String?,
     size: Dp,
     shape: Shape,
     modifier: Modifier = Modifier.size(size),
@@ -862,13 +862,8 @@ private fun CoverBox(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
-        } else {
-            Icon(
-                imageVector = fallbackIcon,
-                contentDescription = null,
-                tint = colors.onSurfaceVariant.copy(alpha = 0.35f),
-                modifier = Modifier.size(size * 0.42f),
-            )
+        } else if (title != null) {
+            ListeningDefaultCover(title, modifier = Modifier.fillMaxSize())
         }
     }
 }

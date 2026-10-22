@@ -31,7 +31,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.fluxplayer.app.core.ui.cache.rememberBookCoverImageLoader
-import com.fluxplayer.app.core.ui.designsystem.NextIcons
 import com.fluxplayer.app.core.ui.theme.FluxTheme
 import com.fluxplayer.app.feature.player.model.AudioBook
 
@@ -77,12 +76,7 @@ fun AudiobookBookCard(
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
-                    Icon(
-                        imageVector = NextIcons.Headset,
-                        contentDescription = null,
-                        modifier = Modifier.size(26.dp),
-                        tint = colors.onSurfaceVariant.copy(alpha = 0.35f),
-                    )
+                    ListeningDefaultCover(book.title, modifier = Modifier.fillMaxSize())
                 }
             }
 

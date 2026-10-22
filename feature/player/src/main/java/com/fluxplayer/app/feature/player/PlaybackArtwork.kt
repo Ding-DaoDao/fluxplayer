@@ -8,15 +8,12 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,9 +33,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.palette.graphics.Palette
 import coil3.Image
@@ -144,25 +138,10 @@ internal fun PlaybackAlbumCover(artwork: Any?, title: String, onColor: (Color) -
                 .background(FluxTheme.colorScheme.surfaceContainer),
             contentAlignment = Alignment.Center,
         ) {
-            Column(
-                Modifier.fillMaxSize().background(
-                    Brush.verticalGradient(listOf(FluxTheme.colorScheme.secondaryContainer, FluxTheme.colorScheme.surfaceContainer)),
-                ).padding(20.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("有声读物", style = FluxTheme.typography.labelSmall, color = FluxTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    title.ifBlank { "正在收听" },
-                    modifier = Modifier.padding(top = 16.dp),
-                    style = FluxTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                    color = FluxTheme.colorScheme.onSurface,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            ListeningDefaultCover(
+                title = title.ifBlank { "正在收听" },
+                modifier = Modifier.fillMaxSize(),
+            )
             if (artwork != null) {
                 AsyncImage(
                     imageLoader = rememberBookCoverImageLoader(),

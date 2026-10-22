@@ -59,6 +59,7 @@ internal class JdrSourceBackend(private val context: Context) {
     private val covers = linkedMapOf<Pair<String, String>, Pair<Long, ListeningResource?>>()
     private val coverRequests = mutableMapOf<Pair<String, String>, Deferred<ListeningResource?>>()
     private val coverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     // 封面是逐本解析的（每本一次目录请求），并发低会让首屏出图很慢
     private val coverPermits = Semaphore(6)
     private val idleCoverEngines = mutableListOf<Pair<String, JsSourceEngine>>()
