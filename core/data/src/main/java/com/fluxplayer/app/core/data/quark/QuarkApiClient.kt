@@ -26,10 +26,12 @@ class QuarkApiClient(
             sessionContext?.let { context ->
                 if (driveType == "uc") {
                     val tv = UcTvService(context)
+                    // TV 授权失效时不能让整条播放挂掉，回落到网页转码/下载
                     if (tv.isAuthorized()) {
-                        val url = tv.playback(fid).first().first
-                        android.net.Uri.parse(url).host?.let { com.fluxplayer.app.core.common.CloudPlayHeaders.register(it) { emptyMap() } }
-                        return url
+                        runCatching { tv.playback(fid).first().first }.getOrNull()?.let { url ->
+                            android.net.Uri.parse(url).host?.let { host -> com.fluxplayer.app.core.common.CloudPlayHeaders.register(host) { emptyMap() } }
+                            return url
+                        }
                     }
                 } else if (context.getSharedPreferences("quark", android.content.Context.MODE_PRIVATE).getBoolean("prefer_original_playback", false)) {
                     getOriginalPlaybackUrl(fid, name).getOrNull()?.let { return it }
@@ -299,7 +301,8 @@ class QuarkApiClient(
         val conversation = "3000008641494773"
         val base = "https://drive-social-api.quark.cn/1/clouddrive/chat/conv"
         val query = "?pr=ucpro&fr=pc&sys=win32&ve=3.19.0"
-        val localId = java.util.UUID.randomUUID().toString()
+        val groupId = java.util.UUID.randomUUID().toString()
+        val localMsgId = java.util.UUID.randomUUID().toString()
         val body = JSONObject().put("return_msg_as_list", 1).put(
             "conversations",
             JSONArray().put(
@@ -308,7 +311,7 @@ class QuarkApiClient(
                         "file_list",
                         JSONArray().put(
                             JSONObject().put("fid", fid).put("content", name)
-                                .put("client_extra", JSONObject().put("group_id", localId).put("device_model", "Administrator").put("local_msg_id", localId)),
+                                .put("client_extra", JSONObject().put("group_id", groupId).put("device_model", "Administrator").put("local_msg_id", localMsgId)),
                         ),
                     ),
             ),
@@ -325,7 +328,9 @@ class QuarkApiClient(
         suspend fun token(target: String): String {
             val json = apiPost("$base/file/acquire_dl_token$query", JSONObject().put("conversation_id", target).put("conversation_type", 3).put("msg_id", messageId))
             check(json.optInt("code", 0) == 0 && json.optInt("status", 200) == 200) { "夸克快传授权失败" }
-            return json.getJSONObject("data").getString("token").also { check(it.isNotBlank() && it != "null" && it.none(Char::isWhitespace)) { "夸克播放授权无效" } }
+            return json.getJSONObject("data").getString("token").also {
+                check(it.isNotBlank() && it.length <= 32768 && it != "null" && it.none(Char::isWhitespace)) { "夸克播放授权无效" }
+            }
         }
         val authorization = try {
             token(targetConversation)
@@ -339,11 +344,26 @@ class QuarkApiClient(
                 .put("fids", JSONArray().put(fid)).put("speedup_session", "").put("token", authorization),
         )
         check(download.optInt("code", 0) == 0 && download.optInt("status", 200) == 200) { "夸克原画取址失败" }
-        val list = download.optJSONArray("data") ?: throw IllegalStateException("夸克未返回播放地址")
-        val item = selectPlaybackFile((0 until list.length()).map { list.getJSONObject(it) }, fid)
-        item.optString("download_url").ifBlank { item.optString("url") }.also { url ->
-            check(url.startsWith("https://") || url.startsWith("http://")) { "夸克返回的播放地址无效" }
+        // data 可能是数组，也可能是包了一层的对象（wenxi 的 _downloadItem 两种都收）
+        val items = when (val data = download.opt("data")) {
+            is JSONArray -> (0 until data.length()).map { data.getJSONObject(it) }
+            is JSONObject -> data.optJSONArray("data")?.let { array -> (0 until array.length()).map { array.getJSONObject(it) } } ?: listOf(data)
+            else -> throw IllegalStateException("夸克未返回播放地址")
         }
+        val item = selectPlaybackFile(items, fid)
+        val url = item.optString("download_url").ifBlank { item.optString("url") }
+        validatePlaybackUrl(url)
+        url
+    }
+
+    /** 与 wenxi 一致：必须是 http/https、有 host、不带 userInfo、不含控制字符。 */
+    private fun validatePlaybackUrl(url: String) {
+        val uri = runCatching { java.net.URI(url) }.getOrNull()
+        check(
+            uri != null && (uri.scheme == "http" || uri.scheme == "https") &&
+                !uri.host.isNullOrBlank() && uri.userInfo == null &&
+                url.none { it.code <= 0x20 || it.code == 0x7f },
+        ) { "夸克快传未返回有效播放地址" }
     }
 
     private fun selectPlaybackFile(items: List<JSONObject>, fid: String): JSONObject {

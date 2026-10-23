@@ -403,5 +403,30 @@ class ProviderParityRegressionTest {
         assertEquals(1, features.listShare(session, session.rootId).size)
     }
 
+    @Test
+    fun quarkOriginalPlaybackFollowsFastTransferChainAndRejectsForeignFid() = runBlocking {
+        val paths = mutableListOf<String>()
+        fun api(downloadFid: String = "f1"): QuarkApiClient {
+            val http = client { request, _ ->
+                val path = request.url.encodedPath
+                paths += path.substringAfterLast("/")
+                when {
+                    path.endsWith("/msg/batch_send") ->
+                        """{"status":200,"code":0,"data":{"send_msg_list":[{"fid":"f1","store_msg_id":"m1","conversation_id":"3000008641494773"}]}}"""
+                    path.endsWith("/file/acquire_dl_token") -> """{"status":200,"code":0,"data":{"token":"tok"}}"""
+                    path.endsWith("/file/download") ->
+                        """{"status":200,"code":0,"data":[{"fid":"$downloadFid","download_url":"https://cdn.example.test/a.mp4"}]}"""
+                    else -> """{"status":200,"code":0,"data":{}}"""
+                }
+            }
+            return QuarkApiClient(http).apply { setCookie("__uid=user;__pus=a;__puus=b") }
+        }
+        // 快传三步：batch_send → acquire_dl_token → file/download
+        assertEquals("https://cdn.example.test/a.mp4", api().getOriginalPlaybackUrl("f1", "a.mp4").getOrThrow())
+        assertEquals(listOf("batch_send", "acquire_dl_token", "download"), paths)
+        // 返回的文件不是所选文件时必须失败，不能把别人的地址交给播放器
+        assertTrue(api(downloadFid = "other").getOriginalPlaybackUrl("f1", "a.mp4").isFailure)
+    }
+
     private fun md5(text: String) = MessageDigest.getInstance("MD5").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 }
