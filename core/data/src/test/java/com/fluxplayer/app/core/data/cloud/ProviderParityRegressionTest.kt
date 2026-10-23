@@ -1,6 +1,7 @@
 package com.fluxplayer.app.core.data.cloud
 
 import com.fluxplayer.app.core.common.CloudPlayHeaders
+import com.fluxplayer.app.core.data.quark.quarkPlaybackAuth
 import com.fluxplayer.app.core.data.cloud189.C189ApiClient
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.pan123.Pan123ApiClient
@@ -303,7 +304,7 @@ class ProviderParityRegressionTest {
             val files = if (page == "1") org.json.JSONArray((1..50).map { JSONObject().put("fid", "$it").put("file_name", "文件$it") }) else org.json.JSONArray().put(JSONObject().put("fid", "last").put("file_name", "最后文件"))
             JSONObject().put("code", 0).put("status", 200).put("data", JSONObject().put("list", files)).toString()
         }
-        val api = QuarkApiClient(http).apply { setDriveType("uc") }
+        val api = QuarkApiClient(http, provider = "uc")
         assertEquals(51, CloudProviderFeatures.from(api, "uc").listPersonalFiles("0").size)
         assertEquals(listOf("1", "2"), pages)
     }
@@ -446,6 +447,41 @@ class ProviderParityRegressionTest {
         assertTrue(CloudPlayHeaders.isExplicitlyAnonymous("cdn.example.test"))
         CloudPlayHeaders.clear()
         assertFalse(CloudPlayHeaders.isExplicitlyAnonymous("cdn.example.test"))
+    }
+
+    @Test
+    fun quarkAndUcPlaybackAuthAreIndependent() {
+        quarkPlaybackAuth("quark").apply {
+            cookie = "quark-cookie"; isActive = true; referer = "https://pan.quark.cn/"
+        }
+        quarkPlaybackAuth("uc").apply {
+            cookie = "uc-cookie"; isActive = true; referer = "https://drive.uc.cn/"
+        }
+        // 两家各持一份，互相看不到对方的 Cookie
+        assertEquals("quark-cookie", quarkPlaybackAuth("quark").getPlayHeaders()["Cookie"])
+        assertEquals("uc-cookie", quarkPlaybackAuth("uc").getPlayHeaders()["Cookie"])
+        assertEquals("https://pan.quark.cn/", quarkPlaybackAuth("quark").referer)
+        assertEquals("https://drive.uc.cn/", quarkPlaybackAuth("uc").referer)
+
+        // 登出 UC 不影响夸克
+        quarkPlaybackAuth("uc").clear()
+        assertTrue(quarkPlaybackAuth("quark").getPlayHeaders().isNotEmpty())
+        assertTrue(quarkPlaybackAuth("uc").getPlayHeaders().isEmpty())
+        quarkPlaybackAuth("quark").clear()
+    }
+
+    @Test
+    fun providerScopedSuffixHeadersDoNotOverwriteEachOther() {
+        CloudPlayHeaders.clear()
+        CloudPlayHeaders.registerSuffixFor("quark", ".quark.cn") { mapOf("Cookie" to "quark-cookie") }
+        CloudPlayHeaders.registerSuffixFor("uc", ".quark.cn") { mapOf("Cookie" to "uc-cookie") }
+
+        // 同一域名，按当前播放来源取对应那一家的头
+        CloudPlayHeaders.activeProvider = "quark"
+        assertEquals("quark-cookie", CloudPlayHeaders.getHeaders("vod.quark.cn")["Cookie"])
+        CloudPlayHeaders.activeProvider = "uc"
+        assertEquals("uc-cookie", CloudPlayHeaders.getHeaders("vod.quark.cn")["Cookie"])
+        CloudPlayHeaders.clear()
     }
 
     private fun md5(text: String) = MessageDigest.getInstance("MD5").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }

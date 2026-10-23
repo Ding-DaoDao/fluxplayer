@@ -62,7 +62,8 @@ class CloudProviderFeatures private constructor(
             result to false
         }, resolvePersonal = { file -> client.getDownloadUrl(file.id).getOrThrow() }, httpClient = client.featureHttpClient)
 
-        fun from(client: QuarkApiClient, type: String) = CloudProviderFeatures(type, { path, body, query, headers ->
+        /** [type] 必须与 client 的来源一致；默认直接取客户端来源，避免两处传参不一致。 */
+        fun from(client: QuarkApiClient, type: String = client.provider) = CloudProviderFeatures(type, { path, body, query, headers ->
             client.featureRequest(path, body, query, headers)
         }, folderLoader = { parent, page ->
             val items = client.listFiles(parent, page).getOrThrow()

@@ -120,6 +120,23 @@ FluxPlayer 已有六家网盘的个人目录浏览、播放、下载、新建文
 
 未改：123 **分享**接口的 `next=-1`（FluxPlayer 用的是配置下发的 `shareFileDetails`，与 wenxi 的 `b/api/share/get` 不是同一个端点，照抄参数有风险）；`.quark.cn` 后缀处理器的全局单槽并发覆盖（既有设计，非本次引入）。
 
+### 夸克 / UC 彻底分离（2026-10-23）
+
+两家协议同源，但**共享可变状态**导致过「授权 UC TV 后夸克播放失败」。现在按来源拆干净，
+代码仍共用一份协议实现（复制两份会各自漂移），但**没有任何共享的可变状态**：
+
+| 状态 | 拆分前 | 拆分后 |
+| --- | --- | --- |
+| 客户端来源 | `QuarkApiClient.driveType` 可变字段 + `setDriveType()` | 构造参数 `provider`，**不可变**；`setDriveType` 只在来源变化时重建实例 |
+| 播放鉴权 | 单例 `object QuarkAuthProvider` | `QuarkPlaybackAuth` 两个实例：`QuarkAuthProvider` / `UcAuthProvider`，按 `quarkPlaybackAuth(provider)` 取 |
+| 播放域名头 | `.quark.cn` 单个全局槽 | 注册带来源（`registerFor` / `registerSuffixFor`），查找优先当前来源 → 公共规则 → 其它来源兜底 |
+| 匿名域名 | 无来源，永久生效 | `registerAnonymous(host, provider)`，只在来源匹配时生效 |
+| 浏览页/下载的头 | 请求时回读全局 | 本次账号的头快照 / 客户端自己的头 |
+| 登出 | 清全局（会把另一家也清掉） | 只清本来源 |
+
+回归用例：`quarkAndUcPlaybackAuthAreIndependent`、`providerScopedSuffixHeadersDoNotOverwriteEachOther`、
+`ucTvAnonymousHostDoesNotBlockQuarkPlaybackOnSameHost`。
+
 ### 已知架构差异（不算缺陷）
 
 - 「转存并播放」把文件留在用户选择的目录，不做临时目录与自动清理（与 wenxi 不同，是刻意取舍，见上文边界说明）。

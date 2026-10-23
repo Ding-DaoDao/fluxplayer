@@ -1,5 +1,6 @@
 package com.fluxplayer.app.core.data.quark
 
+import com.fluxplayer.app.core.common.CloudPlayHeaders
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import com.fluxplayer.app.core.data.GlobalCookieJar
@@ -13,7 +14,14 @@ import org.json.JSONObject
 
 class QuarkApiClient(
     client: OkHttpClient = CloudHttpClient.DEFAULT,
+    /** 固定来源（"quark" / "uc"）。创建后不可变，避免同一实例被切来切去导致状态串号。 */
+    val provider: String = "quark",
 ) : BaseCloudApiClient(client) {
+    private val isUc: Boolean get() = provider == "uc"
+
+    /** 本来源独立的播放鉴权状态，不再与另一家共用。 */
+    private val auth: QuarkPlaybackAuth get() = quarkPlaybackAuth(provider)
+
     private var sessionContext: android.content.Context? = null
 
     fun configureSession(context: android.content.Context) {
@@ -21,18 +29,18 @@ class QuarkApiClient(
     }
 
     /**
-     * 把「本次播放的账号」写进夸克/UC 共用的全局鉴权。
-     * 特性层（搜索、分享转存）播报时也要走这一步，否则全局还停在上一次另一家的账号上。
+     * 把本次播放的账号写进**本来源**的鉴权状态。
+     * 特性层（搜索、分享转存）播放时也要走这一步，避免沿用上一次另一家的凭据。
      */
     private fun syncPlaybackAuth() {
         val headers = featureHeaders()
-        com.fluxplayer.app.core.common.CloudPlayHeaders.activeProvider = driveType
-        com.fluxplayer.app.core.data.quark.QuarkAuthProvider.isActive = true
-        com.fluxplayer.app.core.data.quark.QuarkAuthProvider.cookie = getCookie()
-        headers["User-Agent"]?.let { com.fluxplayer.app.core.data.quark.QuarkAuthProvider.userAgent = it }
-        com.fluxplayer.app.core.data.quark.QuarkAuthProvider.referer = headers["referer"] ?: homeUrl
-        com.fluxplayer.app.core.common.CloudPlayHeaders.registerSuffix(".quark.cn") { featureHeaders() }
-        if (driveType == "uc") com.fluxplayer.app.core.common.CloudPlayHeaders.registerSuffix(".uc.cn") { featureHeaders() }
+        CloudPlayHeaders.activeProvider = provider
+        auth.isActive = true
+        auth.cookie = getCookie()
+        headers["User-Agent"]?.let { auth.userAgent = it }
+        auth.referer = headers["referer"] ?: homeUrl
+        CloudPlayHeaders.registerSuffixFor(provider, ".quark.cn") { featureHeaders() }
+        if (isUc) CloudPlayHeaders.registerSuffixFor(provider, ".uc.cn") { featureHeaders() }
     }
 
     suspend fun resolvePlaybackUrl(fid: String, name: String): String {
@@ -41,7 +49,7 @@ class QuarkApiClient(
         syncPlaybackAuth()
         if (video) {
             sessionContext?.let { context ->
-                if (driveType == "uc") {
+                if (isUc) {
                     val tv = UcTvService(context)
                     // TV 授权失效时不能让整条播放挂掉，回落到网页转码/下载
                     if (tv.isAuthorized()) {
@@ -68,44 +76,36 @@ class QuarkApiClient(
     }
 
     private val cookieManager = QuarkCookieManager()
-    private var driveType: String = "quark"
     var onCookieUpdated: ((String) -> Unit)? = null
 
-    private val baseUrl: String get() = if (driveType == "uc") "https://pc-api.uc.cn" else "https://drive-pc.quark.cn"
-    private val homeUrl: String get() = if (driveType == "uc") "https://drive.uc.cn/" else "https://pan.quark.cn/"
-    private val pr: String get() = if (driveType == "uc") "UCBrowser" else "ucpro"
-
-    fun setDriveType(type: String) {
-        if (driveType != type) {
-            cookieManager.clear()
-            onCookieUpdated = null
-        }
-        driveType = type
-    }
+    private val baseUrl: String get() = if (isUc) "https://pc-api.uc.cn" else "https://drive-pc.quark.cn"
+    private val homeUrl: String get() = if (isUc) "https://drive.uc.cn/" else "https://pan.quark.cn/"
+    private val pr: String get() = if (isUc) "UCBrowser" else "ucpro"
 
     fun setCookie(cookie: String) {
         cookieManager.add(cookie)
         val merged = cookieManager.get()
-        QuarkAuthProvider.cookie = merged
-        QuarkAuthProvider.referer = homeUrl
-        QuarkAuthProvider.isActive = cookie.isNotBlank()
-        if (driveType == "uc") GlobalCookieJar.setUcCookie(cookie) else GlobalCookieJar.setQuarkCookie(cookie)
+        // 只写本来源的鉴权状态，另一家不受影响
+        auth.cookie = merged
+        auth.referer = homeUrl
+        auth.isActive = cookie.isNotBlank()
+        if (isUc) GlobalCookieJar.setUcCookie(cookie) else GlobalCookieJar.setQuarkCookie(cookie)
     }
 
     fun getCookie(): String = cookieManager.get()
 
-    val pageSize: Int get() = if (driveType == "uc") 50 else 100
+    val pageSize: Int get() = if (isUc) 50 else 100
 
     internal suspend fun featureRequest(path: String, body: JSONObject?, query: Map<String, String> = emptyMap(), headers: Map<String, String> = emptyMap()): JSONObject {
         val url = ("$baseUrl/1/clouddrive/$path").toHttpUrl().newBuilder()
             .addQueryParameter("pr", pr).addQueryParameter("fr", "pc").apply {
                 query.forEach { (key, value) -> addQueryParameter(key, value) }
                 // 夸克侧这些路径要带 uc_param_str（wenxi 的 url() 同款分流）
-                if (driveType == "quark" && path.removeSuffix("/") in setOf("file/delete", "file/rename", "file/move", "share", "share/password")) {
+                if (!isUc && path.removeSuffix("/") in setOf("file/delete", "file/rename", "file/move", "share", "share/password")) {
                     addQueryParameter("uc_param_str", "")
                 }
             }.build().toString()
-        val requestHeaders = (if (driveType == "uc" && path.startsWith("transfer_share/")) mapOf("referer" to "https://fast.uc.cn/", "Origin" to "https://fast.uc.cn") else emptyMap()) + headers
+        val requestHeaders = (if (isUc && path.startsWith("transfer_share/")) mapOf("referer" to "https://fast.uc.cn/", "Origin" to "https://fast.uc.cn") else emptyMap()) + headers
         val json = if (body == null) apiGet(url, extraHeaders = requestHeaders) else apiPost(url, body, extraHeaders = requestHeaders)
         check(json.optInt("code", 0) == 0 && json.optInt("status", 200) == 200) {
             json.optString("message", "网盘请求失败")
@@ -117,21 +117,21 @@ class QuarkApiClient(
         return c.contains("__uid=") && c.contains("__pus=")
     }
 
-    /** 清除内存中的 Cookie 及 driveType，防止退出后残留旧账号数据 */
+    /** 清除内存中的 Cookie，防止退出后残留旧账号数据（来源本身不可变，无需重置） */
     fun clearCookie() {
-        if (driveType == "uc") GlobalCookieJar.setUcCookie("") else GlobalCookieJar.setQuarkCookie("")
+        if (isUc) GlobalCookieJar.setUcCookie("") else GlobalCookieJar.setQuarkCookie("")
         cookieManager.clear()
-        driveType = "quark"
+        auth.clear()
         onCookieUpdated = null
     }
 
-    /** 本账号的请求头快照。跨模块（浏览页/下载）也需要，避免误用全局 QuarkAuthProvider。 */
+    /** 本账号（本来源）的请求头快照。跨模块（浏览页/下载）用它，避免误用另一家的全局值。 */
     fun featureHeaders(): Map<String, String> = buildHeaders()
 
     private fun buildHeaders(): Map<String, String> {
         return mapOf(
             "cookie" to getCookie(),
-            "User-Agent" to if (driveType == "uc") "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) uc-cloud-drive/1.6.1 Chrome/100.0.4896.160 Electron/18.3.5.16-b62cf9c50d Safari/537.36" else QUARK_UA,
+            "User-Agent" to if (isUc) UC_PLAY_UA else QUARK_UA,
             "referer" to homeUrl,
             "Origin" to homeUrl.removeSuffix("/"),
         )
@@ -156,9 +156,9 @@ class QuarkApiClient(
         if (accepted.isEmpty()) return
         accepted.forEach { cookieManager.add(it) }
         val merged = cookieManager.get()
-        QuarkAuthProvider.cookie = merged
+        auth.cookie = merged
         onCookieUpdated?.invoke(merged)
-        if (driveType == "uc") GlobalCookieJar.setUcCookie(merged) else GlobalCookieJar.setQuarkCookie(merged)
+        if (isUc) GlobalCookieJar.setUcCookie(merged) else GlobalCookieJar.setQuarkCookie(merged)
     }
 
     private suspend fun apiGet(url: String, retry: Boolean = true, extraHeaders: Map<String, String> = emptyMap()): JSONObject {
@@ -201,7 +201,6 @@ class QuarkApiClient(
     private val cookieRefreshLock = kotlinx.coroutines.sync.Mutex()
 
     private suspend fun refreshCookie(): Boolean = cookieRefreshLock.withLock {
-        val expectedType = driveType
         val expected = getCookie()
         if (!expected.contains("__pus=")) return@withLock false
         val reduced = expected.split(';').filterNot { it.trim().startsWith("__puus=") }.joinToString(";")
@@ -209,7 +208,7 @@ class QuarkApiClient(
         (buildHeaders() + ("cookie" to reduced)).forEach { (key, value) -> request.header(key, value) }
         val response = executeRequestAndGetResponse(request.build())
         response.use {
-            check(driveType == expectedType && getCookie() == expected) { "网盘账号已变化，请重新操作" }
+            check(getCookie() == expected) { "网盘账号已变化，请重新操作" }
             if (!it.isSuccessful || it.headers("set-cookie").isEmpty()) return@withLock false
             updateCookieFromResponse(it)
             true
@@ -230,7 +229,7 @@ class QuarkApiClient(
             append("&_size=$pageSize")
             append("&_fetch_total=1")
             append("&_fetch_sub_dirs=0")
-            if (driveType == "quark") {
+            if (!isUc) {
                 // 夸克侧需要这组参数才能看到全部文件（含风险文件名），UC 不需要
                 append("&uc_param_str=")
                 append("&fetch_all_file=1")
@@ -303,12 +302,12 @@ class QuarkApiClient(
     }
 
     suspend fun getDownloadUrl(fid: String): Result<String> = runCatching {
-        if (driveType == "uc") sessionContext?.let { context ->
+        if (isUc) sessionContext?.let { context ->
             val tv = UcTvService(context)
             if (tv.isAuthorized()) return@runCatching tv.download(fid, 0)
         }
         val body = JSONObject().put("fids", JSONArray().put(fid))
-        val json = apiPost("$baseUrl/1/clouddrive/file/download?pr=$pr&fr=pc&sys=win32&ve=${if (driveType == "uc") "1.6.1" else "3.23.2"}", body)
+        val json = apiPost("$baseUrl/1/clouddrive/file/download?pr=$pr&fr=pc&sys=win32&ve=${if (isUc) "1.6.1" else "3.23.2"}", body)
         check(json.optInt("code", 0) == 0 && json.optInt("status", 200) == 200) { json.optString("message", "下载接口错误") }
         val data = json.optJSONArray("data") ?: error("网盘未返回下载信息")
         val items = (0 until data.length()).map { data.getJSONObject(it) }
@@ -318,7 +317,7 @@ class QuarkApiClient(
 
     /** 使用当前账号的发送到电脑会话获取原画播放地址。 */
     suspend fun getOriginalPlaybackUrl(fid: String, name: String = "视频"): Result<String> = runCatching {
-        check(driveType == "quark") { "此播放方式仅适用于夸克" }
+        check(!isUc) { "此播放方式仅适用于夸克" }
         val conversation = "3000008641494773"
         val base = "https://drive-social-api.quark.cn/1/clouddrive/chat/conv"
         val query = "?pr=ucpro&fr=pc&sys=win32&ve=3.19.0"
@@ -442,7 +441,7 @@ class QuarkApiClient(
 
     /** 夸克的写操作要带 uc_param_str，UC 不需要（与 wenxi 的 url() 分流一致） */
     private val mutationQuery: String
-        get() = if (driveType == "quark") "&uc_param_str=" else ""
+        get() = if (!isUc) "&uc_param_str=" else ""
 
     private suspend fun finishMutation(json: JSONObject): Boolean {
         check(json.optInt("code", 0) == 0 && json.optInt("status", 200) == 200) { json.optString("message", "网盘操作失败") }

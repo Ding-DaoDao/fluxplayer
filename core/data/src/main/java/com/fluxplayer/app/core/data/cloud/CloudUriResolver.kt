@@ -17,7 +17,7 @@ import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.pan123.Pan123ApiClient
 import com.fluxplayer.app.core.data.pan123.Pan123AuthProvider
 import com.fluxplayer.app.core.data.quark.QuarkApiClient
-import com.fluxplayer.app.core.data.quark.QuarkAuthProvider
+import com.fluxplayer.app.core.data.quark.quarkPlaybackAuth
 import com.fluxplayer.app.core.data.security.getSecret
 import com.fluxplayer.app.core.data.security.putSecret
 import com.fluxplayer.app.core.data.yun139.Yun139ApiClient
@@ -49,16 +49,18 @@ class CloudUriResolver @Inject constructor(
     }
 
     /**
-     * 夸克和 UC 共用 [QuarkAuthProvider]，CDN 兜底分支只认这一个全局值。
-     * 开始播放前把它同步成本次播放的账号，避免两家都登录时互相串号。
+     * 夸克和 UC 各有一份播放鉴权（[QuarkAuthProvider] / [UcAuthProvider]），
+     * 开始播放前只写本次播放那一家，另一家不受影响。
      */
     private fun useQuarkAuthProviderFor(client: QuarkApiClient, cookie: String, provider: String) {
         val headers = client.featureHeaders()
-        QuarkAuthProvider.isActive = true
-        QuarkAuthProvider.cookie = cookie
-        headers["User-Agent"]?.let { QuarkAuthProvider.userAgent = it }
-        QuarkAuthProvider.referer = headers["referer"]
-            ?: if (provider == "uc") "https://drive.uc.cn/" else "https://pan.quark.cn/"
+        // 夸克与 UC 各自一份鉴权状态，这里只写本次播放那一家
+        val auth = quarkPlaybackAuth(provider)
+        auth.isActive = true
+        auth.cookie = cookie
+        headers["User-Agent"]?.let { auth.userAgent = it }
+        auth.referer = headers["referer"]
+            ?: if (provider == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
     }
 
     suspend fun resolve(uri: Uri): Uri? {
@@ -85,7 +87,7 @@ class CloudUriResolver @Inject constructor(
                 features.resolvePersonalFile(fileId, uri.getQueryParameter("extra_parent").orEmpty())
             }
             val host = Uri.parse(url).host.orEmpty()
-            if (!CloudPlayHeaders.isExplicitlyAnonymous(host)) CloudPlayHeaders.register(host, features.fileHeaders())
+            if (!CloudPlayHeaders.isExplicitlyAnonymous(host)) CloudPlayHeaders.registerFor(provider, host, features.fileHeaders())
             return Uri.parse(url)
         }
 
@@ -144,9 +146,8 @@ class CloudUriResolver @Inject constructor(
                 val cookie = prefs.getSecret(provider, "cookie").orEmpty()
                 if (cookie.isBlank()) return null
                 CloudProviderFeatures.from(
-                    QuarkApiClient().apply {
+                    QuarkApiClient(provider = provider).apply {
                         configureSession(context)
-                        setDriveType(provider)
                         setCookie(cookie)
                         onCookieUpdated = { merged -> prefs.edit().putSecret(provider, "cookie", merged).apply() }
                     },
@@ -381,18 +382,16 @@ class CloudUriResolver @Inject constructor(
             return null
         }
 
-        val client = QuarkApiClient()
-        client.setDriveType("quark")
+        val client = QuarkApiClient(provider = "quark")
         client.setCookie(cookie)
         // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
         client.onCookieUpdated = { merged -> prefs.edit().putSecret("quark", "cookie", merged).apply() }
         selectPlaybackProvider("quark")
-        // 夸克和 UC 共用 QuarkAuthProvider，这里同步成本次播放的账号，
-        // 避免两家都登录时 CDN 兜底分支拿到另一家的 Cookie。
+        // 只同步本次播放那一家（夸克/UC 已各有独立鉴权），另一家的状态保持不动。
         useQuarkAuthProviderFor(client, cookie, "quark")
 
-        // 注册夸克播放头（后缀匹配覆盖所有 *.quark.cn 子域名）
-        CloudPlayHeaders.registerSuffix(".quark.cn") { client.featureHeaders() }
+        // 注册夸克播放头（后缀匹配覆盖所有 *.quark.cn 子域名，带来源隔离）
+        CloudPlayHeaders.registerSuffixFor("quark", ".quark.cn") { client.featureHeaders() }
 
         if (prefs.getBoolean("prefer_original_playback", false)) {
             val original = client.getOriginalPlaybackUrl(fileId).getOrNull()
@@ -435,8 +434,7 @@ class CloudUriResolver @Inject constructor(
             return qualities.first().first
         }
 
-        val client = QuarkApiClient()
-        client.setDriveType("uc")
+        val client = QuarkApiClient(provider = "uc")
         client.setCookie(cookie)
         // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
         client.onCookieUpdated = { merged -> prefs.edit().putSecret("uc", "cookie", merged).apply() }
@@ -444,9 +442,9 @@ class CloudUriResolver @Inject constructor(
         useQuarkAuthProviderFor(client, cookie, "uc")
 
         // 注册 UC 播放头（后缀匹配覆盖 *.quark.cn 和 *.uc.cn 子域名）。
-        // 取本次播放账号、而不是全局 QuarkAuthProvider，避免和夸克串号。
-        CloudPlayHeaders.registerSuffix(".quark.cn") { client.featureHeaders() }
-        CloudPlayHeaders.registerSuffix(".uc.cn") { client.featureHeaders() }
+        // 取本次播放账号自己的头快照，不与夸克共用。
+        CloudPlayHeaders.registerSuffixFor("uc", ".quark.cn") { client.featureHeaders() }
+        CloudPlayHeaders.registerSuffixFor("uc", ".uc.cn") { client.featureHeaders() }
 
         val playResult = client.getVideoPlayInfo(fileId).getOrNull()
         if (playResult != null && playResult.urls.isNotEmpty()) {

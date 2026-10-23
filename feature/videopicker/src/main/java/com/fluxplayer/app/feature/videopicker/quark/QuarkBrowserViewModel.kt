@@ -14,7 +14,7 @@ import com.fluxplayer.app.core.common.PickerUtils
 import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.cloud.CloudUriResolver
 import com.fluxplayer.app.core.data.quark.QuarkApiClient
-import com.fluxplayer.app.core.data.quark.QuarkAuthProvider
+import com.fluxplayer.app.core.data.quark.quarkPlaybackAuth
 import com.fluxplayer.app.core.data.quark.QuarkFileItem
 import com.fluxplayer.app.core.data.repository.CloudDownloadRepository
 import com.fluxplayer.app.core.data.repository.PlaybackHistoryRepository
@@ -65,7 +65,17 @@ class QuarkBrowserViewModel @Inject constructor(
 
     // region ==================== API Client ====================
 
-    val apiClient = QuarkApiClient().apply { configureSession(application) }
+    /**
+     * 夸克与 UC 现在是两个独立实例（各自固定来源），不再用 setDriveType 在同一个实例上切换。
+     * 本 VM 每侧一个实例（BrowseTabs 用不同 key），setDriveType 只在来源变化时重建客户端。
+     */
+    var apiClient = QuarkApiClient(provider = "quark").apply { configureSession(application) }
+        private set
+
+    private fun ensureClient(provider: String) {
+        if (apiClient.provider == provider) return
+        apiClient = QuarkApiClient(provider = provider).apply { configureSession(getApplication()) }
+    }
     private val itemCache = mutableMapOf<String, QuarkFileItem>()
 
     // endregion
@@ -141,21 +151,20 @@ class QuarkBrowserViewModel @Inject constructor(
         val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().putSecret(prefName, "cookie", cookie).apply()
 
-        apiClient.setDriveType(driveType)
+        ensureClient(driveType)
         apiClient.setCookie(cookie)
         setupCookiePersistence(prefName)
 
-        // 注册缩略图 headers（浏览时 Coil 需要）
-        QuarkAuthProvider.cookie = cookie
-        QuarkAuthProvider.referer = if (driveType == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
-        QuarkAuthProvider.isActive = true
-        // 用本次账号的头快照注册，而不是在请求时回读全局：夸克/UC 共用 QuarkAuthProvider，
-        // 回读会让「打开另一家的浏览页」把正在播放那家的头改掉。
+        // 注册缩略图 headers（浏览时 Coil 需要）。只写本来源的鉴权状态，
+        // 并用本次账号的头快照注册，不会影响另一家正在播放的请求。
+        val auth = quarkPlaybackAuth(driveType)
+        auth.cookie = cookie
+        auth.referer = if (driveType == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
+        auth.isActive = true
         val headersSnapshot = apiClient.featureHeaders()
+        CloudPlayHeaders.registerSuffixFor(driveType, ".quark.cn", headersSnapshot)
         if (driveType == "uc") {
-            CloudPlayHeaders.registerSuffix(".uc.cn", headersSnapshot)
-        } else {
-            CloudPlayHeaders.registerSuffix(".quark.cn", headersSnapshot)
+            CloudPlayHeaders.registerSuffixFor("uc", ".uc.cn", headersSnapshot)
         }
 
         updateUiState { it.copy(isLoggedIn = true, driveType = driveType) }
@@ -172,7 +181,7 @@ class QuarkBrowserViewModel @Inject constructor(
         if (_uiState.value.driveType == type && _uiState.value.isLoggedIn) return
         val isSwitching = _uiState.value.driveType != type
         Log.d(TAG, "setDriveType: type=$type, isSwitching=$isSwitching")
-        apiClient.setDriveType(type)
+        ensureClient(type)
         val prefName = if (type == "uc") UC_PREF_NAME else PREF_NAME
         val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
         val cookie = prefs.getSecret(prefName, "cookie").orEmpty()
@@ -184,16 +193,15 @@ class QuarkBrowserViewModel @Inject constructor(
         if (cookie.isNotBlank()) {
             apiClient.setCookie(cookie)
             setupCookiePersistence(prefName)
-            // 注册缩略图 headers
-            QuarkAuthProvider.cookie = cookie
-            QuarkAuthProvider.referer = if (type == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
-            QuarkAuthProvider.isActive = true
-            // 同样用本次账号的头快照，避免切换账号/切到另一家时改掉正在播放那家的头
+            // 注册缩略图 headers：只写本来源状态，用本次账号的头快照
+            val auth = quarkPlaybackAuth(type)
+            auth.cookie = cookie
+            auth.referer = if (type == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
+            auth.isActive = true
             val headersSnapshot = apiClient.featureHeaders()
+            CloudPlayHeaders.registerSuffixFor(type, ".quark.cn", headersSnapshot)
             if (type == "uc") {
-                CloudPlayHeaders.registerSuffix(".uc.cn", headersSnapshot)
-            } else {
-                CloudPlayHeaders.registerSuffix(".quark.cn", headersSnapshot)
+                CloudPlayHeaders.registerSuffixFor("uc", ".uc.cn", headersSnapshot)
             }
             updateUiState { it.copy(isLoggedIn = true, driveType = type, items = if (isSwitching) emptyList() else it.items, error = null, isLoading = true) }
             syncStackTop { it.copy(isLoading = true, error = null) }
@@ -225,10 +233,8 @@ class QuarkBrowserViewModel @Inject constructor(
         val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         apiClient.clearCookie()
-        apiClient.setDriveType(driveType)
-        // QuarkAuthProvider 是夸克/UC 共用的播放鉴权全局值，登出必须清掉，
-        // 否则旧 Cookie 会继续带给 CDN；另一家仍在登录时会在下次播放时重新写入。
-        com.fluxplayer.app.core.data.quark.QuarkAuthProvider.clear()
+        // 只清本来源的播放鉴权，另一家仍在登录时不受影响
+        quarkPlaybackAuth(driveType).clear()
         directoryCache.clear()
         CloudDirectoryCache.clear(getApplication(), driveType)
 
@@ -598,7 +604,7 @@ class QuarkBrowserViewModel @Inject constructor(
 
     suspend fun resolveImageUrl(item: WebDavResource): Pair<String, Map<String, String>>? {
         val url = apiClient.getDownloadUrl(item.path).getOrNull() ?: return null
-        return url to QuarkAuthProvider.getPlayHeaders()
+        return url to apiClient.featureHeaders()
     }
 
     // endregion

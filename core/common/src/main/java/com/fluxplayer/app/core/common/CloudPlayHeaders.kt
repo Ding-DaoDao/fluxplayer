@@ -3,69 +3,95 @@ package com.fluxplayer.app.core.common
 import android.net.Uri
 
 /**
- * 全局云端播放请求头注册表
- * 支持两种注册方式：
- * - register(domain)  → 精确域名匹配，如 "vod.quark.cn"
+ * 全局云端播放请求头注册表。
+ *
+ * 支持两种匹配：
+ * - register(domain)       → 精确域名，如 "vod.quark.cn"
  * - registerSuffix(suffix) → 后缀匹配，如 ".quark.cn" 匹配所有 *.quark.cn 子域名
  *
- * 查找优先级：精确匹配 > 最长后缀匹配
+ * 查找优先级：精确匹配 > 最长后缀匹配。
+ *
+ * **按来源隔离**：夸克与 UC 共用同一段 CDN 域名，因此注册时可以带上来源
+ * （[registerFor] / [registerSuffixFor]）。查找时优先取「来源 == [activeProvider]」的规则，
+ * 其次取不带来源的公共规则，最后才回退到其它来源——这样一家注册的域名不会把另一家的头顶掉。
  */
 object CloudPlayHeaders {
     @Volatile var activeProvider: String = ""
 
-    fun isExplicitlyAnonymous(domain: String): Boolean = anonymousHosts[domain] == activeProvider
+    /** 不带来源的公共规则（其它四家网盘用这个，域名互不重叠）。 */
+    private const val GLOBAL = ""
+
+    private val exactMatchers = mutableMapOf<Pair<String, String>, () -> Map<String, String>>()
+    private val suffixMatchers = mutableMapOf<Pair<String, String>, () -> Map<String, String>>()
 
     /**
      * 明确「不需要任何认证头」的域名 → 注册它的来源。
-     * 必须带来源作用域：夸克与 UC 共用阿里 CDN 域名，UC TV 的预签名地址
-     * 如果无条件把域名标成匿名，会把夸克同一域名上的播放头一起屏蔽掉。
+     * 只有当前播放来源与注册来源一致时才算匿名。
      */
     private val anonymousHosts = mutableMapOf<String, String>()
+
+    fun register(domain: String, headerProvider: () -> Map<String, String>) =
+        registerFor(GLOBAL, domain, headerProvider)
+
+    fun register(domain: String, headers: Map<String, String>) {
+        if (headers.isNotEmpty()) registerFor(GLOBAL, domain) { headers }
+    }
+
+    fun registerFor(provider: String, domain: String, headerProvider: () -> Map<String, String>) {
+        exactMatchers[provider to domain] = headerProvider
+    }
+
+    fun registerFor(provider: String, domain: String, headers: Map<String, String>) {
+        if (headers.isNotEmpty()) registerFor(provider, domain) { headers }
+    }
+
+    /**
+     * 注册域名后缀匹配规则，suffix 应以 "." 开头，如 ".quark.cn"。
+     * HLS .ts 分片可能落在 CDN 边缘子域名上，后缀匹配可保证全子域名覆盖。
+     */
+    fun registerSuffix(suffix: String, headerProvider: () -> Map<String, String>) =
+        registerSuffixFor(GLOBAL, suffix, headerProvider)
+
+    fun registerSuffix(suffix: String, headers: Map<String, String>) {
+        if (headers.isNotEmpty()) registerSuffixFor(GLOBAL, suffix) { headers }
+    }
+
+    fun registerSuffixFor(provider: String, suffix: String, headerProvider: () -> Map<String, String>) {
+        suffixMatchers[provider to normalizeSuffix(suffix)] = headerProvider
+    }
+
+    fun registerSuffixFor(provider: String, suffix: String, headers: Map<String, String>) {
+        if (headers.isNotEmpty()) registerSuffixFor(provider, suffix) { headers }
+    }
 
     fun registerAnonymous(domain: String, provider: String) {
         anonymousHosts[domain] = provider
     }
 
-    private val exactMatchers = mutableMapOf<String, () -> Map<String, String>>()
-    private val suffixMatchers = mutableMapOf<String, () -> Map<String, String>>()
-
-    fun register(domain: String, headerProvider: () -> Map<String, String>) {
-        exactMatchers[domain] = headerProvider
-    }
-
-    fun register(domain: String, headers: Map<String, String>) {
-        if (headers.isNotEmpty()) {
-            exactMatchers[domain] = { headers }
-        }
-    }
-
-    /**
-     * 注册域名后缀匹配规则，suffix 应以 "." 开头，如 ".quark.cn"
-     * HLS .ts 分片可能落在 CDN 边缘子域名上，后缀匹配可保证全子域名覆盖
-     */
-    fun registerSuffix(suffix: String, headerProvider: () -> Map<String, String>) {
-        val normalized = if (suffix.startsWith(".")) suffix else ".$suffix"
-        suffixMatchers[normalized] = headerProvider
-    }
-
-    fun registerSuffix(suffix: String, headers: Map<String, String>) {
-        if (headers.isNotEmpty()) {
-            val normalized = if (suffix.startsWith(".")) suffix else ".$suffix"
-            suffixMatchers[normalized] = { headers }
-        }
-    }
+    /** 只有当前播放来源与注册来源一致时才算明确匿名。 */
+    fun isExplicitlyAnonymous(domain: String): Boolean = anonymousHosts[domain] == activeProvider
 
     fun getHeaders(domain: String): Map<String, String> {
-        // 1. 精确匹配优先
-        exactMatchers[domain]?.invoke()?.let { return it }
+        exactMatchers.entries
+            .filter { it.key.second == domain }
+            .minByOrNull { priority(it.key.first) }
+            ?.let { return it.value.invoke() }
 
-        // 2. 后缀匹配（最长后缀优先，确保 .a.b.com 优先于 .b.com）
         return suffixMatchers.entries
-            .filter { domain.endsWith(it.key) }
-            .maxByOrNull { it.key.length }
+            .filter { domain.endsWith(it.key.second) }
+            .minWithOrNull(compareBy({ priority(it.key.first) }, { -it.key.second.length }))
             ?.value?.invoke()
             ?: emptyMap()
     }
+
+    /** 0 = 当前来源，1 = 公共规则，2 = 其它来源（兜底）。 */
+    private fun priority(provider: String): Int = when (provider) {
+        activeProvider -> 0
+        GLOBAL -> 1
+        else -> 2
+    }
+
+    private fun normalizeSuffix(suffix: String) = if (suffix.startsWith(".")) suffix else ".$suffix"
 
     /**
      * 判断 URL 是否为预签名（自认证）链接。

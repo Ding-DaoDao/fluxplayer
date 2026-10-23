@@ -12,7 +12,7 @@ import com.fluxplayer.app.core.data.openlist.OpenListTokenProvider
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.pan123.Pan123AuthProvider
-import com.fluxplayer.app.core.data.quark.QuarkAuthProvider
+import com.fluxplayer.app.core.data.quark.quarkPlaybackAuth
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -41,7 +41,7 @@ class AuthAwareDataSourceFactory(
         .setAllowCrossProtocolRedirects(true)
 
     override fun createDataSource(): DataSource {
-        httpFactory.setUserAgent(if (CloudPlayHeaders.activeProvider in setOf("quark", "uc")) QuarkAuthProvider.userAgent else userAgent)
+        httpFactory.setUserAgent(if (CloudPlayHeaders.activeProvider in setOf("quark", "uc")) quarkPlaybackAuth(CloudPlayHeaders.activeProvider).userAgent else userAgent)
         return AuthAwareDataSource(
             httpDelegate = httpFactory.createDataSource(),
             fileDelegate = FileDataSource(),
@@ -182,12 +182,18 @@ private class AuthAwareDataSource(
         Log.d(TAG, "applyHttpAuth: host=$host, fragment=$fragment")
         Log.d(TAG, "applyHttpAuth: url=${url}...")
 
-        // 夸克/UC 播放认证：通过 URI fragment 检测
-        if (("quarkPlay" in fragment || "ucPlay" in fragment) && QuarkAuthProvider.isActive) {
-            Log.d(TAG, "applyHttpAuth: Applying Quark/UC auth")
-            http.setRequestProperty("Cookie", QuarkAuthProvider.cookie)
-            http.setRequestProperty("Referer", QuarkAuthProvider.referer)
-            http.setRequestProperty("User-Agent", QuarkAuthProvider.userAgent)
+        // 夸克/UC 播放认证：通过 URI fragment 检测。两家各自一份鉴权，按 fragment 取对应那家。
+        val quarkLikeProvider = when {
+            "ucPlay" in fragment -> "uc"
+            "quarkPlay" in fragment -> "quark"
+            else -> null
+        }
+        if (quarkLikeProvider != null && quarkPlaybackAuth(quarkLikeProvider).isActive) {
+            val auth = quarkPlaybackAuth(quarkLikeProvider)
+            Log.d(TAG, "applyHttpAuth: Applying $quarkLikeProvider auth")
+            http.setRequestProperty("Cookie", auth.cookie)
+            http.setRequestProperty("Referer", auth.referer)
+            http.setRequestProperty("User-Agent", auth.userAgent)
             // 不打印 Cookie 值（敏感信息）
             return
         }
@@ -253,9 +259,10 @@ private class AuthAwareDataSource(
             // HLS .ts 分片兜底：当 fragment 和 CloudPlayHeaders 域名均未命中时，
             // 为当前 active 的云盘注入基础认证头，防止 CDN 边缘节点拒绝请求。
             // 由解析器单独记录当前播放来源，各家账号的登录态可以同时保留。
-            if (CloudPlayHeaders.activeProvider in setOf("quark", "uc") && QuarkAuthProvider.isActive) {
-                http.setRequestProperty("Cookie", QuarkAuthProvider.cookie)
-                http.setRequestProperty("User-Agent", QuarkAuthProvider.userAgent)
+            if (CloudPlayHeaders.activeProvider in setOf("quark", "uc") && quarkPlaybackAuth(CloudPlayHeaders.activeProvider).isActive) {
+                val auth = quarkPlaybackAuth(CloudPlayHeaders.activeProvider)
+                http.setRequestProperty("Cookie", auth.cookie)
+                http.setRequestProperty("User-Agent", auth.userAgent)
             } else if (CloudPlayHeaders.activeProvider == "alipan" && AliyunAuthProvider.isActive) {
                 http.setRequestProperty("Authorization", AliyunAuthProvider.authorization)
                 http.setRequestProperty("Referer", "https://www.alipan.com/")

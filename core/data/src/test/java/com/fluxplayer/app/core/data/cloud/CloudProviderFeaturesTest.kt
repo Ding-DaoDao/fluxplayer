@@ -85,7 +85,7 @@ class CloudProviderFeaturesTest {
                 """{"data":{"list":[{"fid":"f","file_name":"视频.mp4","size":100,"share_fid_token":"file-token"}]}}"""
             }
         }
-        val api = QuarkApiClient(http).apply { setDriveType("uc") }
+        val api = QuarkApiClient(http, provider = "uc")
         val features = CloudProviderFeatures.from(api, "uc")
         val session = features.openShare("https://drive.uc.cn/s/abc", "pwd")
         val files = features.listShare(session, session.rootId)
