@@ -8,8 +8,9 @@ import okhttp3.Request
 import okhttp3.Response
 
 abstract class BaseCloudApiClient(
-    protected val client: OkHttpClient = CloudHttpClient.DEFAULT
+    protected val client: OkHttpClient = CloudHttpClient.DEFAULT,
 ) {
+    internal val featureHttpClient: OkHttpClient get() = client
     protected val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     protected val formUrlEncoded = "application/x-www-form-urlencoded".toMediaType()
 

@@ -9,10 +9,10 @@ import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.Pan123FallbackCache
 import com.fluxplayer.app.core.common.VideoQualityCache
 import com.fluxplayer.app.core.common.sanitizeUrl
+import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.aliyun.AliyunApiClient
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189ApiClient
-import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.pan123.Pan123ApiClient
 import com.fluxplayer.app.core.data.pan123.Pan123AuthProvider
@@ -23,19 +23,19 @@ import com.fluxplayer.app.core.data.security.putSecret
 import com.fluxplayer.app.core.data.yun139.Yun139ApiClient
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-import javax.inject.Singleton
 
 @Singleton
 class CloudUriResolver @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val videoQualityCache: VideoQualityCache
+    private val videoQualityCache: VideoQualityCache,
 ) {
     companion object {
         private const val TAG = "CloudUriResolver"
@@ -43,48 +43,38 @@ class CloudUriResolver @Inject constructor(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** 清除除指定 Provider 之外的所有云盘认证状态，防止 HLS 分片兜底注入时 Cookie/Token 串号 */
-    private fun clearOtherProviders(except: String) {
-        // quark/uc 共享 QuarkAuthProvider，只要保留其一即不清除
-        if (except != "quark" && except != "uc") {
-            QuarkAuthProvider.clear()
-        }
-        // GlobalCookieJar 按域名分别清理，防止 quark/uc 串号
-        if (except != "quark") {
-            GlobalCookieJar.clearHost("drive.quark.cn")
-        }
-        if (except != "uc") {
-            GlobalCookieJar.clearHost("pc-api.uc.cn")
-            GlobalCookieJar.clearHost("drive.uc.cn")
-        }
-        if (except != "alipan") {
-            AliyunAuthProvider.clear()
-            GlobalCookieJar.clearHost("api.alipan.com")
-            GlobalCookieJar.clearHost("www.alipan.com")
-        }
-        if (except != "pan123") {
-            Pan123AuthProvider.clear()
-            GlobalCookieJar.clearHost("api.123278.com")
-            GlobalCookieJar.clearHost("apigate.123795.com")
-        }
-        if (except != "cloud189") {
-            C189AuthProvider.clear()
-            GlobalCookieJar.clearHost("cloud.189.cn")
-            GlobalCookieJar.clearHost("api.cloud.189.cn")
-            GlobalCookieJar.clearHost("m.cloud.189.cn")
-            GlobalCookieJar.clearHost("open.e.189.cn")
-        }
-        if (except != "yun139") {
-            Yun139AuthProvider.clear()
-            GlobalCookieJar.clearHost("yun.139.com")
-            GlobalCookieJar.clearHost("api.139.com")
-        }
+    /** 播放上下文独立选择，不清除其他网盘仍在使用的登录凭据。 */
+    private fun selectPlaybackProvider(provider: String) {
+        CloudPlayHeaders.activeProvider = provider
     }
 
     suspend fun resolve(uri: Uri): Uri? {
         if (!CloudUriScheme.isCloudUri(uri)) return null
         val provider = CloudUriScheme.getProvider(uri) ?: return null
         val fileId = CloudUriScheme.getFileId(uri) ?: return null
+        selectPlaybackProvider(provider)
+
+        if (uri.getQueryParameter("space") != null || uri.getQueryParameter("extra_parent") != null) {
+            val features = extraFeatures(provider) ?: return null
+            val spaceId = uri.getQueryParameter("space")
+            val url = if (spaceId != null) {
+                features.resolveSpaceFile(
+                    CloudSpace(spaceId, uri.getQueryParameter("space_name").orEmpty()),
+                    CloudRemoteFile(
+                        fileId,
+                        uri.getQueryParameter("file_name").orEmpty(),
+                        false,
+                        token = uri.getQueryParameter("space_path").orEmpty(),
+                        parentId = uri.getQueryParameter("space_parent").orEmpty(),
+                    ),
+                )
+            } else {
+                features.resolvePersonalFile(fileId, uri.getQueryParameter("extra_parent").orEmpty())
+            }
+            val host = Uri.parse(url).host.orEmpty()
+            if (!CloudPlayHeaders.isExplicitlyAnonymous(host)) CloudPlayHeaders.register(host, features.fileHeaders())
+            return Uri.parse(url)
+        }
 
         // Check cache first
         val cachedUrl = CloudPlaylistCache.getResolvedUrl(provider, fileId)
@@ -111,6 +101,64 @@ class CloudUriResolver @Inject constructor(
         return Uri.parse(resolvedUrl)
     }
 
+    private fun extraFeatures(provider: String): CloudProviderFeatures? {
+        val prefs = context.getSharedPreferences(provider, Context.MODE_PRIVATE)
+        return when (provider) {
+            "alipan" -> {
+                val auth = prefs.getSecret(provider, "authorization").orEmpty()
+                if (auth.isBlank()) return null
+                CloudProviderFeatures.from(
+                    AliyunApiClient().apply {
+                        configureSession(context)
+                        authorization = auth
+                        driveId = prefs.getString("drive_id", "").orEmpty()
+                        prefs.getSecret(provider, "device_id")?.let { setDeviceId(it) }
+                        prefs.getSecret(provider, "signature")?.let { setSignature(it) }
+                    },
+                )
+            }
+            "pan123" -> {
+                val token = prefs.getSecret(provider, "token").orEmpty()
+                if (token.isBlank()) return null
+                CloudProviderFeatures.from(
+                    Pan123ApiClient().apply {
+                        configureSession(context)
+                        setToken("Bearer ${token.removePrefix("Bearer ")}")
+                    },
+                )
+            }
+            "quark", "uc" -> {
+                val cookie = prefs.getSecret(provider, "cookie").orEmpty()
+                if (cookie.isBlank()) return null
+                CloudProviderFeatures.from(
+                    QuarkApiClient().apply {
+                        configureSession(context)
+                        setDriveType(provider)
+                        setCookie(cookie)
+                        onCookieUpdated = { merged -> prefs.edit().putSecret(provider, "cookie", merged).apply() }
+                    },
+                    provider,
+                )
+            }
+            "yun139" -> {
+                val token = prefs.getSecret(provider, "authorization").orEmpty()
+                if (token.isBlank()) return null
+                CloudProviderFeatures.from(
+                    Yun139ApiClient().apply {
+                        setToken(token, prefs.getSecret(provider, "phoneNumber").orEmpty(), prefs.getSecret(provider, "userDomainId").orEmpty())
+                        Yun139AuthProvider.cookie = prefs.getSecret(provider, "cookies").orEmpty()
+                    },
+                )
+            }
+            "cloud189" -> {
+                C189AuthProvider.restoreSavedSession()
+                if (!C189AuthProvider.hasValidSession()) return null
+                CloudProviderFeatures.from(C189ApiClient())
+            }
+            else -> null
+        }
+    }
+
     /**
      * 刷新 123 云盘画质 URL（鉴权 token 可能过期，切换画质前调用）
      * 返回新的 QualityOption 列表，同时更新 VideoQualityCache
@@ -129,7 +177,7 @@ class CloudUriResolver @Inject constructor(
             return null
         }
 
-        val client = Pan123ApiClient()
+        val client = Pan123ApiClient().apply { configureSession(context) }
         client.setToken("Bearer $token")
         val cfg = client.loadConfig().getOrNull()
         if (cfg == null) {
@@ -147,7 +195,7 @@ class CloudUriResolver @Inject constructor(
             downloadUrl = metadata.downloadUrl ?: "",
             createAt = "",
             trashedAt = "",
-            starredStatus = 0
+            starredStatus = 0,
         )
 
         val playResult = client.getVideoPlayInfo(item).getOrNull()
@@ -183,7 +231,7 @@ class CloudUriResolver @Inject constructor(
 
     private suspend fun resolvePan123(fileId: String): String? {
         Log.d(TAG, "========== resolvePan123 START: fileId=$fileId ==========")
-        
+
         val prefs = context.getSharedPreferences("pan123", Context.MODE_PRIVATE)
         val token = prefs.getSecret("pan123", "token").orEmpty()
         if (token.isBlank()) {
@@ -192,14 +240,14 @@ class CloudUriResolver @Inject constructor(
         }
         Log.d(TAG, "resolvePan123: token exists=${token.isNotBlank()}")
 
-        val client = Pan123ApiClient()
+        val client = Pan123ApiClient().apply { configureSession(context) }
         client.setToken("Bearer $token")
 
         // 注册 pan123 播放认证，播放器数据源自动注入
-        clearOtherProviders("pan123")
+        selectPlaybackProvider("pan123")
         Pan123AuthProvider.authorization = "Bearer $token"
         Pan123AuthProvider.isActive = true
-        
+
         // 注册所有 123 云盘 CDN 域名后缀（关键修复！）
         // 123云盘的CDN域名是 *.123295.com，不是 *.123pan.cn
         CloudPlayHeaders.registerSuffix(".123295.com") { Pan123AuthProvider.getPlayHeaders() }
@@ -228,9 +276,9 @@ class CloudUriResolver @Inject constructor(
                 downloadUrl = fileMetadata.downloadUrl ?: "",
                 createAt = "",
                 trashedAt = "",
-                starredStatus = 0
+                starredStatus = 0,
             )
-            
+
             // Step 1 & Step 2 并行：resolveDownloadUrlViaHead + getVideoPlayInfo
             // 两个网络请求同时发出，总耗时 = max(HEAD, getVideoPlayInfo)
             Log.d(TAG, "resolvePan123: launching parallel HEAD + getVideoPlayInfo...")
@@ -247,7 +295,11 @@ class CloudUriResolver @Inject constructor(
                     Log.d(TAG, "resolvePan123: resolveDownloadUrlViaHead SUCCESS url=${sanitizeUrl(headUrl)}")
                     val dlHeaders = client.buildDownloadHeaders(headUrl)
                     Pan123AuthProvider.referer = dlHeaders["Referer"] ?: Pan123AuthProvider.referer
-                    val host = try { java.net.URI(headUrl).host ?: "" } catch (_: Exception) { "" }
+                    val host = try {
+                        java.net.URI(headUrl).host ?: ""
+                    } catch (_: Exception) {
+                        ""
+                    }
                     if (host.isNotBlank()) {
                         val suffix = host.substringAfter('.')
                         if (suffix.isNotBlank()) CloudPlayHeaders.registerSuffix(".$suffix", dlHeaders)
@@ -308,7 +360,6 @@ class CloudUriResolver @Inject constructor(
         return null
     }
 
-
     private suspend fun resolveQuark(fileId: String): String? {
         val prefs = context.getSharedPreferences("quark", Context.MODE_PRIVATE)
         val cookie = prefs.getSecret("quark", "cookie").orEmpty()
@@ -322,10 +373,15 @@ class CloudUriResolver @Inject constructor(
         client.setCookie(cookie)
         // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
         client.onCookieUpdated = { merged -> prefs.edit().putSecret("quark", "cookie", merged).apply() }
-        clearOtherProviders("quark")
+        selectPlaybackProvider("quark")
 
         // 注册夸克播放头（后缀匹配覆盖所有 *.quark.cn 子域名）
         CloudPlayHeaders.registerSuffix(".quark.cn") { QuarkAuthProvider.getPlayHeaders() }
+
+        if (prefs.getBoolean("prefer_original_playback", false)) {
+            val original = client.getOriginalPlaybackUrl(fileId).getOrNull()
+            if (!original.isNullOrBlank()) return original + "#quarkPlay=true#"
+        }
 
         val playResult = client.getVideoPlayInfo(fileId).getOrNull()
         if (playResult != null && playResult.urls.isNotEmpty()) {
@@ -351,12 +407,21 @@ class CloudUriResolver @Inject constructor(
         val cookie = prefs.getSecret("uc", "cookie").orEmpty()
         if (cookie.isBlank() || !cookie.contains("__uid=")) return null
 
+        val tvService = com.fluxplayer.app.core.data.quark.UcTvService(context)
+        if (tvService.isAuthorized()) {
+            val qualities = tvService.playback(fileId)
+            qualities.forEach { (url, _) -> Uri.parse(url).host?.let { host -> CloudPlayHeaders.register(host) { emptyMap() } } }
+            val options = qualities.map { (url, name) -> VideoQualityCache.QualityOption(label = name, url = url) }
+            videoQualityCache.cacheQualityOptions("uc", fileId, fileId, options)
+            return qualities.first().first
+        }
+
         val client = QuarkApiClient()
         client.setDriveType("uc")
         client.setCookie(cookie)
         // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
         client.onCookieUpdated = { merged -> prefs.edit().putSecret("uc", "cookie", merged).apply() }
-        clearOtherProviders("uc")
+        selectPlaybackProvider("uc")
 
         // 注册 UC 播放头（后缀匹配覆盖 *.quark.cn 和 *.uc.cn 子域名）
         CloudPlayHeaders.registerSuffix(".quark.cn") { QuarkAuthProvider.getPlayHeaders() }
@@ -385,7 +450,7 @@ class CloudUriResolver @Inject constructor(
             return null
         }
 
-        clearOtherProviders("cloud189")
+        selectPlaybackProvider("cloud189")
         // 注册天翼云盘播放头（后缀匹配覆盖所有 *.189.cn 子域名）
         CloudPlayHeaders.registerSuffix(".189.cn") { C189AuthProvider.getPlayHeaders() }
 
@@ -399,7 +464,7 @@ class CloudUriResolver @Inject constructor(
     private suspend fun resolveYun139(fileId: String): String? {
         if (!Yun139AuthProvider.isActive) return null
 
-        clearOtherProviders("yun139")
+        selectPlaybackProvider("yun139")
         // 注册移动云盘播放头（后缀匹配覆盖所有 *.139.com 子域名）
         CloudPlayHeaders.registerSuffix(".139.com") { Yun139AuthProvider.getPlayHeaders() }
 
@@ -423,9 +488,9 @@ class CloudUriResolver @Inject constructor(
         val auth = prefs.getSecret("alipan", "authorization").orEmpty()
         if (auth.isBlank()) return null
 
-        val client = AliyunApiClient()
+        val client = AliyunApiClient().apply { configureSession(context) }
         client.authorization = auth
-        clearOtherProviders("alipan")
+        selectPlaybackProvider("alipan")
         AliyunAuthProvider.authorization = auth
         AliyunAuthProvider.isActive = true
 

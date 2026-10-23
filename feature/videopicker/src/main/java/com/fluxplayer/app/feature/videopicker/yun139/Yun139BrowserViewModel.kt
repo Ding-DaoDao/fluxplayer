@@ -58,7 +58,6 @@ class Yun139BrowserViewModel @Inject constructor(
 
     // endregion
 
-
     companion object {
         private const val TAG = "Yun139BrowserVM"
         private const val PREF_NAME = "yun139"
@@ -76,7 +75,7 @@ class Yun139BrowserViewModel @Inject constructor(
     val uiState: StateFlow<Yun139BrowserUiState> = _uiState.asStateFlow()
 
     private val _navigationStack = MutableStateFlow(
-        listOf(DirectoryStackEntry(fileId = "/", label = "根目录"))
+        listOf(DirectoryStackEntry(fileId = "/", label = "根目录")),
     )
     val navigationStack: StateFlow<List<DirectoryStackEntry>> = _navigationStack.asStateFlow()
 
@@ -100,7 +99,7 @@ class Yun139BrowserViewModel @Inject constructor(
         val progress: Float = 0f,
         val downloadedBytes: Long = 0,
         val totalBytes: Long = 0,
-        val completedFilePath: String? = null
+        val completedFilePath: String? = null,
     )
 
     private val _downloadProgress = MutableStateFlow<DownloadProgressData?>(null)
@@ -148,6 +147,7 @@ class Yun139BrowserViewModel @Inject constructor(
         val authorization = prefs.getSecret(PREF_NAME, "authorization").orEmpty()
         val phoneNumber = prefs.getSecret(PREF_NAME, "phoneNumber").orEmpty()
         val userDomainId = prefs.getSecret(PREF_NAME, "userDomainId").orEmpty()
+        Yun139AuthProvider.cookie = prefs.getSecret(PREF_NAME, "cookies").orEmpty()
         val lastRefresh = prefs.getLong("lastRefresh", 0L)
 
         if (authorization.isBlank()) return
@@ -187,6 +187,7 @@ class Yun139BrowserViewModel @Inject constructor(
     // region ==================== 登录 — loginWithWeb ====================
 
     fun loginWithWeb(authorization: String, userDomainId: String) {
+        Yun139AuthProvider.cookie = android.webkit.CookieManager.getInstance().getCookie("https://yun.139.com").orEmpty()
         try {
             // 解码 cookie 中的 authorization 并重新编码为 mobile:phone:authToken 格式
             val base64Part = authorization.removePrefix("Basic ").trim()
@@ -195,7 +196,7 @@ class Yun139BrowserViewModel @Inject constructor(
             val authToken = decoded.split(":").getOrNull(2) ?: decoded.split(":").last()
             val tokenValue = "Basic " + Base64.encodeToString(
                 "mobile:$phoneNumber:$authToken".toByteArray(Charsets.UTF_8),
-                Base64.NO_WRAP
+                Base64.NO_WRAP,
             )
 
             apiClient.setToken(tokenValue, phoneNumber, userDomainId)
@@ -209,6 +210,7 @@ class Yun139BrowserViewModel @Inject constructor(
                 .putSecret(PREF_NAME, "authorization", tokenValue)
                 .putSecret(PREF_NAME, "phoneNumber", phoneNumber)
                 .putSecret(PREF_NAME, "userDomainId", userDomainId)
+                .putSecret(PREF_NAME, "cookies", Yun139AuthProvider.cookie)
                 .putLong("lastRefresh", System.currentTimeMillis())
                 .apply()
 
@@ -264,7 +266,7 @@ class Yun139BrowserViewModel @Inject constructor(
             val result = apiClient.listFiles(
                 parentFileId,
                 orderBy = _uiState.value.orderBy,
-                orderDirection = _uiState.value.orderDirection
+                orderDirection = _uiState.value.orderDirection,
             )
             if (seq != loadSequence) return@launch
 
@@ -280,7 +282,7 @@ class Yun139BrowserViewModel @Inject constructor(
                                 CloudPlaylistCache.FileMetadata(
                                     fileName = file.fileName,
                                     parentPath = "$currentFileId|$fullPathLabel",
-                                )
+                                ),
                             )
                         }
                     }
@@ -289,14 +291,17 @@ class Yun139BrowserViewModel @Inject constructor(
                     CloudDirectoryCache.put(getApplication(), "yun139", parentFileId, resources)
                     val nextCursor = listResult.nextMarker.ifBlank { null }
                     val hasMore = nextCursor != null && listResult.items.size >= 100
-                    if (hasMore && nextCursor != null) directoryCursorCache[parentFileId] = nextCursor
-                    else directoryCursorCache.remove(parentFileId)
+                    if (hasMore && nextCursor != null) {
+                        directoryCursorCache[parentFileId] = nextCursor
+                    } else {
+                        directoryCursorCache.remove(parentFileId)
+                    }
                     updateUiState {
                         it.copy(
                             items = resources,
                             isLoading = false,
                             hasMore = hasMore,
-                            nextPageCursor = if (hasMore) nextCursor else null
+                            nextPageCursor = if (hasMore) nextCursor else null,
                         )
                     }
                     syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
@@ -306,20 +311,20 @@ class Yun139BrowserViewModel @Inject constructor(
                     val msg = e.message ?: "未知错误"
                     val friendly = when {
                         msg.contains("<!DOCTYPE", ignoreCase = true) ||
-                        msg.contains("cannot be converted to JSONObject", ignoreCase = true) ->
+                            msg.contains("cannot be converted to JSONObject", ignoreCase = true) ->
                             "认证失败，请使用正确的 Authorization Token 登录"
                         msg.contains("require login", ignoreCase = true) ||
-                        msg.contains("token", ignoreCase = true) ||
-                        msg.contains("401") -> "登录已过期，请重新登录"
+                            msg.contains("token", ignoreCase = true) ||
+                            msg.contains("401") -> "登录已过期，请重新登录"
                         msg.contains("timeout", ignoreCase = true) ||
-                        msg.contains("Timeout", ignoreCase = true) ||
-                        msg.contains("timed out", ignoreCase = true) ->
+                            msg.contains("Timeout", ignoreCase = true) ||
+                            msg.contains("timed out", ignoreCase = true) ->
                             "请求超时，请重试"
                         else -> "加载失败: ${msg.take(100)}"
                     }
                     updateUiState { it.copy(error = friendly, isLoading = false) }
                     syncStackTop { it.copy(error = friendly, isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -342,7 +347,7 @@ class Yun139BrowserViewModel @Inject constructor(
                     isLoadingMore = false,
                     error = null,
                     hasMore = cursor != null,
-                    nextPageCursor = cursor
+                    nextPageCursor = cursor,
                 )
             }
             syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
@@ -369,7 +374,7 @@ class Yun139BrowserViewModel @Inject constructor(
             try {
                 val result = apiClient.listFiles(
                     state.currentFolderId, pageCursor = cursor,
-                    orderBy = state.orderBy, orderDirection = state.orderDirection
+                    orderBy = state.orderBy, orderDirection = state.orderDirection,
                 )
                 result.fold(
                     onSuccess = { listResult ->
@@ -385,13 +390,16 @@ class Yun139BrowserViewModel @Inject constructor(
                         val nextCursor = listResult.nextMarker.ifBlank { null }
                         val hasMore = nextCursor != null && listResult.items.size >= 100
                         directoryCache[state.currentFolderId] = allItems
-                        if (hasMore && nextCursor != null) directoryCursorCache[state.currentFolderId] = nextCursor
-                        else directoryCursorCache.remove(state.currentFolderId)
+                        if (hasMore && nextCursor != null) {
+                            directoryCursorCache[state.currentFolderId] = nextCursor
+                        } else {
+                            directoryCursorCache.remove(state.currentFolderId)
+                        }
                         updateUiState {
                             it.copy(
                                 items = allItems, isLoadingMore = false,
                                 hasMore = hasMore,
-                                nextPageCursor = if (hasMore) nextCursor else null
+                                nextPageCursor = if (hasMore) nextCursor else null,
                             )
                         }
                         syncStackTop { it.copy(items = allItems, isLoading = false, error = null) }
@@ -400,7 +408,7 @@ class Yun139BrowserViewModel @Inject constructor(
                         if (e !is kotlinx.coroutines.CancellationException) {
                             updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
                         }
-                    }
+                    },
                 )
             } finally {
                 loadingMore = false
@@ -421,14 +429,17 @@ class Yun139BrowserViewModel @Inject constructor(
         updateUiState {
             it.copy(
                 breadcrumbs = state.breadcrumbs + Yun139Breadcrumb(item.name, item.path),
-                scrollTargetIndex = index, scrollTargetParentKey = parentKey
+                scrollTargetIndex = index,
+                scrollTargetParentKey = parentKey,
             )
         }
         _navigationStack.update { it + DirectoryStackEntry(fileId = item.path, label = item.name) }
         loadDirectoryCached(item.path)
     }
 
-    fun clearScrollTarget() { updateUiState { it.copy(scrollTargetIndex = -1) } }
+    fun clearScrollTarget() {
+        updateUiState { it.copy(scrollTargetIndex = -1) }
+    }
 
     fun navigateUp() {
         val breadcrumbs = _uiState.value.breadcrumbs
@@ -474,7 +485,9 @@ class Yun139BrowserViewModel @Inject constructor(
 
     // region ==================== 刷新 ====================
 
-    fun refresh() { loadDirectory(_uiState.value.currentFolderId) }
+    fun refresh() {
+        loadDirectory(_uiState.value.currentFolderId)
+    }
 
     // endregion
 
@@ -493,7 +506,7 @@ class Yun139BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("创建失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -511,7 +524,7 @@ class Yun139BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("删除失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -529,7 +542,7 @@ class Yun139BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("重命名失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -545,8 +558,12 @@ class Yun139BrowserViewModel @Inject constructor(
 
     fun dismissPicker() {
         updateUiState {
-            it.copy(pendingAction = null, moveFileId = null,
-                pickerFolders = emptyList(), pickerIsLoading = false)
+            it.copy(
+                pendingAction = null,
+                moveFileId = null,
+                pickerFolders = emptyList(),
+                pickerIsLoading = false,
+            )
         }
     }
 
@@ -566,7 +583,7 @@ class Yun139BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     updateUiState { it.copy(pickerFolders = emptyList(), pickerIsLoading = false) }
                     notifier.error("加载文件夹失败: ${e.message}")
-                }
+                },
             )
         }
     }
@@ -584,7 +601,7 @@ class Yun139BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("创建失败: ${e.message}")
                     updateUiState { it.copy(pickerIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -598,12 +615,13 @@ class Yun139BrowserViewModel @Inject constructor(
             result.fold(
                 onSuccess = {
                     notifier.success("移动成功")
-                    dismissPicker(); refresh()
+                    dismissPicker()
+                    refresh()
                 },
                 onFailure = { e ->
                     notifier.error("移动失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -723,7 +741,7 @@ class Yun139BrowserViewModel @Inject constructor(
             thumbnailUrl = file.thumbnailUrl,
             folderSize = if (file.isDir) file.fileSize else 0,
             category = file.contentType,
-            createdAt = file.createDate.ifEmpty { file.lastOpTime }
+            createdAt = file.createDate.ifEmpty { file.lastOpTime },
         )
     }
 

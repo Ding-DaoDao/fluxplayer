@@ -602,7 +602,7 @@ class C189BrowserViewModel @Inject constructor(
             updateUiState { it.copy(isLoading = true) }
             try {
                 withSessionRecovery {
-                    apiClient.deleteFiles(listOf(item.path)).getOrThrow()
+                    apiClient.deleteFiles(listOf(C189FileItem(item.path, item.name, item.isDirectory))).getOrThrow()
                 }
                 notifier.success("删除成功")
                 refresh()
@@ -619,7 +619,7 @@ class C189BrowserViewModel @Inject constructor(
             updateUiState { it.copy(isLoading = true) }
             try {
                 withSessionRecovery {
-                    apiClient.renameFile(item.path, newName).getOrThrow()
+                    apiClient.renameFile(item.path, newName, item.isDirectory).getOrThrow()
                 }
                 notifier.success("重命名成功")
                 refresh()
@@ -687,11 +687,12 @@ class C189BrowserViewModel @Inject constructor(
     fun moveTo(targetFolderId: String) {
         val fileId = _uiState.value.moveFileId ?: return
         val actualTargetId = targetFolderId.ifEmpty { "-11" }
+        val source = _uiState.value.items.firstOrNull { it.path == fileId } ?: return
         viewModelScope.launch {
             updateUiState { it.copy(isLoading = true) }
             try {
                 withSessionRecovery {
-                    apiClient.moveFiles(listOf(fileId), actualTargetId).getOrThrow()
+                    apiClient.moveFiles(listOf(C189FileItem(source.path, source.name, source.isDirectory)), actualTargetId).getOrThrow()
                 }
                 notifier.success("移动成功")
                 dismissPicker(); refresh()
@@ -1133,6 +1134,7 @@ class C189BrowserViewModel @Inject constructor(
                     shareId = shareId,
                     isFolder = if (item.isDirectory) 1 else 0,
                     targetFolderId = targetId,
+                    accessCode = state.shareBrowsePwd,
                 )
                 if (ok) {
                     notifier.info("已转存到 ${state.shareSaveTargetFolderLabel}: ${item.name}")
@@ -1168,6 +1170,7 @@ class C189BrowserViewModel @Inject constructor(
                         shareId = shareId,
                         isFolder = if (item.isDirectory) 1 else 0,
                         targetFolderId = targetId,
+                        accessCode = state.shareBrowsePwd,
                     )
                     if (ok) successCount++ else failCount++
                 } catch (_: Exception) {

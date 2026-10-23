@@ -57,7 +57,6 @@ class QuarkBrowserViewModel @Inject constructor(
 
     // endregion
 
-
     companion object {
         private const val TAG = "QuarkBrowserVM"
         private const val PREF_NAME = "quark"
@@ -66,7 +65,7 @@ class QuarkBrowserViewModel @Inject constructor(
 
     // region ==================== API Client ====================
 
-    val apiClient = QuarkApiClient()
+    val apiClient = QuarkApiClient().apply { configureSession(application) }
     private val itemCache = mutableMapOf<String, QuarkFileItem>()
 
     // endregion
@@ -77,7 +76,7 @@ class QuarkBrowserViewModel @Inject constructor(
     val uiState: StateFlow<QuarkBrowserUiState> = _uiState.asStateFlow()
 
     private val _navigationStack = MutableStateFlow(
-        listOf(DirectoryStackEntry(fileId = "0", label = "根目录"))
+        listOf(DirectoryStackEntry(fileId = "0", label = "根目录")),
     )
     val navigationStack: StateFlow<List<DirectoryStackEntry>> = _navigationStack.asStateFlow()
 
@@ -100,7 +99,7 @@ class QuarkBrowserViewModel @Inject constructor(
         val progress: Float = 0f,
         val downloadedBytes: Long = 0,
         val totalBytes: Long = 0,
-        val completedFilePath: String? = null
+        val completedFilePath: String? = null,
     )
 
     private val _downloadProgress = MutableStateFlow<DownloadProgressData?>(null)
@@ -136,11 +135,13 @@ class QuarkBrowserViewModel @Inject constructor(
     // region ==================== 登录 — loginWithCookie（含 driveType 和 cookie 验证） ====================
 
     fun loginWithCookie(cookie: String, driveType: String = "quark") {
+        if (driveType == "uc") com.fluxplayer.app.core.data.quark.UcTvService(getApplication()).clearAuthorization()
         Log.d(TAG, "loginWithCookie: driveType=$driveType, cookie长度=${cookie.length}")
         val prefName = if (driveType == "uc") UC_PREF_NAME else PREF_NAME
         val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().putSecret(prefName, "cookie", cookie).apply()
 
+        apiClient.setDriveType(driveType)
         apiClient.setCookie(cookie)
         setupCookiePersistence(prefName)
 
@@ -219,6 +220,7 @@ class QuarkBrowserViewModel @Inject constructor(
         val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         apiClient.clearCookie()
+        apiClient.setDriveType(driveType)
         directoryCache.clear()
         CloudDirectoryCache.clear(getApplication(), driveType)
 
@@ -229,7 +231,7 @@ class QuarkBrowserViewModel @Inject constructor(
             cookieManager.flush()
             android.webkit.WebStorage.getInstance().deleteAllData()
         } catch (_: Exception) {}
-        _uiState.value = QuarkBrowserUiState()
+        _uiState.value = QuarkBrowserUiState(driveType = driveType)
         _navigationStack.value = listOf(DirectoryStackEntry(fileId = "0", label = "根目录"))
     }
 
@@ -266,7 +268,7 @@ class QuarkBrowserViewModel @Inject constructor(
                                 CloudPlaylistCache.FileMetadata(
                                     fileName = file.fileName,
                                     parentPath = "$currentFileId|$fullPathLabel",
-                                )
+                                ),
                             )
                         }
                     }
@@ -276,7 +278,7 @@ class QuarkBrowserViewModel @Inject constructor(
                     updateUiState {
                         it.copy(
                             items = resources,
-                            isLoading = false, hasMore = items.size >= 100, currentPage = 1
+                            isLoading = false, hasMore = items.size >= apiClient.pageSize, currentPage = 1,
                         )
                     }
                     syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
@@ -286,14 +288,14 @@ class QuarkBrowserViewModel @Inject constructor(
                     val msg = e.message ?: "未知错误"
                     val friendly = when {
                         msg.contains("require login", ignoreCase = true) ||
-                        msg.contains("token", ignoreCase = true) ||
-                        msg.contains("invalid", ignoreCase = true) ||
-                        msg.contains("401") -> "登录已过期，请重新登录"
+                            msg.contains("token", ignoreCase = true) ||
+                            msg.contains("invalid", ignoreCase = true) ||
+                            msg.contains("401") -> "登录已过期，请重新登录"
                         else -> "加载失败: $msg"
                     }
                     updateUiState { it.copy(error = friendly, isLoading = false) }
                     syncStackTop { it.copy(error = friendly, isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -312,8 +314,8 @@ class QuarkBrowserViewModel @Inject constructor(
                     isLoading = false,
                     isLoadingMore = false,
                     error = null,
-                    currentPage = (cached.size + 99) / 100,
-                    hasMore = cached.size >= 100
+                    currentPage = (cached.size + apiClient.pageSize - 1) / apiClient.pageSize,
+                    hasMore = cached.size >= apiClient.pageSize,
                 )
             }
             syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
@@ -340,7 +342,7 @@ class QuarkBrowserViewModel @Inject constructor(
                 val result = apiClient.listFiles(
                     pdirFid = state.currentFileId,
                     page = nextPage,
-                    orderBy = state.orderBy
+                    orderBy = state.orderBy,
                 )
                 result.fold(
                     onSuccess = { items ->
@@ -356,15 +358,15 @@ class QuarkBrowserViewModel @Inject constructor(
                             it.copy(
                                 items = _uiState.value.items + filtered,
                                 isLoadingMore = false,
-                                hasMore = items.size >= 100,
-                                currentPage = nextPage
+                                hasMore = items.size >= apiClient.pageSize,
+                                currentPage = nextPage,
                             )
                         }
                         syncStackTop { it.copy(items = _uiState.value.items, isLoading = false, error = null) }
                     },
                     onFailure = { e ->
                         updateUiState { it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}") }
-                    }
+                    },
                 )
             } finally {
                 loadingMore = false
@@ -386,14 +388,16 @@ class QuarkBrowserViewModel @Inject constructor(
             it.copy(
                 breadcrumbs = state.breadcrumbs + QuarkBreadcrumb(item.name, item.path),
                 scrollTargetIndex = index,
-                scrollTargetParentKey = parentKey
+                scrollTargetParentKey = parentKey,
             )
         }
         _navigationStack.update { it + DirectoryStackEntry(fileId = item.path, label = item.name) }
         loadDirectoryCached(item.path)
     }
 
-    fun clearScrollTarget() { updateUiState { it.copy(scrollTargetIndex = -1) } }
+    fun clearScrollTarget() {
+        updateUiState { it.copy(scrollTargetIndex = -1) }
+    }
 
     fun navigateUp() {
         val breadcrumbs = _uiState.value.breadcrumbs
@@ -439,7 +443,9 @@ class QuarkBrowserViewModel @Inject constructor(
 
     // region ==================== 刷新 ====================
 
-    fun refresh() { loadDirectory(_uiState.value.currentFileId) }
+    fun refresh() {
+        loadDirectory(_uiState.value.currentFileId)
+    }
 
     // endregion
 
@@ -458,7 +464,7 @@ class QuarkBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("创建失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -476,7 +482,7 @@ class QuarkBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("删除失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -494,7 +500,7 @@ class QuarkBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("重命名失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -530,7 +536,7 @@ class QuarkBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     updateUiState { it.copy(pickerFolders = emptyList(), pickerIsLoading = false) }
                     notifier.error("加载文件夹失败: ${e.message}")
-                }
+                },
             )
         }
     }
@@ -548,7 +554,7 @@ class QuarkBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("创建失败: ${e.message}")
                     updateUiState { it.copy(pickerIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -568,7 +574,7 @@ class QuarkBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("移动失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -599,7 +605,9 @@ class QuarkBrowserViewModel @Inject constructor(
         downloadJob = viewModelScope.launch {
             val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
-                val urlResult = apiClient.getDownloadUrl(res.path)
+                val tv = com.fluxplayer.app.core.data.quark.UcTvService(getApplication())
+                val useTv = provider == "uc" && tv.isAuthorized()
+                val urlResult = if (useTv) runCatching { tv.download(res.path, res.size) } else apiClient.getDownloadUrl(res.path)
                 urlResult.fold(
                     onSuccess = { url ->
                         downloadContext.ensureActive()
@@ -608,7 +616,7 @@ class QuarkBrowserViewModel @Inject constructor(
                         val completed = cloudDownloadRepository.download(
                             url = url,
                             fileName = res.name,
-                            headers = QuarkAuthProvider.getPlayHeaders(),
+                            headers = if (useTv) emptyMap() else QuarkAuthProvider.getPlayHeaders(),
                             provider = provider,
                             onProgress = { event ->
                                 downloadContext.ensureActive()
@@ -693,7 +701,7 @@ class QuarkBrowserViewModel @Inject constructor(
             fileCount = if (file.dir && file.includeItems > 0) file.includeItems else null,
             folderSize = if (file.dir) file.size else 0,
             category = file.objCategory,
-            createdAt = if (file.createdAt > 0) file.createdAt.toString() else ""
+            createdAt = if (file.createdAt > 0) file.createdAt.toString() else "",
         )
     }
 

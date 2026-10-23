@@ -59,14 +59,13 @@ class AliyunBrowserViewModel @Inject constructor(
 
     // endregion
 
-
     companion object {
         private const val PREF_NAME = "alipan"
     }
 
     // region ==================== API Client & Auth ====================
 
-    val apiClient = AliyunApiClient()
+    val apiClient = AliyunApiClient().apply { configureSession(application) }
     val authProvider = AliyunAuthProvider
 
     // endregion
@@ -77,7 +76,7 @@ class AliyunBrowserViewModel @Inject constructor(
     val uiState: StateFlow<AliyunBrowserUiState> = _uiState.asStateFlow()
 
     private val _navigationStack = MutableStateFlow(
-        listOf(DirectoryStackEntry(fileId = "root", label = "根目录"))
+        listOf(DirectoryStackEntry(fileId = "root", label = "根目录")),
     )
     val navigationStack: StateFlow<List<DirectoryStackEntry>> = _navigationStack.asStateFlow()
 
@@ -107,7 +106,7 @@ class AliyunBrowserViewModel @Inject constructor(
         val progress: Float = 0f,
         val downloadedBytes: Long = 0,
         val totalBytes: Long = 0,
-        val completedFilePath: String? = null
+        val completedFilePath: String? = null,
     )
 
     private val _downloadProgress = MutableStateFlow<DownloadProgressData?>(null)
@@ -178,8 +177,11 @@ class AliyunBrowserViewModel @Inject constructor(
                         }
                     } catch (_: Exception) {}
 
-                    val driveOptions = if (driveInfo != null) buildDriveOptionsFromInfo(driveInfo)
-                        else emptyList()
+                    val driveOptions = if (driveInfo != null) {
+                        buildDriveOptionsFromInfo(driveInfo)
+                    } else {
+                        emptyList()
+                    }
 
                     updateUiState {
                         it.copy(
@@ -187,7 +189,7 @@ class AliyunBrowserViewModel @Inject constructor(
                             isLoggedIn = true,
                             isLoading = false,
                             driveOptions = driveOptions,
-                            currentDriveId = driveId
+                            currentDriveId = driveId,
                         )
                     }
                     refreshDriveInfo()
@@ -198,7 +200,7 @@ class AliyunBrowserViewModel @Inject constructor(
                     val friendly = when {
                         errMsg.contains("AccessTokenInvalid", ignoreCase = true) -> "token已失效，请重新登录"
                         errMsg.contains("Failed to connect", ignoreCase = true) ||
-                        errMsg.contains("Unable to resolve", ignoreCase = true) -> "无法连接到阿里云盘服务"
+                            errMsg.contains("Unable to resolve", ignoreCase = true) -> "无法连接到阿里云盘服务"
                         else -> "token验证失败: $errMsg"
                     }
                     updateUiState { it.copy(isLoggedIn = false, isLoading = false, error = friendly) }
@@ -417,7 +419,7 @@ class AliyunBrowserViewModel @Inject constructor(
             AliyunBrowserUiState(
                 isLoggedIn = false,
                 reLoginRequired = true,
-                error = "登录已过期，正在尝试自动续期..."
+                error = "登录已过期，正在尝试自动续期...",
             )
         }
     }
@@ -441,7 +443,7 @@ class AliyunBrowserViewModel @Inject constructor(
             val result = apiClient.listFiles(
                 parentFileId,
                 orderBy = orderBy.substringBefore(":"),
-                orderDirection = orderBy.substringAfter(":", "ASC")
+                orderDirection = orderBy.substringAfter(":", "ASC"),
             )
             if (seq != loadSequence) return@launch
 
@@ -457,7 +459,7 @@ class AliyunBrowserViewModel @Inject constructor(
                                 CloudPlaylistCache.FileMetadata(
                                     fileName = file.fileName,
                                     parentPath = "$currentFileId|$fullPathLabel",
-                                )
+                                ),
                             )
                         }
                     }
@@ -468,7 +470,7 @@ class AliyunBrowserViewModel @Inject constructor(
                         it.copy(
                             items = resources,
                             isLoading = false,
-                            nextMarker = listResult.nextMarker.ifEmpty { null }
+                            nextMarker = listResult.nextMarker.ifEmpty { null },
                         )
                     }
                     syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
@@ -483,7 +485,7 @@ class AliyunBrowserViewModel @Inject constructor(
                             val msg = e.message ?: "未知错误"
                             when {
                                 msg.contains("Failed to connect", ignoreCase = true) ||
-                                msg.contains("Unable to resolve", ignoreCase = true) ->
+                                    msg.contains("Unable to resolve", ignoreCase = true) ->
                                     "无法连接到阿里云盘服务"
                                 else -> "加载失败: $msg"
                             }
@@ -491,7 +493,7 @@ class AliyunBrowserViewModel @Inject constructor(
                     }
                     updateUiState { it.copy(error = friendly, isLoading = false) }
                     syncStackTop { it.copy(error = friendly, isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -513,7 +515,7 @@ class AliyunBrowserViewModel @Inject constructor(
                     isLoading = false,
                     isLoadingMore = false,
                     error = null,
-                    nextMarker = cached.nextMarker
+                    nextMarker = cached.nextMarker,
                 )
             }
             syncStackTop { it.copy(items = cached.items, isLoading = false, error = null) }
@@ -558,7 +560,7 @@ class AliyunBrowserViewModel @Inject constructor(
                             it.copy(
                                 items = combined,
                                 isLoadingMore = false,
-                                nextMarker = marker
+                                nextMarker = marker,
                             )
                         }
                         syncStackTop { it.copy(items = _uiState.value.items, isLoading = false, error = null) }
@@ -567,7 +569,7 @@ class AliyunBrowserViewModel @Inject constructor(
                         updateUiState {
                             it.copy(isLoadingMore = false, error = "加载更多失败: ${e.message}")
                         }
-                    }
+                    },
                 )
             } finally {
                 if (seq == loadSequence) {
@@ -592,7 +594,7 @@ class AliyunBrowserViewModel @Inject constructor(
             it.copy(
                 breadcrumbs = state.breadcrumbs + AliyunBreadcrumb(item.name, item.path),
                 scrollTargetIndex = index,
-                scrollTargetParentKey = parentKey
+                scrollTargetParentKey = parentKey,
             )
         }
         _navigationStack.update { it + DirectoryStackEntry(fileId = item.path, label = item.name) }
@@ -671,7 +673,7 @@ class AliyunBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("创建失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -689,7 +691,7 @@ class AliyunBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("删除失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -707,7 +709,7 @@ class AliyunBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("重命名失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -724,8 +726,10 @@ class AliyunBrowserViewModel @Inject constructor(
     fun dismissPicker() {
         updateUiState {
             it.copy(
-                pendingAction = null, moveFileId = null,
-                pickerFolders = emptyList(), pickerIsLoading = false
+                pendingAction = null,
+                moveFileId = null,
+                pickerFolders = emptyList(),
+                pickerIsLoading = false,
             )
         }
     }
@@ -750,7 +754,7 @@ class AliyunBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     updateUiState { it.copy(pickerFolders = emptyList(), pickerIsLoading = false) }
                     notifier.error("加载文件夹失败: ${e.message}")
-                }
+                },
             )
         }
     }
@@ -768,7 +772,7 @@ class AliyunBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("创建失败: ${e.message}")
                     updateUiState { it.copy(pickerIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -788,7 +792,7 @@ class AliyunBrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("移动失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -878,7 +882,9 @@ class AliyunBrowserViewModel @Inject constructor(
         }
         try {
             val uri = FileProvider.getUriForFile(
-                context, "${context.packageName}.fileprovider", file
+                context,
+                "${context.packageName}.fileprovider",
+                file,
             )
             val intent = Intent(Intent.ACTION_SEND).apply {
                 putExtra(Intent.EXTRA_STREAM, uri)
@@ -915,7 +921,7 @@ class AliyunBrowserViewModel @Inject constructor(
             thumbnailUrl = file.thumbnail.ifBlank { null },
             folderSize = if (file.type == "folder") file.size else 0,
             category = file.category,
-            createdAt = file.createdAt
+            createdAt = file.createdAt,
         )
     }
 

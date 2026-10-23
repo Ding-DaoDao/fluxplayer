@@ -4,9 +4,14 @@ import java.security.SecureRandom
 
 object Yun139AuthProvider {
     @Volatile var authorization: String = ""
+
     @Volatile var phoneNumber: String = ""
+
     @Volatile var userDomainId: String = ""
+
     @Volatile var isActive: Boolean = false
+
+    @Volatile var cookie: String = ""
 
     val deviceInfo: String by lazy {
         generateDeviceInfo()
@@ -28,6 +33,7 @@ object Yun139AuthProvider {
 
     fun clear() {
         authorization = ""
+        cookie = ""
         phoneNumber = ""
         userDomainId = ""
         isActive = false
@@ -42,9 +48,11 @@ object Yun139AuthProvider {
                 "x-yun-api-version" to "v2",
                 "x-yun-svc-type" to "1",
                 "x-yun-module-type" to "100",
-                "x-yun-app-channel" to "10000023"
+                "x-yun-app-channel" to "10000023",
             )
-        } else emptyMap()
+        } else {
+            emptyMap()
+        }
     }
 
     fun getDownloadHeaders(): Map<String, String> {
@@ -55,17 +63,22 @@ object Yun139AuthProvider {
                 "x-SvcType" to "1",
                 "x-huawei-channelSrc" to "10000023",
                 "x-MM-Source" to "0000",
-                "User-Agent" to "okhttp/4.12.0"
+                "User-Agent" to "okhttp/4.12.0",
             )
-        } else emptyMap()
+        } else {
+            emptyMap()
+        }
     }
 
     private val DEVICE_TYPES = listOf(
         "2312DRAABC", "2312DR AABI", "2312DR AABG",
         "2310RK86C", "2310RK86I", "24122RKC7C",
-        "24127RK2CC", "24108PN61G", "24108PN61I"
+        "24127RK2CC", "24108PN61G", "24108PN61I",
     )
     private val OS_VERSIONS = listOf(
-        "android 13", "android 14", "android 15", "android 16"
+        "android 13",
+        "android 14",
+        "android 15",
+        "android 16",
     )
 }

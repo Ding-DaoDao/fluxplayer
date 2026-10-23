@@ -190,6 +190,9 @@ fun QuarkBrowserTabContent(
             playedUriSet = state.playedUriSet,
             cloudProviderKey = if (state.driveType == "uc") "uc" else "quark",
             notificationEvents = viewModel.messageEvents,
+            providerFeatures = remember(viewModel.apiClient, state.driveType) { com.fluxplayer.app.core.data.cloud.CloudProviderFeatures.from(viewModel.apiClient, state.driveType) },
+            currentFolderId = state.currentFileId,
+            onPlayExtraFile = onPlayVideo,
         )
 
         val renameItem = state.items.getOrNull(renameIndex)

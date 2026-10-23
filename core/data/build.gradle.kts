@@ -44,6 +44,7 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp.core)
+    implementation(libs.bouncycastle)
     implementation(libs.androidx.media3.datasource)
     implementation(libs.androidx.media3.database)
 
@@ -54,6 +55,7 @@ dependencies {
     kspAndroidTest(libs.hilt.compiler)
 
     testImplementation(libs.junit4)
+    testImplementation(libs.orgjson)
     androidTestImplementation(libs.androidx.test.ext)
     androidTestImplementation(libs.androidx.test.espresso.core)
 }

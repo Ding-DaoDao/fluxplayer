@@ -60,7 +60,6 @@ class Pan123BrowserViewModel @Inject constructor(
 
     // endregion
 
-
     companion object {
         private const val TAG = "Pan123BrowserVM"
         private const val PREF_NAME = "pan123"
@@ -68,7 +67,7 @@ class Pan123BrowserViewModel @Inject constructor(
 
     // region ==================== API Client ====================
 
-    val apiClient = Pan123ApiClient()
+    val apiClient = Pan123ApiClient().apply { configureSession(application) }
     private var cachedFileItems: List<Pan123FileItem> = emptyList()
     private var cachedShareFileItems: List<Pan123ShareFileItem> = emptyList()
 
@@ -80,7 +79,7 @@ class Pan123BrowserViewModel @Inject constructor(
     val uiState: StateFlow<Pan123BrowserUiState> = _uiState.asStateFlow()
 
     private val _navigationStack = MutableStateFlow(
-        listOf(DirectoryStackEntry(fileId = "0", label = "根目录"))
+        listOf(DirectoryStackEntry(fileId = "0", label = "根目录")),
     )
     val navigationStack: StateFlow<List<DirectoryStackEntry>> = _navigationStack.asStateFlow()
 
@@ -104,7 +103,7 @@ class Pan123BrowserViewModel @Inject constructor(
         val progress: Float = 0f,
         val downloadedBytes: Long = 0,
         val totalBytes: Long = 0,
-        val completedFilePath: String? = null
+        val completedFilePath: String? = null,
     )
 
     private val _downloadProgress = MutableStateFlow<DownloadProgressData?>(null)
@@ -164,7 +163,9 @@ class Pan123BrowserViewModel @Inject constructor(
             apiClient.setToken("Bearer $token")
             // 预热 getconfig（写入静态缓存，后续播放无需再请求）
             viewModelScope.launch {
-                try { apiClient.loadConfig() } catch (_: Exception) {}
+                try {
+                    apiClient.loadConfig()
+                } catch (_: Exception) {}
             }
             Pan123AuthProvider.authorization = "Bearer $token"
             Pan123AuthProvider.isActive = true
@@ -175,7 +176,9 @@ class Pan123BrowserViewModel @Inject constructor(
             // 从磁盘缓存预填根目录，加速子目录导航
             CloudDirectoryCache.get(getApplication(), "pan123", "0")?.let { directoryCache["0"] = it }
             viewModelScope.launch {
-                try { loadDirectory("0") } catch (_: Exception) {}
+                try {
+                    loadDirectory("0")
+                } catch (_: Exception) {}
             }
             return
         }
@@ -204,6 +207,8 @@ class Pan123BrowserViewModel @Inject constructor(
                         .putSecret(PREF_NAME, "passport", passport)
                         .putSecret(PREF_NAME, "password", password)
                         .putSecret(PREF_NAME, "token", loginResult.token)
+                        .putBoolean("auto_login_blocked", false)
+                        .remove("previous_token")
                         .putLong("refresh_token_expire_time", loginResult.refreshTokenExpireTime)
                         .apply()
                     Pan123AuthProvider.authorization = "Bearer ${loginResult.token}"
@@ -217,7 +222,7 @@ class Pan123BrowserViewModel @Inject constructor(
                     updateUiState {
                         it.copy(isLoading = false, initializing = false, error = "登录失败: ${e.message}")
                     }
-                }
+                },
             )
         }
     }
@@ -235,7 +240,9 @@ class Pan123BrowserViewModel @Inject constructor(
         apiClient.setTokenDirectly(trimmed)
         // 预热 getconfig（写入静态缓存，后续播放无需再请求）
         viewModelScope.launch {
-            try { apiClient.loadConfig() } catch (_: Exception) {}
+            try {
+                apiClient.loadConfig()
+            } catch (_: Exception) {}
         }
         val tokenValue = trimmed.removePrefix("Bearer ")
         val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -297,7 +304,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 parentFileId,
                 page = 1,
                 orderBy = _uiState.value.orderBy,
-                orderDirection = _uiState.value.orderDirection
+                orderDirection = _uiState.value.orderDirection,
             )
             if (seq != loadSequence) return@launch
 
@@ -317,7 +324,7 @@ class Pan123BrowserViewModel @Inject constructor(
                                     s3keyFlag = file.s3keyFlag,
                                     downloadUrl = file.downloadUrl,
                                     parentPath = "$currentFileId|$fullPathLabel",
-                                )
+                                ),
                             )
                         }
                     }
@@ -330,7 +337,7 @@ class Pan123BrowserViewModel @Inject constructor(
                         it.copy(
                             items = resources,
                             isLoading = false, hasMore = hasMore,
-                            currentPage = 1
+                            currentPage = 1,
                         )
                     }
                     syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
@@ -339,13 +346,13 @@ class Pan123BrowserViewModel @Inject constructor(
                     val msg = e.message ?: "未知错误"
                     val friendly = when {
                         msg.contains("require login", ignoreCase = true) ||
-                        msg.contains("token", ignoreCase = true) ||
-                        msg.contains("401") -> "登录已过期，请重新登录"
+                            msg.contains("token", ignoreCase = true) ||
+                            msg.contains("401") -> "登录已过期，请重新登录"
                         else -> "加载失败: $msg"
                     }
                     updateUiState { it.copy(error = friendly, isLoading = false) }
                     syncStackTop { it.copy(error = friendly, isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -368,7 +375,7 @@ class Pan123BrowserViewModel @Inject constructor(
                     isLoadingMore = false,
                     error = null,
                     hasMore = hasMore,
-                    currentPage = restoredPage
+                    currentPage = restoredPage,
                 )
             }
             syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
@@ -398,7 +405,7 @@ class Pan123BrowserViewModel @Inject constructor(
                     parentFileId = state.currentFileId,
                     page = nextPage,
                     orderBy = state.orderBy,
-                    orderDirection = state.orderDirection
+                    orderDirection = state.orderDirection,
                 )
                 if (seq != loadSequence) return@launch
                 result.fold(
@@ -417,7 +424,7 @@ class Pan123BrowserViewModel @Inject constructor(
                                         s3keyFlag = file.s3keyFlag,
                                         downloadUrl = file.downloadUrl,
                                         parentPath = "$currentFileId|$fullPathLabel",
-                                    )
+                                    ),
                                 )
                             }
                         }
@@ -436,7 +443,7 @@ class Pan123BrowserViewModel @Inject constructor(
                         updateUiState {
                             it.copy(
                                 items = allItems, isLoadingMore = false,
-                                hasMore = hasMore, currentPage = nextPage
+                                hasMore = hasMore, currentPage = nextPage,
                             )
                         }
                         syncStackTop { it.copy(items = allItems, isLoading = false, error = null) }
@@ -447,7 +454,7 @@ class Pan123BrowserViewModel @Inject constructor(
                             updateUiState { it.copy(isLoadingMore = false, error = message) }
                             syncStackTop { it.copy(error = message) }
                         }
-                    }
+                    },
                 )
             } finally {
                 if (seq == loadSequence) {
@@ -470,14 +477,17 @@ class Pan123BrowserViewModel @Inject constructor(
         updateUiState {
             it.copy(
                 breadcrumbs = state.breadcrumbs + Pan123Breadcrumb(item.name, item.path),
-                scrollTargetIndex = index, scrollTargetParentKey = parentKey
+                scrollTargetIndex = index,
+                scrollTargetParentKey = parentKey,
             )
         }
         _navigationStack.update { it + DirectoryStackEntry(fileId = item.path, label = item.name) }
         loadDirectoryCached(item.path)
     }
 
-    fun clearScrollTarget() { updateUiState { it.copy(scrollTargetIndex = -1) } }
+    fun clearScrollTarget() {
+        updateUiState { it.copy(scrollTargetIndex = -1) }
+    }
 
     fun navigateUp() {
         val breadcrumbs = _uiState.value.breadcrumbs
@@ -523,7 +533,9 @@ class Pan123BrowserViewModel @Inject constructor(
 
     // region ==================== 刷新 ====================
 
-    fun refresh() { loadDirectory(_uiState.value.currentFileId) }
+    fun refresh() {
+        loadDirectory(_uiState.value.currentFileId)
+    }
 
     // endregion
 
@@ -542,7 +554,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("创建失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -561,7 +573,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("删除失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -579,7 +591,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("重命名失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -595,8 +607,12 @@ class Pan123BrowserViewModel @Inject constructor(
 
     fun dismissPicker() {
         updateUiState {
-            it.copy(pendingAction = null, moveFileId = null,
-                pickerFolders = emptyList(), pickerIsLoading = false)
+            it.copy(
+                pendingAction = null,
+                moveFileId = null,
+                pickerFolders = emptyList(),
+                pickerIsLoading = false,
+            )
         }
     }
 
@@ -616,7 +632,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     updateUiState { it.copy(pickerFolders = emptyList(), pickerIsLoading = false) }
                     notifier.error("加载文件夹失败: ${e.message}")
-                }
+                },
             )
         }
     }
@@ -634,7 +650,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("创建失败: ${e.message}")
                     updateUiState { it.copy(pickerIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -654,7 +670,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("移动失败: ${e.message}")
                     updateUiState { it.copy(isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -794,7 +810,7 @@ class Pan123BrowserViewModel @Inject constructor(
             val result = apiClient.listFiles(
                 parentFileId = "0",
                 page = 1,
-                searchData = query
+                searchData = query,
             )
             result.fold(
                 onSuccess = { listResult ->
@@ -805,13 +821,13 @@ class Pan123BrowserViewModel @Inject constructor(
                             items = resources,
                             isLoading = false,
                             hasMore = listResult.items.size >= 100,
-                            currentPage = 1
+                            currentPage = 1,
                         )
                     }
                 },
                 onFailure = { e ->
                     updateUiState { it.copy(error = "搜索失败: ${e.message}", isLoading = false) }
-                }
+                },
             )
         }
     }
@@ -835,7 +851,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 },
                 onFailure = { e ->
                     notifier.error("获取账号信息失败: ${e.message}")
-                }
+                },
             )
         }
     }
@@ -903,7 +919,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("获取分享内容失败: ${e.message}")
                     updateUiState { it.copy(shareIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -930,7 +946,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("加载文件夹失败: ${e.message}")
                     updateUiState { it.copy(shareIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -958,7 +974,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("加载失败: ${e.message}")
                     updateUiState { it.copy(shareIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -1011,7 +1027,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 onFailure = { e ->
                     notifier.error("转存失败: ${e.message}")
                     updateUiState { it.copy(shareIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -1042,7 +1058,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 },
                 onFailure = {
                     updateUiState { it.copy(shareTargetPickerIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -1072,7 +1088,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 },
                 onFailure = {
                     updateUiState { it.copy(shareTargetPickerIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -1092,7 +1108,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 },
                 onFailure = {
                     updateUiState { it.copy(shareTargetPickerIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -1112,7 +1128,7 @@ class Pan123BrowserViewModel @Inject constructor(
                 },
                 onFailure = {
                     updateUiState { it.copy(shareTargetPickerIsLoading = false) }
-                }
+                },
             )
         }
     }
@@ -1188,7 +1204,7 @@ class Pan123BrowserViewModel @Inject constructor(
             thumbnailUrl = file.thumbnailUrl,
             folderSize = if (file.isDirectory) file.size else 0,
             category = pan123CategoryToLabel(file.category),
-            createdAt = file.createAt
+            createdAt = file.createAt,
         )
     }
 

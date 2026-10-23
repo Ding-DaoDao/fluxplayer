@@ -206,6 +206,9 @@ fun C189BrowserTabContent(
             playedUriSet = state.playedUriSet,
             cloudProviderKey = "cloud189",
             notificationEvents = viewModel.messageEvents,
+            providerFeatures = remember(viewModel.apiClient) { com.fluxplayer.app.core.data.cloud.CloudProviderFeatures.from(viewModel.apiClient) },
+            currentFolderId = state.currentFolderId,
+            onPlayExtraFile = onPlayVideo,
             providerMenuItems = { onDismiss ->
                 DropdownMenuItem(
                     text = { Text("签到") },
@@ -219,13 +222,6 @@ fun C189BrowserTabContent(
                     onClick = {
                         onDismiss()
                         viewModel.showUserInfo()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("打开分享链接") },
-                    onClick = {
-                        onDismiss()
-                        viewModel.showShareInput()
                     },
                 )
             },

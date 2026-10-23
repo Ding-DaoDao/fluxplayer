@@ -3,8 +3,11 @@ package com.fluxplayer.app.core.data.quark
 class QuarkCookieManager(initial: String = "") {
     private val cookies = LinkedHashMap<String, String>()
 
-    init { add(initial) }
+    init {
+        add(initial)
+    }
 
+    @Synchronized
     fun add(cookie: Any?) {
         when (cookie) {
             is String -> {
@@ -23,7 +26,11 @@ class QuarkCookieManager(initial: String = "") {
         }
     }
 
+    @Synchronized
     fun get(): String = cookies.entries.joinToString(";") { "${it.key}=${it.value}" }
 
-    fun clear() { cookies.clear() }
+    @Synchronized
+    fun clear() {
+        cookies.clear()
+    }
 }

@@ -240,6 +240,9 @@ fun AliyunBrowserTabContent(
             playedUriSet = state.playedUriSet,
             cloudProviderKey = "alipan",
             notificationEvents = viewModel.messageEvents,
+            providerFeatures = remember(viewModel.apiClient) { com.fluxplayer.app.core.data.cloud.CloudProviderFeatures.from(viewModel.apiClient) },
+            currentFolderId = state.currentFileId,
+            onPlayExtraFile = onPlayVideo,
         )
 
         val renameItem = state.items.getOrNull(renameIndex)

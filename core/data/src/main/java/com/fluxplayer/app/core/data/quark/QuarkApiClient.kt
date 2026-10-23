@@ -3,6 +3,8 @@ package com.fluxplayer.app.core.data.quark
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import com.fluxplayer.app.core.data.GlobalCookieJar
+import kotlinx.coroutines.sync.withLock
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -10,8 +12,33 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class QuarkApiClient(
-    client: OkHttpClient = CloudHttpClient.DEFAULT
+    client: OkHttpClient = CloudHttpClient.DEFAULT,
 ) : BaseCloudApiClient(client) {
+    private var sessionContext: android.content.Context? = null
+
+    fun configureSession(context: android.content.Context) {
+        sessionContext = context.applicationContext
+    }
+
+    suspend fun resolvePlaybackUrl(fid: String, name: String): String {
+        val video = Regex("\\.(mp4|mkv|avi|mov|webm|flv|m4v|ts|wmv|rmvb)$", RegexOption.IGNORE_CASE).containsMatchIn(name)
+        if (video) {
+            sessionContext?.let { context ->
+                if (driveType == "uc") {
+                    val tv = UcTvService(context)
+                    if (tv.isAuthorized()) {
+                        val url = tv.playback(fid).first().first
+                        android.net.Uri.parse(url).host?.let { com.fluxplayer.app.core.common.CloudPlayHeaders.register(it) { emptyMap() } }
+                        return url
+                    }
+                } else if (context.getSharedPreferences("quark", android.content.Context.MODE_PRIVATE).getBoolean("prefer_original_playback", false)) {
+                    getOriginalPlaybackUrl(fid, name).getOrNull()?.let { return it }
+                }
+            }
+            getVideoPlayInfo(fid).getOrNull()?.urls?.firstOrNull()?.let { return it }
+        }
+        return getDownloadUrl(fid).getOrThrow()
+    }
 
     companion object {
         private const val TAG = "QuarkApi"
@@ -22,8 +49,8 @@ class QuarkApiClient(
     private var driveType: String = "quark"
     var onCookieUpdated: ((String) -> Unit)? = null
 
-    private val baseUrl: String get() = if (driveType == "uc") "https://pc-api.uc.cn" else "https://drive.quark.cn"
-    private val homeUrl: String get() = if (driveType == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
+    private val baseUrl: String get() = if (driveType == "uc") "https://pc-api.uc.cn" else "https://drive-pc.quark.cn"
+    private val homeUrl: String get() = if (driveType == "uc") "https://drive.uc.cn/" else "https://pan.quark.cn/"
     private val pr: String get() = if (driveType == "uc") "UCBrowser" else "ucpro"
 
     fun setDriveType(type: String) {
@@ -44,6 +71,21 @@ class QuarkApiClient(
     }
 
     fun getCookie(): String = cookieManager.get()
+
+    val pageSize: Int get() = if (driveType == "uc") 50 else 100
+
+    internal suspend fun featureRequest(path: String, body: JSONObject?, query: Map<String, String> = emptyMap(), headers: Map<String, String> = emptyMap()): JSONObject {
+        val url = ("$baseUrl/1/clouddrive/$path").toHttpUrl().newBuilder()
+            .addQueryParameter("pr", pr).addQueryParameter("fr", "pc").apply {
+                query.forEach { (key, value) -> addQueryParameter(key, value) }
+            }.build().toString()
+        val requestHeaders = (if (driveType == "uc" && path.startsWith("transfer_share/")) mapOf("referer" to "https://fast.uc.cn/", "Origin" to "https://fast.uc.cn") else emptyMap()) + headers
+        val json = if (body == null) apiGet(url, extraHeaders = requestHeaders) else apiPost(url, body, extraHeaders = requestHeaders)
+        check(json.optInt("code", 0) == 0 && json.optInt("status", 200) == 200) {
+            json.optString("message", "网盘请求失败")
+        }
+        return json
+    }
     fun hasValidCookie(): Boolean {
         val c = getCookie()
         return c.contains("__uid=") && c.contains("__pus=")
@@ -51,60 +93,90 @@ class QuarkApiClient(
 
     /** 清除内存中的 Cookie 及 driveType，防止退出后残留旧账号数据 */
     fun clearCookie() {
+        if (driveType == "uc") GlobalCookieJar.setUcCookie("") else GlobalCookieJar.setQuarkCookie("")
         cookieManager.clear()
         driveType = "quark"
         onCookieUpdated = null
     }
 
+    internal fun featureHeaders(): Map<String, String> = buildHeaders()
+
     private fun buildHeaders(): Map<String, String> {
         return mapOf(
             "cookie" to getCookie(),
-            "User-Agent" to QUARK_UA,
-            "referer" to homeUrl
+            "User-Agent" to if (driveType == "uc") "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) uc-cloud-drive/1.6.1 Chrome/100.0.4896.160 Electron/18.3.5.16-b62cf9c50d Safari/537.36" else QUARK_UA,
+            "referer" to homeUrl,
+            "Origin" to homeUrl.removeSuffix("/"),
         )
     }
 
     private fun updateCookieFromResponse(resp: okhttp3.Response) {
-        val setCookie = resp.header("set-cookie") ?: return
-        cookieManager.add(setCookie)
+        val setCookies = resp.headers("set-cookie")
+        if (setCookies.isEmpty()) return
+        setCookies.forEach { cookieManager.add(it.substringBefore(';')) }
         val merged = cookieManager.get()
         QuarkAuthProvider.cookie = merged
         onCookieUpdated?.invoke(merged)
+        if (driveType == "uc") GlobalCookieJar.setUcCookie(merged) else GlobalCookieJar.setQuarkCookie(merged)
     }
 
-    private suspend fun apiGet(url: String): JSONObject {
+    private suspend fun apiGet(url: String, retry: Boolean = true, extraHeaders: Map<String, String> = emptyMap()): JSONObject {
         val builder = Request.Builder().url(url).get()
-        buildHeaders().forEach { (k, v) -> builder.header(k, v) }
+        (buildHeaders() + extraHeaders).forEach { (k, v) -> builder.header(k, v) }
         val resp = executeRequestAndGetResponse(builder.build())
         updateCookieFromResponse(resp)
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
+        if (resp.code == 401 && retry && refreshCookie()) return apiGet(url, false, extraHeaders)
         if (!resp.isSuccessful) {
             throw IllegalStateException("HTTP ${resp.code} from $url: ${respBody.take(200)}")
         }
-        return JSONObject(respBody)
+        val json = JSONObject(respBody)
+        if (retry && (json.optInt("code") == 31001 || json.optInt("status") == 401) && refreshCookie()) return apiGet(url, false, extraHeaders)
+        return json
     }
 
-    private suspend fun apiPost(url: String, body: JSONObject? = null): JSONObject {
+    private suspend fun apiPost(url: String, body: JSONObject? = null, retry: Boolean = true, extraHeaders: Map<String, String> = emptyMap()): JSONObject {
         val builder = Request.Builder().url(url)
         if (body != null) {
             builder.post(body.toString().toRequestBody(jsonMediaType))
         } else {
             builder.post("".toRequestBody(null))
         }
-        buildHeaders().forEach { (k, v) -> builder.header(k, v) }
+        (buildHeaders() + extraHeaders).forEach { (k, v) -> builder.header(k, v) }
         val resp = executeRequestAndGetResponse(builder.build())
         updateCookieFromResponse(resp)
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
+        if (resp.code == 401 && retry && refreshCookie()) return apiPost(url, body, false, extraHeaders)
         if (!resp.isSuccessful) {
             throw IllegalStateException("HTTP ${resp.code} from $url: ${respBody.take(200)}")
         }
-        return JSONObject(respBody)
+        val json = JSONObject(respBody)
+        if (retry && (json.optInt("code") == 31001 || json.optInt("status") == 401) && refreshCookie()) return apiPost(url, body, false, extraHeaders)
+        return json
+    }
+
+    private val cookieRefreshLock = kotlinx.coroutines.sync.Mutex()
+
+    private suspend fun refreshCookie(): Boolean = cookieRefreshLock.withLock {
+        val expectedType = driveType
+        val expected = getCookie()
+        if (!expected.contains("__pus=")) return@withLock false
+        val reduced = expected.split(';').filterNot { it.trim().startsWith("__puus=") }.joinToString(";")
+        val request = Request.Builder().url("$baseUrl/1/clouddrive/config?pr=$pr&fr=pc")
+        (buildHeaders() + ("cookie" to reduced)).forEach { (key, value) -> request.header(key, value) }
+        val response = executeRequestAndGetResponse(request.build())
+        response.use {
+            check(driveType == expectedType && getCookie() == expected) { "网盘账号已变化，请重新操作" }
+            if (!it.isSuccessful || it.headers("set-cookie").isEmpty()) return@withLock false
+            updateCookieFromResponse(it)
+            true
+        }
     }
 
     suspend fun listFiles(
         pdirFid: String = "0",
         page: Int = 1,
-        orderBy: String = "file_name:asc"
+        orderBy: String = "file_name:asc",
     ): Result<List<QuarkFileItem>> = runCatching {
         val url = buildString {
             append(baseUrl)
@@ -112,7 +184,7 @@ class QuarkApiClient(
             append("&pdir_fid=$pdirFid")
 
             append("&_page=$page")
-            append("&_size=100")
+            append("&_size=$pageSize")
             append("&uc_param_str=")
             append("&_fetch_total=1")
             append("&_fetch_sub_dirs=0")
@@ -142,7 +214,7 @@ class QuarkApiClient(
                 createdAt = item.optLong("created_at", 0),
                 thumbnail = item.optString("thumbnail", ""),
                 shareFidToken = item.optString("share_fid_token", ""),
-                includeItems = item.optInt("include_items", 0)
+                includeItems = item.optInt("include_items", 0),
             )
         }
     }
@@ -183,17 +255,81 @@ class QuarkApiClient(
     }
 
     suspend fun getDownloadUrl(fid: String): Result<String> = runCatching {
-        val body = JSONObject().apply {
-            put("fids", JSONArray().apply { put(fid) })
+        if (driveType == "uc") sessionContext?.let { context ->
+            val tv = UcTvService(context)
+            if (tv.isAuthorized()) return@runCatching tv.download(fid, 0)
         }
-        val json = apiPost("$baseUrl/1/clouddrive/file/download?pr=$pr&fr=pc", body)
-        // 检查 API 业务层错误（code!=0 时 data 不可用）
-        if (json.optInt("code", 0) != 0) {
-            throw IllegalStateException(json.optString("message", "下载接口错误"))
+        val body = JSONObject().put("fids", JSONArray().put(fid))
+        val json = apiPost("$baseUrl/1/clouddrive/file/download?pr=$pr&fr=pc&sys=win32&ve=${if (driveType == "uc") "1.6.1" else "3.23.2"}", body)
+        check(json.optInt("code", 0) == 0 && json.optInt("status", 200) == 200) { json.optString("message", "下载接口错误") }
+        val data = json.optJSONArray("data") ?: error("网盘未返回下载信息")
+        val items = (0 until data.length()).map { data.getJSONObject(it) }
+        val item = items.singleOrNull { it.optString("fid") == fid } ?: items.singleOrNull()?.takeIf { it.optString("fid").isBlank() } ?: error("下载文件与所选文件不一致")
+        item.optString("download_url").ifBlank { item.optString("url") }.also { url -> check(url.startsWith("https://") || url.startsWith("http://")) { "网盘未返回有效下载链接" } }
+    }
+
+    /** 使用当前账号的发送到电脑会话获取原画播放地址。 */
+    suspend fun getOriginalPlaybackUrl(fid: String, name: String = "视频"): Result<String> = runCatching {
+        check(driveType == "quark") { "此播放方式仅适用于夸克" }
+        val conversation = "3000008641494773"
+        val base = "https://drive-social-api.quark.cn/1/clouddrive/chat/conv"
+        val query = "?pr=ucpro&fr=pc&sys=win32&ve=3.19.0"
+        val localId = java.util.UUID.randomUUID().toString()
+        val body = JSONObject().put("return_msg_as_list", 1).put(
+            "conversations",
+            JSONArray().put(
+                JSONObject().put("merge_file", 0).put("conversation_id", conversation).put("conversation_type", 3)
+                    .put(
+                        "file_list",
+                        JSONArray().put(
+                            JSONObject().put("fid", fid).put("content", name)
+                                .put("client_extra", JSONObject().put("group_id", localId).put("device_model", "Administrator").put("local_msg_id", localId)),
+                        ),
+                    ),
+            ),
+        )
+        val response = apiPost("$base/msg/batch_send$query", body)
+        check(response.optInt("code", 0) == 0 && response.optInt("status", 200) == 200) { "夸克快传准备失败" }
+        val data = response.optJSONObject("data") ?: throw IllegalStateException("夸克未返回快传信息")
+        val raw = data.opt("send_msg_list") ?: data
+        val messages = if (raw is JSONArray) (0 until raw.length()).map { raw.getJSONObject(it) } else listOf(raw as JSONObject)
+        val message = selectPlaybackFile(messages, fid)
+        val messageId = message.optString("store_msg_id").ifBlank { message.optString("msg_id").ifBlank { message.optString("id") } }
+        check(messageId.isNotBlank() && messageId != "null") { "夸克未返回快传消息标识" }
+        val targetConversation = message.optString("conversation_id").ifBlank { data.optString("conversation_id").ifBlank { conversation } }
+        suspend fun token(target: String): String {
+            val json = apiPost("$base/file/acquire_dl_token$query", JSONObject().put("conversation_id", target).put("conversation_type", 3).put("msg_id", messageId))
+            check(json.optInt("code", 0) == 0 && json.optInt("status", 200) == 200) { "夸克快传授权失败" }
+            return json.getJSONObject("data").getString("token").also { check(it.isNotBlank() && it != "null" && it.none(Char::isWhitespace)) { "夸克播放授权无效" } }
         }
-        val data = json.optJSONArray("data") ?: JSONArray()
-        if (data.length() == 0) throw IllegalStateException("无下载链接")
-        data.getJSONObject(0).optString("download_url", "")
+        val authorization = try {
+            token(targetConversation)
+        } catch (error: IllegalStateException) {
+            if (targetConversation == conversation) throw error
+            token(conversation)
+        }
+        val download = apiPost(
+            "https://drive-pc.quark.cn/1/clouddrive/file/download?pr=ucpro&fr=pc&sys=win32&ve=3.23.2",
+            JSONObject()
+                .put("fids", JSONArray().put(fid)).put("speedup_session", "").put("token", authorization),
+        )
+        check(download.optInt("code", 0) == 0 && download.optInt("status", 200) == 200) { "夸克原画取址失败" }
+        val list = download.optJSONArray("data") ?: throw IllegalStateException("夸克未返回播放地址")
+        val item = selectPlaybackFile((0 until list.length()).map { list.getJSONObject(it) }, fid)
+        item.optString("download_url").ifBlank { item.optString("url") }.also { url ->
+            check(url.startsWith("https://") || url.startsWith("http://")) { "夸克返回的播放地址无效" }
+        }
+    }
+
+    private fun selectPlaybackFile(items: List<JSONObject>, fid: String): JSONObject {
+        fun identity(item: JSONObject): String = item.optString("fid").ifBlank {
+            item.optJSONObject("file")?.optString("fid").orEmpty().ifBlank {
+                item.optJSONObject("extra")?.optJSONObject("custom_extra")?.optJSONObject("file")?.optString("fid").orEmpty()
+            }
+        }
+        return items.singleOrNull { identity(it) == fid }
+            ?: items.singleOrNull()?.takeIf { identity(it).isBlank() }
+            ?: throw IllegalStateException("夸克返回的播放文件与所选文件不一致")
     }
 
     suspend fun createFolder(name: String, parentFid: String): Result<Boolean> = runCatching {
@@ -203,7 +339,7 @@ class QuarkApiClient(
             put("dir", true)
         }
         val json = apiPost("$baseUrl/1/clouddrive/file?pr=$pr&fr=pc", body)
-        json.optString("file_name") == name
+        finishMutation(json)
     }
 
     suspend fun renameFile(fid: String, newName: String): Result<Boolean> = runCatching {
@@ -212,7 +348,7 @@ class QuarkApiClient(
             put("file_name", newName)
         }
         val json = apiPost("$baseUrl/1/clouddrive/file/rename?pr=$pr&fr=pc", body)
-        json.optString("file_name") == newName
+        finishMutation(json)
     }
 
     suspend fun deleteFiles(fids: List<String>): Result<Boolean> = runCatching {
@@ -222,9 +358,7 @@ class QuarkApiClient(
             put("exclude_fids", JSONArray())
         }
         val json = apiPost("$baseUrl/1/clouddrive/file/delete?pr=$pr&fr=pc", body)
-        json.optInt("code", -1) == 0 || throw IllegalStateException(
-            json.optString("message", "删除失败")
-        )
+        finishMutation(json)
     }
 
     suspend fun moveFiles(fids: List<String>, toPdirFid: String): Result<Boolean> = runCatching {
@@ -235,8 +369,21 @@ class QuarkApiClient(
             put("exclude_fids", JSONArray())
         }
         val json = apiPost("$baseUrl/1/clouddrive/file/move?pr=$pr&fr=pc", body)
-        json.optInt("code", -1) == 0 || throw IllegalStateException(
-            json.optString("message", "移动失败")
-        )
+        finishMutation(json)
+    }
+
+    private suspend fun finishMutation(json: JSONObject): Boolean {
+        check(json.optInt("code", 0) == 0 && json.optInt("status", 200) == 200) { json.optString("message", "网盘操作失败") }
+        val taskId = json.optJSONObject("data")?.optString("task_id").orEmpty()
+        if (taskId.isBlank()) return true
+        repeat(40) { attempt ->
+            val result = featureRequest("task", null, mapOf("task_id" to taskId, "retry_index" to attempt.toString()))
+            val data = result.optJSONObject("data") ?: error("网盘任务响应不完整")
+            val status = data.optInt("status", data.optInt("task_status"))
+            check(status !in setOf(3, 4)) { "网盘文件操作失败" }
+            if (status == 2 || data.optLong("finished_at") > 0) return true
+            kotlinx.coroutines.delay(750)
+        }
+        error("网盘文件操作超时，请刷新目录确认")
     }
 }

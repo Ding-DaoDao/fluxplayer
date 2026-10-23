@@ -1,6 +1,5 @@
 package com.fluxplayer.app.core.data.yun139
 
-import android.util.Log
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import okhttp3.OkHttpClient
@@ -10,7 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class Yun139ApiClient(
-    client: OkHttpClient = CloudHttpClient.DEFAULT
+    client: OkHttpClient = CloudHttpClient.DEFAULT,
 ) : BaseCloudApiClient(client) {
 
     companion object {
@@ -42,6 +41,16 @@ class Yun139ApiClient(
 
     fun isLoggedIn(): Boolean = Yun139AuthProvider.isActive
 
+    internal suspend fun featureRequest(path: String, body: JSONObject): JSONObject {
+        val json = apiPost(
+            if (path.startsWith("https://")) path else "$BASE_URL/hcy/file/$path",
+            body,
+            com.fluxplayer.app.core.data.cloud.MobileCloudProtocol.cloudHeaders(body.toString()),
+        )
+        com.fluxplayer.app.core.data.cloud.MobileCloudProtocol.checkResponse(json)
+        return json
+    }
+
     // endregion
 
     // region ==================== Headers ====================
@@ -60,7 +69,7 @@ class Yun139ApiClient(
             "content-type" to "application/json; charset=UTF-8",
             "User-Agent" to DEFAULT_UA,
             "x-yun-uni" to uni(),
-            "Referer" to "https://yun.139.com/"
+            "Referer" to "https://yun.139.com/",
         )
 
     private val downloadHeaders: Map<String, String>
@@ -73,7 +82,7 @@ class Yun139ApiClient(
             "authorization" to auth(),
             "content-type" to "application/json; charset=UTF-8",
             "User-Agent" to DEFAULT_UA,
-            "x-yun-uni" to uni()
+            "x-yun-uni" to uni(),
         )
 
     private val videoPreviewHeaders: Map<String, String>
@@ -90,7 +99,7 @@ class Yun139ApiClient(
             "authorization" to auth(),
             "content-type" to "application/json; charset=UTF-8",
             "User-Agent" to DEFAULT_UA,
-            "x-yun-uni" to uni()
+            "x-yun-uni" to uni(),
         )
 
     private val fileMgmtHeaders: Map<String, String>
@@ -106,7 +115,7 @@ class Yun139ApiClient(
             "authorization" to auth(),
             "content-type" to "application/json; charset=UTF-8",
             "User-Agent" to DEFAULT_UA,
-            "x-yun-uni" to uni()
+            "x-yun-uni" to uni(),
         )
 
     // endregion
@@ -116,7 +125,7 @@ class Yun139ApiClient(
     private suspend fun apiPost(
         url: String,
         body: JSONObject?,
-        headers: Map<String, String>
+        headers: Map<String, String>,
     ): JSONObject {
         val bodyStr = body?.toString() ?: ""
         val builder = Request.Builder().url(url)
@@ -125,10 +134,12 @@ class Yun139ApiClient(
         val req = builder.build()
         // 整个请求 + 读取 body 都在 IO 线程完成
         val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val resp = executeRequestAndGetResponse(req)
-            resp.body?.string() ?: ""
+            executeRequestAndGetResponse(req).use { response ->
+                check(response.isSuccessful) { "移动云盘请求失败（HTTP ${response.code}）" }
+                response.body?.string() ?: error("移动云盘响应为空")
+            }
         }
-        return JSONObject(text)
+        return JSONObject(text).also { com.fluxplayer.app.core.data.cloud.MobileCloudProtocol.checkResponse(it) }
     }
 
     // endregion
@@ -140,13 +151,16 @@ class Yun139ApiClient(
         pageCursor: String? = null,
         pageSize: Int = 100,
         orderBy: String = "updated_at",
-        orderDirection: String = "DESC"
+        orderDirection: String = "DESC",
     ): Result<Yun139ListResult> = runCatching {
         val body = JSONObject().apply {
-            put("pageInfo", JSONObject().apply {
-                put("pageSize", pageSize)
-                put("pageCursor", pageCursor ?: JSONObject.NULL)
-            })
+            put(
+                "pageInfo",
+                JSONObject().apply {
+                    put("pageSize", pageSize)
+                    put("pageCursor", pageCursor ?: JSONObject.NULL)
+                },
+            )
             put("orderBy", orderBy)
             put("orderDirection", orderDirection)
             put("parentFileId", folderId)
@@ -181,7 +195,7 @@ class Yun139ApiClient(
                         .firstOrNull { it.optString("style") == "Large" }
                         ?.optString("url", "")
                         ?.ifBlank { null }
-                }
+                },
             )
         }
         Yun139ListResult(items, 0, nextPageCursor)
@@ -214,46 +228,41 @@ class Yun139ApiClient(
     }
 
     suspend fun createFolder(parentFolderId: String, folderName: String): Result<Boolean> = runCatching {
-        val body = JSONObject().apply {
-            put("contentType", JSONObject.NULL)
-            put("description", JSONObject.NULL)
-            put("fileId", JSONObject.NULL)
-            put("fileRenameMode", JSONObject.NULL)
-            put("name", folderName)
-            put("ownerId", JSONObject.NULL)
-            put("parentFileId", parentFolderId)
-            put("parentPath", JSONObject.NULL)
-            put("type", "folder")
-        }
-        apiPost("$BASE_URL/hcy/file/create", body, fileMgmtHeaders)
+        val response = featureRequest("create", JSONObject().put("parentFileId", parentFolderId).put("name", folderName).put("description", "").put("type", "folder").put("fileRenameMode", "force_rename"))
+        check(response.optJSONObject("data")?.optString("fileId").orEmpty().isNotBlank()) { "移动未确认文件夹创建，请刷新后确认" }
         true
     }
 
     suspend fun renameFile(fileId: String, newName: String): Result<Boolean> = runCatching {
-        val body = JSONObject().apply {
-            put("FileRenameMode", JSONObject.NULL)
-            put("description", JSONObject.NULL)
-            put("fileId", fileId)
-            put("name", newName)
-        }
-        apiPost("$BASE_URL/hcy/file/update", body, fileMgmtHeaders)
+        featureRequest("update", JSONObject().put("fileId", fileId).put("name", newName).put("description", ""))
         true
     }
 
-    suspend fun deleteFiles(fileIds: List<String>): Result<Boolean> = runCatching {
-        val body = JSONObject().apply {
-            put("fileIds", JSONArray(fileIds))
+    private suspend fun awaitFileTask(response: JSONObject) {
+        val taskId = response.optJSONObject("data")?.optString("taskId").orEmpty()
+        check(taskId.isNotBlank()) { "移动未返回操作任务编号，请刷新目录确认" }
+        repeat(30) {
+            val result = apiPost("$BASE_URL/hcy/task/get", JSONObject().put("taskId", taskId), com.fluxplayer.app.core.data.cloud.MobileCloudProtocol.cloudHeaders(JSONObject().put("taskId", taskId).toString()))
+                .getJSONObject("data")
+            val info = result.getJSONObject("taskInfo")
+            val status = info.optString("status").lowercase(java.util.Locale.US)
+            check(status !in setOf("failed", "error", "cancelled", "3", "4")) { "移动文件操作失败" }
+            val entries = result.optJSONArray("batchFileResults")
+            check(entries == null || (0 until entries.length()).all { index -> entries.getJSONObject(index).optString("errCode") in setOf("", "0", "0000") }) { "部分移动云盘文件操作失败，请刷新目录确认" }
+            if (info.optInt("progress") >= 100 || status in setOf("success", "succeed", "completed", "done", "2")) return
+            kotlinx.coroutines.delay(750)
         }
-        apiPost("$BASE_URL/hcy/recyclebin/batchTrash", body, fileMgmtHeaders)
+        error("移动文件操作仍在处理中，请稍后刷新确认")
+    }
+
+    suspend fun deleteFiles(fileIds: List<String>): Result<Boolean> = runCatching {
+        val body = JSONObject().put("fileIds", JSONArray(fileIds))
+        awaitFileTask(apiPost("$BASE_URL/hcy/recyclebin/batchTrash", body, com.fluxplayer.app.core.data.cloud.MobileCloudProtocol.cloudHeaders(body.toString())))
         true
     }
 
     suspend fun moveFiles(fileIds: List<String>, targetFolderId: String): Result<Boolean> = runCatching {
-        val body = JSONObject().apply {
-            put("fileIds", JSONArray(fileIds))
-            put("toParentFileId", targetFolderId)
-        }
-        apiPost("$BASE_URL/hcy/file/batchMove", body, fileMgmtHeaders)
+        awaitFileTask(featureRequest("batchMove", JSONObject().put("fileIds", JSONArray(fileIds)).put("toParentFileId", targetFolderId)))
         true
     }
 
@@ -277,7 +286,7 @@ class Yun139ApiClient(
             "content-type" to "application/json; charset=UTF-8",
             "User-Agent" to DEFAULT_UA,
             "authorization" to auth(),
-            "x-yun-uni" to uni()
+            "x-yun-uni" to uni(),
         )
         val json = apiPost("$USER_BASE/user/auth/refreshToken", body, loginHeaders)
         val success = json.optBoolean("success", false) || json.optString("message", "") == "请求成功"
@@ -287,7 +296,7 @@ class Yun139ApiClient(
             if (token.isNotBlank()) {
                 val phone = Yun139AuthProvider.phoneNumber
                 val newAuth = "Basic " + android.util.Base64.encodeToString(
-                    "mobile:$phone:$token".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP
+                    "mobile:$phone:$token".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP,
                 )
                 Yun139AuthProvider.authorization = newAuth
             }

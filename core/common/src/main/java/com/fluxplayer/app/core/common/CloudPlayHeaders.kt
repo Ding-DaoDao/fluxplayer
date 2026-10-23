@@ -11,6 +11,10 @@ import android.net.Uri
  * 查找优先级：精确匹配 > 最长后缀匹配
  */
 object CloudPlayHeaders {
+    @Volatile var activeProvider: String = ""
+
+    fun isExplicitlyAnonymous(domain: String): Boolean = exactMatchers[domain]?.invoke()?.isEmpty() == true
+
     private val exactMatchers = mutableMapOf<String, () -> Map<String, String>>()
     private val suffixMatchers = mutableMapOf<String, () -> Map<String, String>>()
 
@@ -63,6 +67,7 @@ object CloudPlayHeaders {
     }
 
     fun clear() {
+        activeProvider = ""
         exactMatchers.clear()
         suffixMatchers.clear()
     }

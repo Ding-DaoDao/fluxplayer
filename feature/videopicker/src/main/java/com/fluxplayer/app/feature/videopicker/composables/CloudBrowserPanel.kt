@@ -114,6 +114,9 @@ fun <T> CloudBrowserPanel(
     cloudProviderKey: String = "",
     providerMenuItems: @Composable ((onDismiss: () -> Unit) -> Unit) = {},
     notificationEvents: SharedFlow<FluxMessageEvent>? = null,
+    providerFeatures: com.fluxplayer.app.core.data.cloud.CloudProviderFeatures? = null,
+    currentFolderId: String = "",
+    onPlayExtraFile: (android.net.Uri, String?) -> Unit = { _, _ -> },
 ) {
     // 从 navigationStack 或扁平参数获取当前目录状态
     val topEntry = navigationStack.lastOrNull()
@@ -122,6 +125,7 @@ fun <T> CloudBrowserPanel(
     val curError = topEntry?.error ?: error
     var showExitConfirm by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var featureAction by remember { mutableStateOf<CloudFeatureAction?>(null) }
 
     // 缓存每层目录的 LazyListState，使得返回时滚动位置保持不变
     val listStateCache = remember { mutableStateMapOf<String, androidx.compose.foundation.lazy.LazyListState>() }
@@ -136,7 +140,12 @@ fun <T> CloudBrowserPanel(
         var isNearBottom by remember { mutableStateOf(false) }
         Column(modifier = Modifier.fillMaxSize()) {
             if (!isConfigured) {
-                loginContent()
+                Box(Modifier.weight(1f)) { loginContent() }
+                if (providerFeatures != null) {
+                    TextButton(onClick = { featureAction = CloudFeatureAction.Import }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Text("浏览分享链接")
+                    }
+                }
             } else {
                 // 顶层：网盘名 + 设置按钮
                 ProviderTopBar(
@@ -156,6 +165,27 @@ fun <T> CloudBrowserPanel(
                     onMenuDismiss = { showMenu = false },
                     menuContent = {
                         providerMenuItems.invoke({ showMenu = false })
+                        if (providerFeatures != null) {
+                            HorizontalDivider()
+                            val actions = buildList {
+                                add(CloudFeatureAction.Search)
+                                add(CloudFeatureAction.Upload)
+                                add(CloudFeatureAction.Create)
+                                add(CloudFeatureAction.Import)
+                                if (providerFeatures.provider in setOf("alipan", "yun139", "cloud189")) add(CloudFeatureAction.Spaces)
+                                if (providerFeatures.provider in setOf("alipan", "quark", "uc", "yun139")) add(CloudFeatureAction.Account)
+                                if (providerFeatures.provider in setOf("quark", "uc")) add(CloudFeatureAction.Playback)
+                            }
+                            actions.forEach { action ->
+                                DropdownMenuItem(
+                                    text = { Text(if (action == CloudFeatureAction.Spaces && providerFeatures.provider == "alipan") "相册" else action.label) },
+                                    onClick = {
+                                        showMenu = false
+                                        featureAction = action
+                                    },
+                                )
+                            }
+                        }
                         HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text("退出") },
@@ -358,6 +388,21 @@ fun <T> CloudBrowserPanel(
                 onRetry = { onRefresh() },
                 modifier = Modifier
                     .align(Alignment.BottomCenter),
+            )
+        }
+    }
+
+    if (featureAction != null && providerFeatures != null) {
+        key(isConfigured, providerFeatures, featureAction) {
+            CloudFeaturesDialog(
+                features = providerFeatures,
+                parentId = currentFolderId,
+                currentItems = curItems,
+                onRefresh = onRefresh,
+                onPlay = onPlayExtraFile,
+                onDismiss = { featureAction = null },
+                isLoggedIn = isConfigured,
+                action = checkNotNull(featureAction),
             )
         }
     }

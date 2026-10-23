@@ -31,7 +31,7 @@ import androidx.media3.datasource.TransferListener
  */
 class AuthAwareDataSourceFactory(
     private val context: Context,
-    userAgent: String = "NextPlayer",
+    private val userAgent: String = "NextPlayer",
 ) : DataSource.Factory {
 
     private val httpFactory = DefaultHttpDataSource.Factory()
@@ -41,9 +41,7 @@ class AuthAwareDataSourceFactory(
         .setAllowCrossProtocolRedirects(true)
 
     override fun createDataSource(): DataSource {
-        if (QuarkAuthProvider.isActive) {
-            httpFactory.setUserAgent(QuarkAuthProvider.userAgent)
-        }
+        httpFactory.setUserAgent(if (CloudPlayHeaders.activeProvider in setOf("quark", "uc")) QuarkAuthProvider.userAgent else userAgent)
         return AuthAwareDataSource(
             httpDelegate = httpFactory.createDataSource(),
             fileDelegate = FileDataSource(),
@@ -91,8 +89,12 @@ private class AuthAwareDataSource(
 
         val (delegate, effectiveSpec) = when (scheme) {
             "http", "https" -> {
-                applyHttpAuth(httpDelegate, uri)
-                applyCloudPlayHeaders(httpDelegate, uri)
+                // 数据源可能复用到另一家网盘，先清理上次请求的认证头。
+                httpDelegate.clearAllRequestProperties()
+                if (!CloudPlayHeaders.isSelfAuthenticatingUrl(uri.toString()) && !CloudPlayHeaders.isExplicitlyAnonymous(uri.host.orEmpty())) {
+                    applyHttpAuth(httpDelegate, uri)
+                    applyCloudPlayHeaders(httpDelegate, uri)
+                }
                 val strippedSpec = stripUserInfo(dataSpec, uri)
                 httpDelegate to strippedSpec
             }
@@ -250,25 +252,25 @@ private class AuthAwareDataSource(
             }
             // HLS .ts 分片兜底：当 fragment 和 CloudPlayHeaders 域名均未命中时，
             // 为当前 active 的云盘注入基础认证头，防止 CDN 边缘节点拒绝请求。
-            // 由于 resolve 时已执行 clearOtherProviders()，同一时刻只有一个 Provider active。
-            if (QuarkAuthProvider.isActive) {
+            // 由解析器单独记录当前播放来源，各家账号的登录态可以同时保留。
+            if (CloudPlayHeaders.activeProvider in setOf("quark", "uc") && QuarkAuthProvider.isActive) {
                 http.setRequestProperty("Cookie", QuarkAuthProvider.cookie)
                 http.setRequestProperty("User-Agent", QuarkAuthProvider.userAgent)
-            } else if (AliyunAuthProvider.isActive) {
+            } else if (CloudPlayHeaders.activeProvider == "alipan" && AliyunAuthProvider.isActive) {
                 http.setRequestProperty("Authorization", AliyunAuthProvider.authorization)
                 http.setRequestProperty("Referer", "https://www.alipan.com/")
                 http.setRequestProperty("User-Agent", AliyunAuthProvider.userAgent)
-            } else if (Pan123AuthProvider.isActive) {
+            } else if (CloudPlayHeaders.activeProvider == "pan123" && Pan123AuthProvider.isActive) {
                 Log.d(TAG, "applyHttpAuth: FALLBACK - Pan123AuthProvider.isActive, setting headers")
                 Log.d(TAG, "applyHttpAuth: FALLBACK - referer=${Pan123AuthProvider.referer}, ua=${Pan123AuthProvider.userAgent}")
                 http.setRequestProperty("Referer", Pan123AuthProvider.referer)
                 http.setRequestProperty("User-Agent", Pan123AuthProvider.userAgent)
                 http.setRequestProperty("X-MF-PAN-RANGE", "1")
                 Log.d(TAG, "applyHttpAuth: FALLBACK - Pan123 headers SET")
-            } else if (C189AuthProvider.isActive) {
+            } else if (CloudPlayHeaders.activeProvider == "cloud189" && C189AuthProvider.isActive) {
                 http.setRequestProperty("Cookie", "COOKIE_LOGIN_USER=${C189AuthProvider.accessToken}")
                 http.setRequestProperty("User-Agent", C189AuthProvider.userAgent)
-            } else if (Yun139AuthProvider.isActive) {
+            } else if (CloudPlayHeaders.activeProvider == "yun139" && Yun139AuthProvider.isActive) {
                 http.setRequestProperty("Authorization", Yun139AuthProvider.authorization)
                 http.setRequestProperty("x-yun-device-id", Yun139AuthProvider.deviceInfo)
                 http.setRequestProperty("x-yun-api-version", "v2")

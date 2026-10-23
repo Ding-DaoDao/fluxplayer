@@ -1,21 +1,9 @@
 package com.fluxplayer.app.core.data.cloud189
 
-import android.util.Base64
 import android.util.Log
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import com.fluxplayer.app.core.data.GlobalCookieJar
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.MessageDigest
@@ -23,9 +11,18 @@ import java.text.SimpleDateFormat
 import java.util.*
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 
 class C189ApiClient(
-    client: OkHttpClient = CloudHttpClient.DEFAULT
+    client: OkHttpClient = CloudHttpClient.DEFAULT,
 ) : BaseCloudApiClient(client) {
 
     companion object {
@@ -37,13 +34,19 @@ class C189ApiClient(
     // 所有客户端读取同一份凭证，播放刷新后浏览页不会继续使用旧会话。
     var accessToken: String
         get() = C189AuthProvider.accessToken
-        set(value) { C189AuthProvider.accessToken = value }
+        set(value) {
+            C189AuthProvider.accessToken = value
+        }
     var sessionKey: String
         get() = C189AuthProvider.sessionKey
-        set(value) { C189AuthProvider.sessionKey = value }
+        set(value) {
+            C189AuthProvider.sessionKey = value
+        }
     var sessionSecret: String
         get() = C189AuthProvider.sessionSecret
-        set(value) { C189AuthProvider.sessionSecret = value }
+        set(value) {
+            C189AuthProvider.sessionSecret = value
+        }
 
     // ==================== 密码学工具 ====================
 
@@ -89,7 +92,11 @@ class C189ApiClient(
         }
 
     private fun responseError(body: String, httpCode: Int): C189ApiException? {
-        val json = try { JSONObject(body) } catch (_: Exception) { null }
+        val json = try {
+            JSONObject(body)
+        } catch (_: Exception) {
+            null
+        }
         val code = json?.let {
             listOf("errorCode", "res_code", "code").map { key -> it.optString(key, "") }
                 .firstOrNull { value -> value.isNotBlank() && value != "0" && value != "200" && value != "SUCCESS" }
@@ -106,7 +113,9 @@ class C189ApiClient(
 
     /** GET — session HMAC-SHA1 签名 (api.cloud.189.cn) */
     private suspend fun signedGet(
-        path: String, queryParams: Map<String, String> = emptyMap(), retry: Boolean = true
+        path: String,
+        queryParams: Map<String, String> = emptyMap(),
+        retry: Boolean = true,
     ): JSONObject {
         val credentials = C189AuthProvider.snapshot()
         val sk = credentials.sessionKey
@@ -121,7 +130,9 @@ class C189ApiClient(
         val date = buildDateHeader()
         val queryStr = if (queryParams.isNotEmpty()) {
             "?" + queryParams.entries.joinToString("&") { "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}" }
-        } else ""
+        } else {
+            ""
+        }
 
         val requestUri = path.substringBefore("?")
         val sigData = "SessionKey=$sk&Operate=GET&RequestURI=$requestUri&Date=$date"
@@ -154,7 +165,9 @@ class C189ApiClient(
 
     /** POST — session HMAC-SHA1 签名 (api.cloud.189.cn) */
     private suspend fun signedPost(
-        path: String, formParams: Map<String, String> = emptyMap(), retry: Boolean = true
+        path: String,
+        formParams: Map<String, String> = emptyMap(),
+        retry: Boolean = true,
     ): JSONObject {
         val credentials = C189AuthProvider.snapshot()
         val sk = credentials.sessionKey
@@ -202,7 +215,9 @@ class C189ApiClient(
 
     /** POST — accessToken + MD5 签名 → cloud.189.cn/api/open/ */
     private suspend fun openApiPost(
-        actionPath: String, formParams: Map<String, String>, retry: Boolean = true
+        actionPath: String,
+        formParams: Map<String, String>,
+        retry: Boolean = true,
     ): JSONObject {
         val credentials = C189AuthProvider.snapshot()
         val at = credentials.accessToken
@@ -247,7 +262,9 @@ class C189ApiClient(
 
     /** GET — open API: cloud.189.cn/api/open/{actionPath} + MD5 签名 (参数放 URL) */
     private suspend fun openApiGet(
-        actionPath: String, queryParams: Map<String, String>, retry: Boolean = true
+        actionPath: String,
+        queryParams: Map<String, String>,
+        retry: Boolean = true,
     ): JSONObject {
         val credentials = C189AuthProvider.snapshot()
         val at = credentials.accessToken
@@ -308,7 +325,7 @@ class C189ApiClient(
                     .header("signature", signature)
                     .header("date", date)
                     .header("Cookie", cookies)
-                    .build()
+                    .build(),
             )
             val body = resp.use { it.body?.string() } ?: return false
             val json = JSONObject(body)
@@ -338,7 +355,7 @@ class C189ApiClient(
                 .url("https://open.e.189.cn/api/logbox/config/encryptConf.do")
                 .header("User-Agent", ua)
                 .post("appId=$appKey".toRequestBody(formUrlEncoded))
-                .build()
+                .build(),
         )
         if (encryptRespBody.isNullOrBlank()) throw IllegalStateException("[Step1] 获取加密配置失败: 空响应")
 
@@ -352,13 +369,13 @@ class C189ApiClient(
         // ---- 2) 获取登录页 lt / reqId / paramId ----
         val noRedirectClient = CloudHttpClient.NO_REDIRECT
         val unifyUrl = "https://cloud.189.cn/api/portal/unifyLoginForPC.action?" +
-                "appId=$appKey&clientType=10020" +
-                "&returnURL=${URLEncoder.encode(returnUrl, "UTF-8")}" +
-                "&timeStamp=${System.currentTimeMillis()}"
+            "appId=$appKey&clientType=10020" +
+            "&returnURL=${URLEncoder.encode(returnUrl, "UTF-8")}" +
+            "&timeStamp=${System.currentTimeMillis()}"
 
         val location = withContext(Dispatchers.IO) {
             val resp = noRedirectClient.newCall(
-                Request.Builder().url(unifyUrl).header("User-Agent", ua).get().build()
+                Request.Builder().url(unifyUrl).header("User-Agent", ua).get().build(),
             ).execute()
             val loc = resp.header("Location")
             resp.close()
@@ -367,7 +384,7 @@ class C189ApiClient(
 
         val html = withContext(Dispatchers.IO) {
             val resp = noRedirectClient.newCall(
-                Request.Builder().url(location).header("User-Agent", ua).get().build()
+                Request.Builder().url(location).header("User-Agent", ua).get().build(),
             ).execute()
             val h = resp.body?.string()
             resp.close()
@@ -406,7 +423,7 @@ class C189ApiClient(
                 .header("lt", lt)
                 .header("REQID", reqId)
                 .post(loginBody.toRequestBody(formUrlEncoded))
-                .build()
+                .build(),
         )
         if (loginRespBody.isNullOrBlank()) throw IllegalStateException("[Step3] 登录请求返回空")
 
@@ -421,15 +438,17 @@ class C189ApiClient(
         val sessionResp = withContext(Dispatchers.IO) {
             client.newCall(
                 Request.Builder()
-                    .url("https://api.cloud.189.cn/getSessionForPC.action?" +
+                    .url(
+                        "https://api.cloud.189.cn/getSessionForPC.action?" +
                             "appId=$appKey&clientType=TELEPC&version=6.2" +
                             "&channelId=web_cloud.189.cn" +
                             "&rand=${System.currentTimeMillis()}" +
-                            "&redirectURL=${URLEncoder.encode(toUrl, "UTF-8")}")
+                            "&redirectURL=${URLEncoder.encode(toUrl, "UTF-8")}",
+                    )
                     .header("User-Agent", ua)
                     .header("accept", "application/json;charset=UTF-8")
                     .post("".toRequestBody(null))
-                    .build()
+                    .build(),
             ).execute()
         }
         val sessionRespBody = sessionResp.body?.string()
@@ -460,7 +479,7 @@ class C189ApiClient(
                     .header("Signature", sig)
                     .header("Timestamp", ts)
                     .header("AppKey", "600100422")
-                    .get().build()
+                    .get().build(),
             ).execute()
         }
         val atBody = atResp.body?.string() ?: "{}"
@@ -468,10 +487,17 @@ class C189ApiClient(
         val accessToken = atJson.optString("accessToken", "")
         if (accessToken.isBlank()) throw IllegalStateException("[Step5] 换取 accessToken 失败: ${atBody.take(200)}")
 
-        check(C189AuthProvider.replaceIfCurrent(expected, C189AuthProvider.Credentials(
-            accessToken = accessToken, sessionKey = sessionKey,
-            sessionSecret = sessionSecret, refreshToken = refreshToken,
-        ))) { "登录状态已改变，请重试" }
+        check(
+            C189AuthProvider.replaceIfCurrent(
+                expected,
+                C189AuthProvider.Credentials(
+                    accessToken = accessToken,
+                    sessionKey = sessionKey,
+                    sessionSecret = sessionSecret,
+                    refreshToken = refreshToken,
+                ),
+            ),
+        ) { "登录状态已改变，请重试" }
 
         "ok"
     }
@@ -488,7 +514,7 @@ class C189ApiClient(
                 .url("https://open.e.189.cn/api/logbox/config/encryptConf.do")
                 .get()
                 .header("User-Agent", C189AuthProvider.userAgent)
-                .build()
+                .build(),
         ) ?: throw IllegalStateException("获取加密配置失败: 空响应")
         val json = JSONObject(respBody)
         val result = json.optInt("result", -1)
@@ -541,7 +567,7 @@ class C189ApiClient(
                 .url("https://open.e.189.cn/api/logbox/oauth2/sdk/sendSmsCode.do")
                 .post(body.toRequestBody(formUrlEncoded))
                 .header("User-Agent", C189AuthProvider.userAgent)
-                .build()
+                .build(),
         ) ?: throw IllegalStateException("发送验证码失败: 空响应")
 
         val json = JSONObject(respBody)
@@ -591,7 +617,7 @@ class C189ApiClient(
                 .url("https://open.e.189.cn/api/logbox/oauth2/oAuth2SdkLoginByPassword.do")
                 .post(loginBody.toRequestBody(formUrlEncoded))
                 .header("User-Agent", C189AuthProvider.userAgent)
-                .build()
+                .build(),
         ) ?: throw IllegalStateException("[SMS Step3] 登录请求返回空")
 
         val loginJson = try {
@@ -654,7 +680,7 @@ class C189ApiClient(
             "osVersion" to "29",
             "networkAccessMode" to "WIFI",
             "telecomsOperator" to "460011",
-            "channelId" to "nearme"
+            "channelId" to "nearme",
         )
 
         val queryStr = params.entries.joinToString("&") {
@@ -668,7 +694,7 @@ class C189ApiClient(
                 .header("User-Agent", "okhttp/3.12.2")
                 .header("accept", "application/json;charset=UTF-8")
                 .header("appkey", "600100885")
-                .build()
+                .build(),
         )
 
         val body = resp.body?.string()
@@ -682,7 +708,7 @@ class C189ApiClient(
         val resCode = json.optInt("res_code", -1)
         if (resCode != 0) {
             throw IllegalStateException(
-                "[login4MergedClient] 失败: $resCode ${json.optString("res_message", "")}"
+                "[login4MergedClient] 失败: $resCode ${json.optString("res_message", "")}",
             )
         }
 
@@ -709,7 +735,7 @@ class C189ApiClient(
             "23013PC75G", "23013PC75I", "24122RKC7C", "24127RK2CC", "24108PN61G",
             "24108PN61I", "24097PN53G", "24097PN53I", "24129PN74C", "24129PN74G",
             "24129PN74I", "2412DRT0AC", "2412DPC0AG", "2412DPC0AI", "2510DRK44C",
-            "25102RKBEC", "25087PN36C", "25098PN5AC", "25010PN30G", "25067PYE3C"
+            "25102RKBEC", "25087PN36C", "25098PN5AC", "25010PN30G", "25067PYE3C",
         )
         return devices[(Math.random() * devices.size).toInt()]
     }
@@ -737,9 +763,13 @@ class C189ApiClient(
                         Request.Builder()
                             .url("https://open.e.189.cn/api/oauth2/refreshToken.do")
                             .header("User-Agent", C189AuthProvider.userAgent)
-                            .post(("clientId=8025431004&refreshToken=" + URLEncoder.encode(current.refreshToken, "UTF-8") +
-                                "&grantType=refresh_token&format=json").toRequestBody(formUrlEncoded))
-                            .build()
+                            .post(
+                                (
+                                    "clientId=8025431004&refreshToken=" + URLEncoder.encode(current.refreshToken, "UTF-8") +
+                                        "&grantType=refresh_token&format=json"
+                                    ).toRequestBody(formUrlEncoded),
+                            )
+                            .build(),
                     ) ?: throw IllegalStateException("刷新凭证响应为空")
                     val json = JSONObject(body)
                     val newToken = json.optString("accessToken", "")
@@ -768,7 +798,7 @@ class C189ApiClient(
                             .header("Signature", signature)
                             .header("Timestamp", timestamp)
                             .header("AppKey", "600100422")
-                            .build()
+                            .build(),
                     ) ?: return@withLock false
                     val token = JSONObject(body).optString("accessToken", "")
                     if (token.isBlank()) return@withLock false
@@ -799,7 +829,7 @@ class C189ApiClient(
             val body = executeRequestOrNull(
                 Request.Builder().url(url).header("User-Agent", "Android")
                     .header("accept", "application/json;charset=UTF-8")
-                    .header("appkey", "600100885").build()
+                    .header("appkey", "600100885").build(),
             ) ?: continue
             val json = JSONObject(body)
             val key = json.optString("sessionKey", "")
@@ -821,6 +851,98 @@ class C189ApiClient(
     }
 
     fun isLoggedIn(): Boolean = C189AuthProvider.hasValidSession()
+
+    private data class FamilyAccess(val credentials: C189AuthProvider.Credentials, val cookie: String, val token: String)
+    private var familyAccess: FamilyAccess? = null
+    private val familyAccessMutex = kotlinx.coroutines.sync.Mutex()
+
+    /** 网页扩展接口沿用网页登录 Cookie，上传和家庭云先取得网页会话。 */
+    private suspend fun webFeatureRequest(
+        path: String,
+        params: Map<String, String> = emptyMap(),
+        post: Boolean = false,
+        jsonBody: Boolean = false,
+        public: Boolean = false,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): JSONObject {
+        val url = okhttp3.HttpUrl.Builder().scheme("https").host("cloud.189.cn").addPathSegments("api/$path")
+        if (!post) params.forEach { (key, value) -> url.addQueryParameter(key, value) }
+        url.addQueryParameter("noCache", System.currentTimeMillis().toString())
+        val request = Request.Builder().url(url.build())
+            .header("Accept", "application/json;charset=UTF-8").header("Referer", "https://cloud.189.cn/web/")
+            .header("Origin", "https://cloud.189.cn").header("User-Agent", C189AuthProvider.userAgent).header("Sign-Type", "1")
+        val cookies = saveCookies().ifBlank { getSessionCookie() }
+        if (public) request.header("Cookie", "") else if (cookies.isNotBlank()) request.header("Cookie", cookies)
+        extraHeaders.forEach { (key, value) -> request.header(key, value) }
+        if (post) {
+            val payload = JSONObject(params)
+            if (params.containsKey("fileIdList")) payload.put("fileIdList", JSONArray(params.getValue("fileIdList")))
+            request.post(if (jsonBody) payload.toString().toRequestBody(jsonMediaType) else params.entries.joinToString("&") { "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}" }.toRequestBody(formUrlEncoded))
+        }
+        val response = executeRequestAndGetResponse(request.build())
+        return response.use {
+            val body = it.body?.string().orEmpty()
+            responseError(body, it.code)?.let { error -> throw error }
+            check(it.isSuccessful) { "天翼网页接口请求失败（HTTP ${it.code}）" }
+            JSONObject(body)
+        }
+    }
+
+    private suspend fun familyAccessToken(): String = familyAccessMutex.withLock {
+        val expected = C189AuthProvider.snapshot()
+        val cookie = saveCookies()
+        familyAccess?.takeIf { it.credentials === expected && it.cookie == cookie }?.let { return@withLock it.token }
+        val session = webFeatureRequest("portal/v2/getUserBriefInfo.action").optString("sessionKey")
+        check(session.isNotBlank()) { "天翼未返回网页会话，请重新登录" }
+        val timestamp = System.currentTimeMillis().toString()
+        val headers = mapOf("AppKey" to "600100422", "Timestamp" to timestamp)
+        val result = webFeatureRequest(
+            "open/oauth2/getAccessTokenBySsKey.action",
+            mapOf("sessionKey" to session),
+            extraHeaders = headers + ("Signature" to md5Signature(headers + ("sessionKey" to session))),
+        )
+        val token = result.optString("accessToken")
+        check(token.isNotBlank()) { "天翼未返回家庭云授权，请重新登录" }
+        check(C189AuthProvider.snapshot() === expected) { "天翼账号已变化，请重新操作" }
+        familyAccess = FamilyAccess(expected, saveCookies(), token)
+        token
+    }
+
+    internal suspend fun featureRequest(path: String, params: Map<String, String>, post: Boolean = false): JSONObject {
+        if (path.startsWith("family/")) {
+            repeat(2) { attempt ->
+                val token = familyAccessToken()
+                val timestamp = System.currentTimeMillis().toString()
+                val url = okhttp3.HttpUrl.Builder().scheme("https").host("api.cloud.189.cn").addPathSegments("open/$path")
+                params.forEach { (key, value) -> url.addQueryParameter(key, value) }
+                val request = Request.Builder().url(url.build())
+                    .header("AccessToken", token).header("Timestamp", timestamp).header("Sign-Type", "1")
+                    .header("Signature", md5Signature(params + mapOf("AccessToken" to token, "Timestamp" to timestamp)))
+                    .header("Accept", "application/json;charset=UTF-8").header("User-Agent", C189AuthProvider.userAgent)
+                    .header("Referer", "https://cloud.189.cn/web/").header("Origin", "https://cloud.189.cn").build()
+                val response = withContext(Dispatchers.IO) {
+                    client.newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES).followRedirects(false).build().newCall(request).execute()
+                }
+                response.use {
+                    val body = it.body?.string().orEmpty()
+                    val error = responseError(body, it.code)
+                    if (error != null && error.authentication && attempt == 0) {
+                        familyAccessMutex.withLock { if (familyAccess?.token == token) familyAccess = null }
+                    } else {
+                        if (error != null) throw error
+                        check(it.isSuccessful) { "天翼家庭云请求失败（HTTP ${it.code}）" }
+                        return JSONObject(body)
+                    }
+                }
+            }
+            error("天翼家庭云授权已失效，请重新登录")
+        }
+        if (path.startsWith("security/") || path.startsWith("portal/") || path in setOf("share/createBatchShare.action", "share/createShareLink.action")) {
+            val webPath = if (path.startsWith("share/")) "open/$path" else path
+            return webFeatureRequest(webPath, params, post, jsonBody = path == "share/createBatchShare.action")
+        }
+        return if (post) openApiPost(path, params) else openApiGet(path, params)
+    }
 
     /** 保存 GlobalCookieJar 中所有 cloud.189.cn 相关 Cookie 为字符串 */
     fun saveCookies(): String {
@@ -855,8 +977,11 @@ class C189ApiClient(
     // ==================== 文件操作 API ====================
 
     suspend fun listFiles(
-        folderId: String = "-11", pageNum: Int = 1, pageSize: Int = 60,
-        orderBy: String = "lastOpTime", descending: Boolean = true
+        folderId: String = "-11",
+        pageNum: Int = 1,
+        pageSize: Int = 60,
+        orderBy: String = "lastOpTime",
+        descending: Boolean = true,
     ): Result<C189ListResult> = runCatching {
         val params = linkedMapOf(
             "folderId" to folderId,
@@ -865,7 +990,7 @@ class C189ApiClient(
             "mediaType" to "0",
             "iconOption" to "5",
             "orderBy" to orderBy,
-            "descending" to descending.toString()
+            "descending" to descending.toString(),
         )
         // 直接用 openApi GET 请求（cloud.189.cn/api/open/），与 openApiPost 同样的 MD5 签名
         val json = openApiGet("file/listFiles.action", params)
@@ -880,35 +1005,39 @@ class C189ApiClient(
             // 文件夹（isDir = true, 缩略图无）
             for (i in 0 until folders.length()) {
                 val f = folders.getJSONObject(i)
-                result.add(C189FileItem(
-                    id = f.optString("id", ""),
-                    name = f.optString("name", ""),
-                    isDir = true,
-                    size = f.optLong("size", 0),
-                    lastOpTime = f.optString("lastOpTime", ""),
-                    createDate = f.optString("createDate", ""),
-                    fileCount = f.optInt("fileCount", 0),
-                    folderSize = f.optLong("fileListSize", 0),
-                    mediaType = -1,
-                    thumbnailUrl = null
-                ))
+                result.add(
+                    C189FileItem(
+                        id = f.optString("id", ""),
+                        name = f.optString("name", ""),
+                        isDir = true,
+                        size = f.optLong("size", 0),
+                        lastOpTime = f.optString("lastOpTime", ""),
+                        createDate = f.optString("createDate", ""),
+                        fileCount = f.optInt("fileCount", 0),
+                        folderSize = f.optLong("fileListSize", 0),
+                        mediaType = -1,
+                        thumbnailUrl = null,
+                    ),
+                )
             }
 
             // 文件（isDir = false, 缩略图取 icon 对象）
             for (i in 0 until files.length()) {
                 val f = files.getJSONObject(i)
                 val icon = f.optJSONObject("icon")
-                result.add(C189FileItem(
-                    id = f.optString("id", ""),
-                    name = f.optString("name", ""),
-                    isDir = false,
-                    size = f.optLong("size", 0),
-                    lastOpTime = f.optString("lastOpTime", ""),
-                    createDate = f.optString("createDate", ""),
-                    fileCount = 0,
-                    mediaType = f.optInt("mediaType", -1),
-                    thumbnailUrl = icon?.optString("smallUrl", null) ?: icon?.optString("largeUrl", null)
-                ))
+                result.add(
+                    C189FileItem(
+                        id = f.optString("id", ""),
+                        name = f.optString("name", ""),
+                        isDir = false,
+                        size = f.optLong("size", 0),
+                        lastOpTime = f.optString("lastOpTime", ""),
+                        createDate = f.optString("createDate", ""),
+                        fileCount = 0,
+                        mediaType = f.optInt("mediaType", -1),
+                        thumbnailUrl = icon?.optString("smallUrl", null) ?: icon?.optString("largeUrl", null),
+                    ),
+                )
             }
             result
         } else {
@@ -925,7 +1054,7 @@ class C189ApiClient(
                     fileCount = item.optInt("fileCount", 0),
                     folderSize = item.optLong("fileListSize", 0),
                     mediaType = item.optInt("mediaType", -1),
-                    thumbnailUrl = item.optString("thumbnailUrl", null)
+                    thumbnailUrl = item.optString("thumbnailUrl", null),
                 )
             }
         }
@@ -943,7 +1072,7 @@ class C189ApiClient(
                 .header("User-Agent", "Android")
                 .header("accept", "application/json;charset=UTF-8")
                 .header("sign-type", "1")
-                .build()
+                .build(),
         )
         val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
         val error = responseError(body, resp.code)
@@ -963,48 +1092,53 @@ class C189ApiClient(
     }
 
     suspend fun getDownloadUrl(fileId: String): Result<String> = runCatching {
-        val json = openApiGet("file/getFileDownloadUrl.action", mapOf("fileId" to fileId))
-        json.optString("fileDownloadUrl", "")
+        val json = webFeatureRequest("open/file/getFileDownloadUrl.action", mapOf("fileId" to fileId, "dt" to "1"))
+        json.optString("fileDownloadUrl", "").replace("&amp;", "&").also { check(it.startsWith("http://") || it.startsWith("https://")) { "天翼未返回有效下载链接" } }
     }
 
     suspend fun createFolder(parentFolderId: String, folderName: String): Result<Boolean> = runCatching {
-        val json = openApiPost("file/createFolder.action", mapOf(
-            "parentFolderId" to parentFolderId, "folderName" to folderName
-        ))
-        json.optBoolean("success", false)
+        val json = webFeatureRequest("open/file/createFolder.action", mapOf("parentFolderId" to parentFolderId, "folderName" to folderName), post = true)
+        check(json.optString("res_code") == "0" || json.optString("id").isNotBlank()) { "天翼未确认文件夹创建，请刷新目录确认" }
+        true
     }
 
-    suspend fun renameFile(fileId: String, newName: String): Result<Boolean> = runCatching {
-        val json = openApiPost("file/renameFile.action", mapOf(
-            "fileId" to fileId, "destFileName" to newName
-        ))
-        json.optBoolean("success", false)
+    suspend fun renameFile(fileId: String, newName: String, isFolder: Boolean = false): Result<Boolean> = runCatching {
+        val params = if (isFolder) mapOf("folderId" to fileId, "destFolderName" to newName) else mapOf("fileId" to fileId, "destFileName" to newName)
+        val json = webFeatureRequest(if (isFolder) "open/file/renameFolder.action" else "open/file/renameFile.action", params, post = true)
+        check(json.optString("res_code") == "0" || json.optString("id") == fileId && json.optString("name") == newName) { "天翼未确认重命名结果，请刷新目录确认" }
+        true
     }
 
-    suspend fun deleteFiles(fileIds: List<String>): Result<Boolean> = runCatching {
-        val json = openApiPost("file/deleteFiles.action", mapOf(
-            "fileIds" to fileIds.joinToString(",")
-        ))
-        json.optBoolean("success", false)
+    private suspend fun batchFiles(type: String, files: List<C189FileItem>, target: String? = null, shareId: String? = null, accessCode: String = ""): Boolean {
+        require(files.isNotEmpty() && files.all { it.id.isNotBlank() && it.id != "-11" }) { "请选择有效的天翼文件" }
+        val infos = JSONArray(files.map { JSONObject().put("fileId", it.id).put("fileName", it.name).put("isFolder", if (it.isDir) 1 else 0) })
+        val params = mutableMapOf("type" to type, "taskInfos" to infos.toString())
+        if (target != null) params["targetFolderId"] = target
+        if (shareId != null) { params["shareId"] = shareId; params["copyType"] = "1" }
+        val cookies = saveCookies().ifBlank { getSessionCookie() } + if (shareId != null && accessCode.isNotBlank()) "; share_$shareId=$accessCode" else ""
+        val created = webFeatureRequest("open/batch/createBatchTask.action", params, post = true, extraHeaders = mapOf("Cookie" to cookies))
+        val taskId = created.optString("taskId")
+        check(taskId.isNotBlank()) { "天翼未返回文件操作任务编号，请刷新确认" }
+        repeat(40) {
+            val result = webFeatureRequest("open/batch/checkBatchTask.action", mapOf("taskId" to taskId, "type" to type), post = true)
+            val status = result.optInt("taskStatus", -1)
+            check(status != 2) { "天翼目标目录有同名文件，请更换目录或重命名后重试" }
+            check(status in setOf(1, 3, 4) && result.optInt("failedCount", 0) == 0) { "天翼文件操作失败，请刷新目录确认" }
+            if (status == 4) {
+                val succeeded = result.optInt("successedCount", -1)
+                check(result.optInt("failedCount", -1) == 0 && succeeded >= files.size && succeeded >= result.optInt("subTaskCount", 0)) { "天翼未确认全部文件操作完成，请刷新目录确认" }
+                return true
+            }
+            kotlinx.coroutines.delay(750)
+        }
+        error("天翼文件操作仍在处理中，请稍后刷新确认，避免重复提交")
     }
 
-    suspend fun moveFiles(fileIds: List<String>, targetFolderId: String): Result<Boolean> = runCatching {
-        val fileId = fileIds.first()
-        val deviceModel = randomDeviceModel()
-        val rand = System.currentTimeMillis().toString()
-        val json = signedGet(
-            "/moveFile.action",
-            linkedMapOf(
-                "rand" to rand,
-                "clientType" to "TELEANDROID",
-                "version" to "8.9.0",
-                "model" to deviceModel,
-                "fileId" to fileId,
-                "destFileName" to "",
-                "destParentFolderId" to targetFolderId
-            )
-        )
-        json.optBoolean("success", false) || json.optString("res_code", "") == "0"
+    suspend fun deleteFiles(files: List<C189FileItem>): Result<Boolean> = runCatching { batchFiles("DELETE", files) }
+
+    suspend fun moveFiles(files: List<C189FileItem>, targetFolderId: String): Result<Boolean> = runCatching {
+        require(files.none { it.id == targetFolderId }) { "不能将文件夹移动到自身" }
+        batchFiles("MOVE", files, targetFolderId)
     }
 
     // ==================== 分享 ====================
@@ -1019,20 +1153,13 @@ class C189ApiClient(
 
     /** 纯客户端解析分享链接，支持 /t/ 和 ?code= 两种格式 */
     fun parseShareUrl(rawUrl: String): ShareInfo? {
-        // 参考先 decodeURIComponent 再解析
-        val trimmed = try {
-            URLDecoder.decode(rawUrl.trim(), "UTF-8")
-        } catch (e: Exception) {
-            rawUrl.trim()
-        }
-        // 同时匹配 /t/xxx 和 ?code=xxx
-        val keyPattern = Regex("""(?:cloud\.189\.cn/t/([a-zA-Z0-9]+)|\?code=([a-zA-Z0-9]+))""", RegexOption.IGNORE_CASE)
-        val keyMatch = keyPattern.find(trimmed) ?: return null
-        val shareKey = keyMatch.groupValues[1].ifBlank { keyMatch.groupValues[2] }
-        // 提取访问码
-        val pwdPattern = Regex("""访问(?:码|密码)?[：:\\s-]*([a-zA-Z0-9]{4})(?=[^\w]|${'$'})""", RegexOption.IGNORE_CASE)
-        val pwd = pwdPattern.find(trimmed)?.groupValues?.getOrNull(1) ?: ""
-        return ShareInfo(shareKey = shareKey, sharePwd = pwd)
+        val link = Regex("https?://cloud\\.189\\.cn/[^\\s]+", RegexOption.IGNORE_CASE).find(rawUrl.trim())?.value ?: return null
+        val uri = try { java.net.URI(link) } catch (_: Exception) { return null }
+        val shareKey = Regex("/t/([A-Za-z0-9]+)").find(uri.path.orEmpty())?.groupValues?.get(1)
+            ?: Regex("(?:^|&)code=([A-Za-z0-9]+)").find(uri.rawQuery.orEmpty())?.groupValues?.get(1) ?: return null
+        val pwd = Regex("[?&](?:accessCode|pwd|password|passcode)=([A-Za-z0-9]+)", RegexOption.IGNORE_CASE).find(link)?.groupValues?.get(1)
+            ?: Regex("(?:访问码|提取码|密码)[:：\\s-]*([A-Za-z0-9]{1,12})").find(rawUrl)?.groupValues?.get(1).orEmpty()
+        return ShareInfo(shareKey, pwd)
     }
 
     fun isShareUrl(url: String): Boolean =
@@ -1040,26 +1167,17 @@ class C189ApiClient(
 
     /** 通过分享码获取分享基本信息（无需登录，accessCode 在 listShareDir 时使用） */
     suspend fun getShareInfoByCode(shareKey: String, sharePwd: String = ""): JSONObject {
-        // 当有访问码时，拼接到 shareCode 中（参考 csdown.js: shareKey + '（访问码：' + sharePwd + '）'）
-        val codeWithPwd = if (sharePwd.isNotEmpty()) "$shareKey（访问码：$sharePwd）" else shareKey
-        val formBody = "shareCode=${URLEncoder.encode(codeWithPwd, "UTF-8")}"
-        val resp = executeRequestAndGetResponse(
-            Request.Builder()
-                .url("$API_BASE/open/share/getShareInfoByCodeV2.action")
-                .post(formBody.toRequestBody(formUrlEncoded))
-                .header("User-Agent", "Android")
-                .header("accept", "application/json;charset=UTF-8")
-                .build()
-        )
-        val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
-        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
-        val json = JSONObject(body)
-        // 检查是否返回了具体的错误
-        if (json.has("errorCode")) {
-            val msg = json.optString("errorMsg", "未知错误")
-            throw IllegalStateException(msg)
+        val info = webFeatureRequest("open/share/getShareInfoByCodeV2.action", mapOf("shareCode" to shareKey), public = true)
+        val folder = info.optString("isFolder") in setOf("true", "1")
+        info.put("isFolder", folder)
+        check(!info.optBoolean("needAccessCode", info.optInt("shareType") == 3) || sharePwd.isNotBlank()) { "该天翼分享需要访问码，请补充后重试" }
+        if (sharePwd.isNotBlank() || info.optString("shareId").isBlank()) {
+            val checked = webFeatureRequest("open/share/checkAccessCode.action", mapOf("shareCode" to shareKey, "accessCode" to sharePwd), public = true)
+            // 天翼有时把 shareId 返回成数字，optString 会做字符串化，避免直接 getString 抛异常
+            info.put("shareId", checked.optString("shareId"))
         }
-        return json
+        check(info.optString("shareId").isNotBlank() && info.optString("fileId").isNotBlank()) { "天翼没有返回有效分享凭证，请确认访问码" }
+        return info
     }
 
     /** 列出分享目录下的文件（无需登录） */
@@ -1081,20 +1199,11 @@ class C189ApiClient(
             "pageSize" to pageSize.toString(),
         )
         if (accessCode.isNotEmpty()) params["accessCode"] = accessCode
-        val queryStr = params.entries.joinToString("&") {
-            "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}"
-        }
-        val resp = executeRequestAndGetResponse(
-            Request.Builder()
-                .url("$API_BASE/open/share/listShareDir.action?$queryStr")
-                .get()
-                .header("User-Agent", "Android")
-                .header("accept", "application/json;charset=UTF-8")
-                .build()
-        )
-        val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
-        if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}: ${body.take(200)}")
-        val json = JSONObject(body)
+        if (isFolder) params["shareDirFileId"] = fileId
+        params["iconOption"] = "5"
+        params["orderBy"] = "lastOpTime"
+        params["descending"] = "true"
+        val json = webFeatureRequest("open/share/listShareDir.action", params, public = true, extraHeaders = if (accessCode.isNotBlank()) mapOf("Cookie" to "share_$shareId=$accessCode") else emptyMap())
         val fileListAO = json.optJSONObject("fileListAO")
             ?: throw IllegalStateException("响应中缺少 fileListAO")
         val folders = fileListAO.optJSONArray("folderList") ?: JSONArray()
@@ -1102,30 +1211,34 @@ class C189ApiClient(
         val items = mutableListOf<C189FileItem>()
         for (i in 0 until folders.length()) {
             val f = folders.getJSONObject(i)
-            items.add(C189FileItem(
-                id = f.optString("id", ""),
-                name = f.optString("name", "").tryUrlDecode(),
-                isDir = true,
-                size = f.optLong("size", 0),
-                lastOpTime = f.optString("lastOpTime", ""),
-                createDate = f.optString("createDate", ""),
-                fileCount = f.optInt("fileCount", 0),
-                folderSize = f.optLong("fileListSize", 0),
-                md5 = f.optString("md5", ""),
-            ))
+            items.add(
+                C189FileItem(
+                    id = f.optString("id", ""),
+                    name = f.optString("name", "").tryUrlDecode(),
+                    isDir = true,
+                    size = f.optLong("size", 0),
+                    lastOpTime = f.optString("lastOpTime", ""),
+                    createDate = f.optString("createDate", ""),
+                    fileCount = f.optInt("fileCount", 0),
+                    folderSize = f.optLong("fileListSize", 0),
+                    md5 = f.optString("md5", ""),
+                ),
+            )
         }
         for (i in 0 until files.length()) {
             val f = files.getJSONObject(i)
-            items.add(C189FileItem(
-                id = f.optString("id", ""),
-                name = f.optString("name", "").tryUrlDecode(),
-                isDir = false,
-                size = f.optLong("size", 0),
-                lastOpTime = f.optString("lastOpTime", ""),
-                createDate = f.optString("createDate", ""),
-                mediaType = f.optInt("mediaType", -1),
-                md5 = f.optString("md5", ""),
-            ))
+            items.add(
+                C189FileItem(
+                    id = f.optString("id", ""),
+                    name = f.optString("name", "").tryUrlDecode(),
+                    isDir = false,
+                    size = f.optLong("size", 0),
+                    lastOpTime = f.optString("lastOpTime", ""),
+                    createDate = f.optString("createDate", ""),
+                    mediaType = f.optInt("mediaType", -1),
+                    md5 = f.optString("md5", ""),
+                ),
+            )
         }
         return C189ListResult(items, fileListAO.optInt("count", 0))
     }
@@ -1137,31 +1250,9 @@ class C189ApiClient(
         shareId: String,
         isFolder: Int,
         targetFolderId: String = "-11",
+        accessCode: String = "",
     ): Boolean {
-        val deviceModel = randomDeviceModel()
-        val rand = System.currentTimeMillis().toString()
-        val taskInfo = JSONObject().apply {
-            put("fileId", fileId)
-            put("fileName", fileName)
-            put("isFolder", isFolder)
-        }
-        val params = linkedMapOf(
-            "type" to "SHARE_SAVE",
-            "taskInfos" to "[$taskInfo]",
-            "targetFolderId" to targetFolderId,
-            "shareId" to shareId,
-        )
-        val queryParams = linkedMapOf(
-            "rand" to rand,
-            "clientType" to "TELEANDROID",
-            "version" to "8.9.0",
-            "model" to deviceModel,
-        )
-        val queryStr = queryParams.entries.joinToString("&") {
-            "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}"
-        }
-        val json = signedPost("/batch/createBatchTask.action?$queryStr", params)
-        return json.optBoolean("success", false) || json.optString("res_code", "") == "0"
+        return batchFiles("SHARE_SAVE", listOf(C189FileItem(fileId, fileName, isFolder == 1)), targetFolderId, shareId, accessCode)
     }
 
     // ==================== 签到 ====================
@@ -1184,12 +1275,15 @@ class C189ApiClient(
     private suspend fun signedGetWithDevice(path: String): JSONObject {
         val deviceModel = randomDeviceModel()
         val rand = System.currentTimeMillis().toString()
-        return signedGet(path, linkedMapOf(
-            "rand" to rand,
-            "clientType" to "TELEANDROID",
-            "version" to "8.9.0",
-            "model" to deviceModel,
-        ))
+        return signedGet(
+            path,
+            linkedMapOf(
+                "rand" to rand,
+                "clientType" to "TELEANDROID",
+                "version" to "8.9.0",
+                "model" to deviceModel,
+            ),
+        )
     }
 
     suspend fun getUserInfoExt(): JSONObject = signedGetWithDevice("/getUserInfoExt.action")

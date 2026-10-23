@@ -203,21 +203,10 @@ fun Pan123BrowserTabContent(
             playedUriSet = state.playedUriStrings,
             cloudProviderKey = "pan123",
             notificationEvents = viewModel.messageEvents,
+            providerFeatures = remember(viewModel.apiClient) { com.fluxplayer.app.core.data.cloud.CloudProviderFeatures.from(viewModel.apiClient) },
+            currentFolderId = state.currentFileId,
+            onPlayExtraFile = onPlayVideo,
             providerMenuItems = { onDismiss ->
-                DropdownMenuItem(
-                    text = { Text("盘内搜索") },
-                    onClick = {
-                        onDismiss()
-                        viewModel.enterSearch()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("分享链接转存") },
-                    onClick = {
-                        onDismiss()
-                        viewModel.showShareInput()
-                    },
-                )
                 DropdownMenuItem(
                     text = { Text("账号信息") },
                     onClick = {

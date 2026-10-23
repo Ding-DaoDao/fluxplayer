@@ -185,6 +185,9 @@ fun Yun139BrowserTabContent(
             playedUriSet = state.playedUriStrings,
             cloudProviderKey = "yun139",
             notificationEvents = viewModel.messageEvents,
+            providerFeatures = remember(viewModel.apiClient) { com.fluxplayer.app.core.data.cloud.CloudProviderFeatures.from(viewModel.apiClient) },
+            currentFolderId = state.currentFolderId,
+            onPlayExtraFile = onPlayVideo,
         )
 
         val renameItem = state.items.getOrNull(renameIndex)
