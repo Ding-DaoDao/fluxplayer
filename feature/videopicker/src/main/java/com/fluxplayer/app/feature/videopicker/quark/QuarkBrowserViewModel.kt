@@ -221,6 +221,9 @@ class QuarkBrowserViewModel @Inject constructor(
         prefs.edit().clear().apply()
         apiClient.clearCookie()
         apiClient.setDriveType(driveType)
+        // QuarkAuthProvider 是夸克/UC 共用的播放鉴权全局值，登出必须清掉，
+        // 否则旧 Cookie 会继续带给 CDN；另一家仍在登录时会在下次播放时重新写入。
+        com.fluxplayer.app.core.data.quark.QuarkAuthProvider.clear()
         directoryCache.clear()
         CloudDirectoryCache.clear(getApplication(), driveType)
 

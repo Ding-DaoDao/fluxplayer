@@ -157,7 +157,10 @@ internal suspend fun CloudProviderFeatures.mobileListShare(session: CloudShareSe
         )
         check(value.has("caLst") || value.has("coLst")) { "移动分享列表不完整，请检查提取码" }
         val batch = value.objects("caLst").map { CloudRemoteFile(it.requiredString("caID"), it.requiredString("caName"), true, parentId = parent) } +
-            value.objects("coLst").map { CloudRemoteFile(it.requiredString("coID"), it.requiredString("coName"), it.optInt("coType") == 2, it.optLong("coSize"), parentId = parent) }
+            value.objects("coLst").map {
+                val isDir = it.optBoolean("isdir") || it.optInt("isdir") == 1 || it.optString("isdir") == "true" || it.optInt("coType") == 2
+                CloudRemoteFile(it.requiredString("coID"), it.requiredString("coName"), isDir, it.optLong("coSize"), parentId = parent)
+            }
         val fresh = batch.filter { seen.add(it.id) }
         files.addAll(fresh)
         if (batch.size < 200) return files
@@ -167,7 +170,7 @@ internal suspend fun CloudProviderFeatures.mobileListShare(session: CloudShareSe
 }
 
 internal suspend fun CloudProviderFeatures.mobileSaveShare(session: CloudShareSession, files: List<CloudRemoteFile>, target: String) {
-    val account = com.fluxplayer.app.core.data.yun139.Yun139AuthProvider.phoneNumber
+    val account = mobileAccount().optString("account")
     val response = MobileCloudProtocol.data(
         MobileCloudProtocol.request(
             "share/IBatchOprTask/createOuterLinkBatchOprTask",

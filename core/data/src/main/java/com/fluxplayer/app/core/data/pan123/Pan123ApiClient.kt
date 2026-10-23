@@ -593,13 +593,13 @@ class Pan123ApiClient(
         Log.d(TAG, "resolveDownloadUrlViaHead: intermediateUrl=${sanitizeUrl(intermediateUrl)}")
 
         // Step 2: HEAD 跟随重定向 → 最终 CDN URL（海阔视界: fetch(url, {onlyHeaders:true}).url）
-        val headRequest = Request.Builder()
-            .url(intermediateUrl)
-            .head()
-            .build()
-        val response = client.newCall(headRequest).execute()
-        val finalUrl = response.request.url.toString()
-        response.close()
+        val finalUrl = withContext(Dispatchers.IO) {
+            val headRequest = Request.Builder()
+                .url(intermediateUrl)
+                .head()
+                .build()
+            client.newCall(headRequest).execute().use { it.request.url.toString() }
+        }
         Log.d(TAG, "resolveDownloadUrlViaHead: finalUrl=${sanitizeUrl(finalUrl)}")
 
         if (finalUrl == intermediateUrl) {
@@ -782,12 +782,16 @@ class Pan123ApiClient(
         try {
             val normalized = Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE).find(url)?.value ?: url.trim()
             val uri = java.net.URI(normalized)
-            val host = uri.host ?: return null
+            val host = uri.host?.removePrefix("www.")?.lowercase() ?: return null
             val path = uri.path ?: ""
 
-            val allowed = setOf("123pan.com", "123pan.cn", "123684.com", "123685.com", "123865.com", "123912.com", "123952.com")
-            if (host.removePrefix("www.").lowercase() in allowed && path.startsWith("/s/")) {
-                val key = path.removePrefix("/s/").trimEnd('/')
+            // 与 wenxi 的 pan123HostPattern 对齐：123pan.com/.cn 与 123xxx.com/.cn 系列，允许子域
+            val isPanHost = Regex("^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)*(?:123pan\\.(?:com|cn)|123\\d+\\.(?:com|cn))$").matches(host)
+            if (isPanHost) {
+                // 形如 /s/<key>、/123pan/<key>，或查询参数 sk=<key>
+                val key = Regex("^/(?:s|123pan)/([A-Za-z0-9_-]+)/?$").find(path)?.groupValues?.get(1)
+                    ?: uri.rawQuery?.let { query -> Regex("(?:^|&)sk=([A-Za-z0-9_-]+)").find(query)?.groupValues?.get(1) }
+                    ?: return null
                 if (!Regex("[A-Za-z0-9_-]+").matches(key)) return null
                 val pwd = Regex("(?:[?&](?:pwd|password)=|提取码[:：\\s]*|访问码[:：\\s]*)([A-Za-z0-9]+)").find(url)?.groupValues?.get(1)
                 return key to pwd
@@ -841,6 +845,7 @@ class Pan123ApiClient(
 
         val data = json.optJSONObject("data")
             ?: throw IllegalStateException("分享内容为空")
+        if (data.optBoolean("Expired")) throw IllegalStateException("123 分享已失效")
         val infoList = data.optJSONArray("InfoList") ?: data.optJSONObject("InfoList")?.optJSONArray("list") ?: data.optJSONArray("infoList")
             ?: throw IllegalStateException("123 分享列表响应不完整，请刷新重试")
         val items = mutableListOf<Pan123ShareFileItem>()
@@ -860,7 +865,8 @@ class Pan123ApiClient(
                 )
             }
         }
-        Pan123ShareListing(files = items, total = data.optInt("total", items.size))
+        // total 只在服务端给出时可信；缺失时不要用首页条数顶替，否则分页会提前结束
+        Pan123ShareListing(files = items, total = data.optInt("total", data.optInt("Total", 0)))
     }
 
     suspend fun copySaveFiles(

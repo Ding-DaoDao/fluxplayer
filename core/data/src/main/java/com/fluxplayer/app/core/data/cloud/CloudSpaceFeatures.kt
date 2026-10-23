@@ -11,9 +11,12 @@ fun CloudProviderFeatures.spaceFileUri(space: CloudSpace, file: CloudRemoteFile)
 
 suspend fun CloudProviderFeatures.listSpaces(): List<CloudSpace> = when (provider) {
     "alipan" -> {
-        val result = post("/adrive/v1/user/albums_info", JSONObject())
-        val id = data(result).requiredString("driveId")
-        listOf(CloudSpace(id, "相册"))
+        // 相册是可选能力：未开通或接口不可用时给空列表，不要让整个空间入口报错
+        runCatching {
+            val result = post("/adrive/v1/user/albums_info", JSONObject())
+            val id = data(result).requiredString("driveId")
+            listOf(CloudSpace(id, "相册"))
+        }.getOrElse { emptyList() }
     }
     "cloud189" -> get("family/manage/getFamilyList.action", emptyMap()).objects("familyInfoResp").map {
         CloudSpace(it.requiredString("familyId"), it.optString("remarkName").ifBlank { "家庭云" })

@@ -44,3 +44,51 @@ FluxPlayer 已有六家网盘的个人目录浏览、播放、下载、新建文
 补记：天翼分享的 `shareId` 在真实响应中可能是数字，原先用 `getString` 读取会直接抛 `JSONException`；已改为字符串化读取（与 wenxi 的 `str()` 行为一致），对应回归用例 `tianyiProtectedShareValidatesAccessCodeBeforeBrowsing` 通过。
 
 界面验证（2026-10-23 复跑）：在项目内的隔离 Android 35 模拟器（`build/cloud-ui-emulator`，x86_64）上运行 `:feature:videopicker:connectedDebugAndroidTest`，8 项固定响应界面测试全部通过（`CloudFeaturesDialogTest` 4 项 + `CloudBrowserPaginationTest` 4 项）。覆盖分步创建分享、未登录分享输入、独立播放设置、分享文件夹进入与返回、更多菜单、转存目录切换和列表分页。已检查模拟器导出的浅色分享选择/分享表单，以及深色分享浏览/转存目录截图，未见截断或错位。测试未访问真实网盘，也未在用户手机上重新尝试安装。
+
+## 第二轮逐家对照审查（2026-10-23）
+
+把六家 provider 逐行和 wenxi 的 `lib/data/providers/` 对照了一遍，结论分三档。
+
+### 已修（本轮改动）
+
+| 问题 | 影响 | 修法 |
+| --- | --- | --- |
+| 天翼批量创建分享把 `shareType`/`expireTime` 字符串化 | 服务端按数字解析时有效期被丢进默认值 | `webFeatureRequest` 支持传 typed JSON，`createBatchShare` 按数字提交 |
+| 天翼分享 `shareMode` 缺省 0 | 未返回该字段时走错分享通道 | 缺省改为 1（与网页一致），通用入口同步 |
+| 123 分享列表 `total` 用首页条数顶替 | 满页时第 2 页起直接不再读，>100 项的目录被截断 | total 只在服务端给出时可信；终止改看「本页是否读完 / 新条目是否为空」 |
+| 天翼分享列表按「本页是否满 200」判断结束 | 服务端把 pageSize 截断时只剩第 1 页 | 优先用返回的总数判断，否则看本页是否读满 |
+| 123 创建分享有效期用 UTC `Z` | 服务端按北京时间解读时偏差 8 小时 | 改为 wenxi 的 `+08:00` 墙钟写法 |
+| 123 分享链接域名白名单写死 7 个 + 只认 `/s/` | `123999.com` 这类别名、`?sk=` 形式解析失败 | 改成 `123pan.com/.cn` + `123xxx.com/.cn`（含子域），同时认 `/s/`、`/123pan/`、`sk=` |
+| 123 分享过期未识别 | 失效分享显示成「目录为空」 | 解析列表后校验 `Expired` |
+| 123 下载链路用了未展开的中间地址 | 新增的分享转存下载可能拿到包装地址 | 统一走 `resolveDownloadUrlViaHead`（fileDownloadInfo → HEAD 跟随 → CDN 直链），并把 HEAD 挪到 IO 线程 |
+| 夸克/UC 播放头共用全局 `QuarkAuthProvider` | 两家都登录时 Cookie/UA/Referer 串号 | 注册本次播放账号的 `featureHeaders()`，并在开始播放前把全局值同步到本账号 |
+| 天翼播放只有转码地址、无兜底 | 未转码/非视频直接播放失败 | 转码失败后退回原始文件下载地址（与 wenxi 的 playback=download 一致） |
+| 移动播放兜底依赖内存元数据 | 音频/冷启动进历史播放必然失败 | 元数据缺失时仍按文件 id 取下载地址 |
+| 移动分享列表只认 `coType==2` | 部分返回把目录当文件 | 兼容 `isdir` 字段 |
+| 移动分享/家庭请求的账号取自 `phoneNumber` | 该字段缺失时发空 account | 缺失时从 Basic 凭据解出账号，仍取不到则明确报「请重新登录」 |
+| 移动列表「还有下一页」按本页是否满 100 | 游标存在但本页不足 100 时漏读尾部 | 只看游标是否为空/重复 |
+| 天翼进入新目录沿用上一个目录的页码 | 换目录后首页内容永久缺失 | `loadDirectory` 重置 `currentPage=1`；`hasMore` 优先用 totalCount |
+| 阿里「个人盘」没有切换入口 | 切到备份盘后回不去，且部分账号永远看不到个人盘 | 空间选项按 wenxi 的 `_spaces` 补上个人盘并去重 |
+| 阿里相册未开通时整个空间入口报错 | 相册是可选能力 | 探测失败返回空列表 |
+| 夸克/移动登出未清内存鉴权 | 旧 Cookie 继续带给 CDN | 登出时清 `QuarkAuthProvider` / `Yun139AuthProvider` |
+
+### 未修（需要实测或需要明确产品取舍）
+
+1. **夸克/UC 分享列表参数未分流**：现在把 UC 用的 `entry/fetch_file_list/_fetch_task/_fetch_share/passcode` 一起发给夸克，且两家都没发 `_sort`。分页顺序不稳时可能触发「分页重复」或漏项。需要抓包确认夸克侧是否容忍这些参数。
+2. **夸克/UC 的移动 `action_type`**：FluxPlayer 用 `2`，wenxi 用 `1`。两者都自洽（删除也是 2），但需真机验证一次移动。
+3. **123 个人列表用 `page` 而非 `next` 游标**，`hasMore` 靠「满 100 条」猜；若服务端只认 `next`，>100 项的目录会重复或截断。需实测一个大目录。
+4. **移动列表/取链不带 `mcloud-sign`**：wenxi 对 `file/list`、`getDownloadUrl`、`task/get` 都签名。若服务端强制校验，移动的浏览/下载会失败——目前能跑说明至少当前版本不强制，但属于隐性风险。
+5. **移动家庭云缺 `familyRootPath` 一致性校验**：只校验 `root:/` 前缀与分段合法性，不校验「当前目录的 path 与 parent 一致」，跨目录错位时可能取到别的文件的下载地址。
+6. **UC 网页播放/下载没有内容一致性校验**：wenxi 用 md5 + 长度探针拦「会员提示片」，FluxPlayer 列表里连 md5 都没保留。UC 受限时可能把提示片当原片。
+7. **分享直链下载（游客免转存）没有**：wenxi 有完整双通道（游客隔离 + 账号直连 + 状态分类）。当前只保留「转存并播放/下载」。
+8. **列表限流/429 退避没有**：wenxi 对 list 类请求有节流 + 指数退避，FluxPlayer 连续请求。大目录或频繁刷新会撞限流。
+9. **天翼 `webFeatureRequest` 失败后不重登重试**（签名通道有重试，网页通道没有）；移动整条链路没有「需重新登录」的识别。
+10. **阿里下载地址缺 `expire_sec=14400`**，默认约 900 秒过期，而播放地址缓存也是 15 分钟，排队下载/续播容易 403。
+11. **夸克/UC 的 Cookie 合并无白名单**（wenxi 只收 `__pus/__puus/__pugs`，且只在成功响应上写回），边缘节点带的 cookie 会被并进主会话。
+12. **阿里设备签名仍带硬编码默认 deviceId/signature**，未登录浏览分享时可能触发 `SignatureInvalid` 后报「账号已变化」。
+
+### 已知架构差异（不算缺陷）
+
+- 「转存并播放」把文件留在用户选择的目录，不做临时目录与自动清理（与 wenxi 不同，是刻意取舍，见上文边界说明）。
+- 123 的转码播放、`ref` AES 解密构造 Referer 是 FluxPlayer 自有方案，wenxi 没有。
+- 不迁移 wenxi 的 Flutter 页面、下载引擎、独立任务中心。

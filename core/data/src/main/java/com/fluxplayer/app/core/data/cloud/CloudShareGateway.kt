@@ -34,8 +34,11 @@ internal class Pan123ShareGateway(private val client: Pan123ApiClient) : CloudSh
             }
             val fresh = batch.filter { seen.add(it.id) }
             result.addAll(fresh)
-            if (batch.size < 100 || result.size >= listing.total) return result
-            check(fresh.isNotEmpty()) { "123 分享分页重复，请刷新重试" }
+            if (fresh.isEmpty()) return result
+            // 服务端可能把 limit 截断到更小的页长，因此不能用“本页是否满 100”判断结束；
+            // total 缺失时会退化成首页条数，此时只把它当成上界提示，继续翻页。
+            if (listing.total > batch.size && result.size >= listing.total) return result
+            if (batch.size < 100) return result
         }
         error("分享目录过大，请进入子目录")
     }
@@ -58,6 +61,8 @@ internal class C189ShareGateway(private val client: C189ApiClient) : CloudShareG
         val info = client.parseShareUrl(text) ?: error("请输入有效的天翼分享链接")
         val pwd = password.ifBlank { info.sharePwd }
         val data = client.getShareInfoByCode(info.shareKey, pwd)
+        // shareMode 缺省按网页分享页的 1 处理，0 会让 listShareDir 走错通道
+        if (data.optString("shareMode").isBlank()) data.put("shareMode", 1)
         return CloudShareSession(data.requiredString("shareId"), pwd, data.toString(), data.requiredString("fileId"))
     }
 
@@ -65,12 +70,18 @@ internal class C189ShareGateway(private val client: C189ApiClient) : CloudShareG
         val info = JSONObject(session.token)
         val result = mutableListOf<CloudRemoteFile>()
         val seen = mutableSetOf<String>()
+        val pageSize = 200
         for (page in 1..200) {
-            val listing = client.listShareDir(session.id, parent, if (parent == session.rootId) info.optBoolean("isFolder") else true, info.optInt("shareMode"), page, 200, session.password)
+            val listing = client.listShareDir(session.id, parent, if (parent == session.rootId) info.optBoolean("isFolder") else true, info.optInt("shareMode"), page, pageSize, session.password)
             val fresh = listing.items.filter { seen.add(it.id) }
             result.addAll(fresh.map { CloudRemoteFile(it.id, it.name, it.isDir, it.size, it.md5, parent) })
-            if (listing.items.size < 200 || result.size >= listing.totalCount) return result
-            check(fresh.isNotEmpty()) { "天翼分享分页重复，请刷新重试" }
+            if (fresh.isEmpty()) return result
+            // 服务端可能把 pageSize 截断，优先用返回的总数判断是否读完
+            if (listing.totalCount > 0) {
+                if (result.size >= listing.totalCount) return result
+            } else if (listing.items.size < pageSize) {
+                return result
+            }
         }
         error("分享目录过大，请进入子目录")
     }

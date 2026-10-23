@@ -369,14 +369,15 @@ class AliyunBrowserViewModel @Inject constructor(
     }
 
     private fun buildDriveOptionsFromInfo(info: com.fluxplayer.app.core.data.aliyun.AliyunDriveInfo): List<DriveOption> {
+        // 与 wenxi 的 _spaces 一致：资源库、备份盘、个人盘（无备份盘时备份盘=个人盘，去重）
         val options = mutableListOf<DriveOption>()
-        // 默认盘（我的云盘）不放入下拉选项，面包屑已显示
-        if (info.backupDriveId.isNotBlank()) {
-            options.add(DriveOption("备份盘", info.backupDriveId))
+        val seen = mutableSetOf<String>()
+        fun add(name: String, driveId: String) {
+            if (driveId.isNotBlank() && seen.add(driveId)) options.add(DriveOption(name, driveId))
         }
-        if (info.resourceDriveId.isNotBlank()) {
-            options.add(DriveOption("资源盘", info.resourceDriveId))
-        }
+        add("资源盘", info.resourceDriveId)
+        add("备份盘", info.backupDriveId.ifEmpty { info.defaultDriveId })
+        add("个人盘", info.defaultDriveId)
         return options
     }
 

@@ -342,7 +342,8 @@ class C189BrowserViewModel @Inject constructor(
         loadingMore = false
         loadSequence++
         val seq = loadSequence
-        updateUiState { it.copy(isLoading = true, error = null, currentFolderId = parentFileId) }
+        // 换目录必须从第 1 页重新读，否则会沿用上一个目录翻到的页码
+        updateUiState { it.copy(isLoading = true, error = null, currentFolderId = parentFileId, currentPage = 1) }
         syncStackTop { it.copy(isLoading = true, error = null) }
 
         loadDirectoryJob = viewModelScope.launch {
@@ -398,7 +399,10 @@ class C189BrowserViewModel @Inject constructor(
         updateUiState {
             it.copy(
                 items = resources,
-                isLoading = false, hasMore = listResult.items.size >= 100, currentPage = 1
+                isLoading = false,
+                // 服务端可能把 pageSize 截断，优先用返回的总数判断还有没有下一页
+                hasMore = if (listResult.totalCount > 0) resources.size < listResult.totalCount else listResult.items.size >= 100,
+                currentPage = 1,
             )
         }
         syncStackTop { it.copy(items = resources, isLoading = false, error = null) }
@@ -459,7 +463,8 @@ class C189BrowserViewModel @Inject constructor(
                         updateUiState {
                             it.copy(
                                 items = combined, isLoadingMore = false,
-                                hasMore = listResult.items.size >= 100, currentPage = nextPage
+                                hasMore = if (listResult.totalCount > 0) combined.size < listResult.totalCount else listResult.items.size >= 100,
+                                currentPage = nextPage,
                             )
                         }
                         syncStackTop { it.copy(items = combined, isLoading = false, error = null) }
@@ -978,7 +983,7 @@ class C189BrowserViewModel @Inject constructor(
                 }
                 val fileId = shareJson.optString("fileId", "")
                 val isFolder = shareJson.optBoolean("isFolder", false)
-                val shareMode = shareJson.optInt("shareMode", 0)
+                val shareMode = shareJson.optInt("shareMode", 1)
                 val rawName = {
                     val raw = shareJson.optString("fileName", "分享文件")
                     if (!Regex("%[0-9A-Fa-f]{2}").containsMatchIn(raw)) raw

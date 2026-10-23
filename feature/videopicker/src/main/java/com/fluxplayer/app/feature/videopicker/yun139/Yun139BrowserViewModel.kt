@@ -228,6 +228,8 @@ class Yun139BrowserViewModel @Inject constructor(
 
     fun logout() {
         apiClient.logout()
+        // 内存中的 Cookie 也要清掉，否则后续请求仍会带上旧账号的会话头
+        Yun139AuthProvider.clear()
 
         // 清除 OkHttp GlobalCookieJar 中旧账号的 Cookie
         GlobalCookieJar.clearHost("yun.139.com")
@@ -289,8 +291,9 @@ class Yun139BrowserViewModel @Inject constructor(
                     val resources = listResult.items.map { fileToResource(it) }
                     directoryCache[parentFileId] = resources
                     CloudDirectoryCache.put(getApplication(), "yun139", parentFileId, resources)
-                    val nextCursor = listResult.nextMarker.ifBlank { null }
-                    val hasMore = nextCursor != null && listResult.items.size >= 100
+                    val nextCursor = listResult.nextMarker.ifBlank { null }.takeIf { it != "null" }
+                    // 游标非空即还有下一页，不能按本页是否满 100 条截断
+                    val hasMore = nextCursor != null && listResult.items.isNotEmpty()
                     if (hasMore && nextCursor != null) {
                         directoryCursorCache[parentFileId] = nextCursor
                     } else {
@@ -387,8 +390,8 @@ class Yun139BrowserViewModel @Inject constructor(
                             return@fold
                         }
                         val allItems = _uiState.value.items + filtered
-                        val nextCursor = listResult.nextMarker.ifBlank { null }
-                        val hasMore = nextCursor != null && listResult.items.size >= 100
+                        val nextCursor = listResult.nextMarker.ifBlank { null }.takeIf { it != "null" }
+                        val hasMore = nextCursor != null && listResult.items.isNotEmpty()
                         directoryCache[state.currentFolderId] = allItems
                         if (hasMore && nextCursor != null) {
                             directoryCursorCache[state.currentFolderId] = nextCursor

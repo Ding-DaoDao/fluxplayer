@@ -15,6 +15,23 @@ import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** 把列表项的元数据（etag/s3keyFlag）还原成 123 下载接口需要的条目。 */
+private fun pan123Item(file: CloudRemoteFile): com.fluxplayer.app.core.data.pan123.Pan123FileItem {
+    val metadata = runCatching { JSONObject(file.token) }.getOrElse { JSONObject() }
+    return com.fluxplayer.app.core.data.pan123.Pan123FileItem(
+        fileId = file.id,
+        fileName = file.name,
+        type = if (file.directory) 1 else 0,
+        size = file.size,
+        etag = metadata.optString("etag"),
+        s3keyFlag = metadata.optString("s3"),
+        downloadUrl = "",
+        createAt = "",
+        trashedAt = "",
+        starredStatus = 0,
+    )
+}
+
 /** 扩展功能复用当前浏览器的客户端和登录态，避免维护第二份账号凭据。 */
 class CloudProviderFeatures private constructor(
     val provider: String,
@@ -58,13 +75,8 @@ class CloudProviderFeatures private constructor(
             val listing = client.listFiles(parentFileId = parent, page = page).getOrThrow()
             listing.items.map { CloudRemoteFile(it.fileId, it.fileName, it.isDirectory, it.size, jsonObject("etag" to it.etag, "s3" to it.s3keyFlag).toString(), parent) } to listing.hasMore
         }, legacyShare = Pan123ShareGateway(client), resolvePersonal = { file ->
-            val metadata = JSONObject(file.token)
-            client.getFileDownloadUrl(
-                com.fluxplayer.app.core.data.pan123.Pan123FileItem(
-                    fileId = file.id, fileName = file.name, type = 0, size = file.size, etag = metadata.optString("etag"),
-                    s3keyFlag = metadata.optString("s3"), downloadUrl = "", createAt = "", trashedAt = "", starredStatus = 0,
-                ),
-            ).getOrThrow()
+            // 与浏览器下载链路一致：fileDownloadInfo → HEAD 跟随 → CDN 直链
+            client.resolveDownloadUrlViaHead(pan123Item(file)).getOrThrow()
         }, httpClient = client.featureHttpClient)
 
         fun from(client: Yun139ApiClient) = CloudProviderFeatures("yun139", { path, body, _, _ ->
@@ -160,7 +172,7 @@ class CloudProviderFeatures private constructor(
             }
             "pan123" -> {
                 val body = jsonObject(
-                    "driveId" to 0, "fileIdList" to ids.map { it.toLong() }, "expiration" to expiration(options.expiryDays).ifBlank { "2099-12-12T08:00:00+08:00" },
+                    "driveId" to 0, "fileIdList" to ids.map { it.toLong() }, "expiration" to pan123Expiration(options.expiryDays),
                     "shareName" to options.title, "event" to "shareCreate", "fileNum" to files.size,
                     "shareModality" to 4, "trafficLimitSwitch" to 1, "trafficLimit" to 0, "trafficSwitch" to 1, "fillPwdSwitch" to 0,
                 )
@@ -405,11 +417,35 @@ class CloudProviderFeatures private constructor(
         else -> "https://yun.123pan.cn/"
     }, "User-Agent" to "Mozilla/5.0") + mediaHeaders().filterKeys { !it.equals("Authorization", true) }
 
-    internal fun mobileAccount() = jsonObject("account" to Yun139AuthProvider.phoneNumber, "accountType" to 1)
+    internal fun mobileAccount() = jsonObject("account" to mobileAccountNumber(), "accountType" to 1)
+
+    /**
+     * 移动的分享/家庭接口都要带账号。优先用登录时存下的手机号，
+     * 否则从 Basic 凭据里解出（格式 `mobile:<账号>:<token>`，与 wenxi 的 accountId 一致）。
+     */
+    private fun mobileAccountNumber(): String {
+        if (Yun139AuthProvider.phoneNumber.isNotBlank()) return Yun139AuthProvider.phoneNumber
+        val account = runCatching {
+            val raw = Yun139AuthProvider.authorization.removePrefix("Basic").trim()
+            String(java.util.Base64.getDecoder().decode(raw)).split(':').getOrNull(1).orEmpty()
+        }.getOrDefault("")
+        check(account.isNotBlank()) { "移动云盘账号信息缺失，请重新登录" }
+        return account
+    }
 
     private fun expiration(days: Int?): String {
         if (days == null) return ""
         return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
             .format(Date(System.currentTimeMillis() + days.toLong() * 86_400_000))
+    }
+
+    /**
+     * 123 的有效期按北京时间解读：写 UTC 时刻 + 8 小时的墙钟时间，再标 +08:00。
+     * 这样无论服务端按偏移解析还是按本地时间解析，到期时刻都一致（与 wenxi 相同）。
+     */
+    private fun pan123Expiration(days: Int?): String {
+        if (days == null) return "2099-12-12T08:00:00+08:00"
+        return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+            .format(Date(System.currentTimeMillis() + days.toLong() * 86_400_000 + 8 * 3_600_000L)) + "+08:00"
     }
 }

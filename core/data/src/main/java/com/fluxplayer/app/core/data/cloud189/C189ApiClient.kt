@@ -864,6 +864,7 @@ class C189ApiClient(
         jsonBody: Boolean = false,
         public: Boolean = false,
         extraHeaders: Map<String, String> = emptyMap(),
+        jsonPayload: JSONObject? = null,
     ): JSONObject {
         val url = okhttp3.HttpUrl.Builder().scheme("https").host("cloud.189.cn").addPathSegments("api/$path")
         if (!post) params.forEach { (key, value) -> url.addQueryParameter(key, value) }
@@ -875,9 +876,10 @@ class C189ApiClient(
         if (public) request.header("Cookie", "") else if (cookies.isNotBlank()) request.header("Cookie", cookies)
         extraHeaders.forEach { (key, value) -> request.header(key, value) }
         if (post) {
-            val payload = JSONObject(params)
-            if (params.containsKey("fileIdList")) payload.put("fileIdList", JSONArray(params.getValue("fileIdList")))
-            request.post(if (jsonBody) payload.toString().toRequestBody(jsonMediaType) else params.entries.joinToString("&") { "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}" }.toRequestBody(formUrlEncoded))
+            val payload = jsonPayload ?: JSONObject(params).also { typed ->
+                if (params.containsKey("fileIdList")) typed.put("fileIdList", JSONArray(params.getValue("fileIdList")))
+            }
+            request.post(if (jsonBody || jsonPayload != null) payload.toString().toRequestBody(jsonMediaType) else params.entries.joinToString("&") { "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}" }.toRequestBody(formUrlEncoded))
         }
         val response = executeRequestAndGetResponse(request.build())
         return response.use {
@@ -939,7 +941,15 @@ class C189ApiClient(
         }
         if (path.startsWith("security/") || path.startsWith("portal/") || path in setOf("share/createBatchShare.action", "share/createShareLink.action")) {
             val webPath = if (path.startsWith("share/")) "open/$path" else path
-            return webFeatureRequest(webPath, params, post, jsonBody = path == "share/createBatchShare.action")
+            // 批量分享的 shareType/expireTime 服务端按数字解析，字符串化会被丢进默认值
+            val batchPayload = if (path == "share/createBatchShare.action") {
+                JSONObject().apply {
+                    params["fileIdList"]?.let { put("fileIdList", JSONArray(it)) }
+                    params["shareType"]?.toIntOrNull()?.let { put("shareType", it) }
+                    params["expireTime"]?.toIntOrNull()?.let { put("expireTime", it) }
+                }
+            } else null
+            return webFeatureRequest(webPath, params, post, jsonBody = batchPayload != null, jsonPayload = batchPayload)
         }
         return if (post) openApiPost(path, params) else openApiGet(path, params)
     }

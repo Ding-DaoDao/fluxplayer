@@ -48,6 +48,19 @@ class CloudUriResolver @Inject constructor(
         CloudPlayHeaders.activeProvider = provider
     }
 
+    /**
+     * 夸克和 UC 共用 [QuarkAuthProvider]，CDN 兜底分支只认这一个全局值。
+     * 开始播放前把它同步成本次播放的账号，避免两家都登录时互相串号。
+     */
+    private fun useQuarkAuthProviderFor(client: QuarkApiClient, cookie: String, provider: String) {
+        val headers = client.featureHeaders()
+        QuarkAuthProvider.isActive = true
+        QuarkAuthProvider.cookie = cookie
+        headers["User-Agent"]?.let { QuarkAuthProvider.userAgent = it }
+        QuarkAuthProvider.referer = headers["referer"]
+            ?: if (provider == "uc") "https://drive.uc.cn/" else "https://pan.quark.cn/"
+    }
+
     suspend fun resolve(uri: Uri): Uri? {
         if (!CloudUriScheme.isCloudUri(uri)) return null
         val provider = CloudUriScheme.getProvider(uri) ?: return null
@@ -374,9 +387,12 @@ class CloudUriResolver @Inject constructor(
         // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
         client.onCookieUpdated = { merged -> prefs.edit().putSecret("quark", "cookie", merged).apply() }
         selectPlaybackProvider("quark")
+        // 夸克和 UC 共用 QuarkAuthProvider，这里同步成本次播放的账号，
+        // 避免两家都登录时 CDN 兜底分支拿到另一家的 Cookie。
+        useQuarkAuthProviderFor(client, cookie, "quark")
 
         // 注册夸克播放头（后缀匹配覆盖所有 *.quark.cn 子域名）
-        CloudPlayHeaders.registerSuffix(".quark.cn") { QuarkAuthProvider.getPlayHeaders() }
+        CloudPlayHeaders.registerSuffix(".quark.cn") { client.featureHeaders() }
 
         if (prefs.getBoolean("prefer_original_playback", false)) {
             val original = client.getOriginalPlaybackUrl(fileId).getOrNull()
@@ -422,10 +438,12 @@ class CloudUriResolver @Inject constructor(
         // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
         client.onCookieUpdated = { merged -> prefs.edit().putSecret("uc", "cookie", merged).apply() }
         selectPlaybackProvider("uc")
+        useQuarkAuthProviderFor(client, cookie, "uc")
 
-        // 注册 UC 播放头（后缀匹配覆盖 *.quark.cn 和 *.uc.cn 子域名）
-        CloudPlayHeaders.registerSuffix(".quark.cn") { QuarkAuthProvider.getPlayHeaders() }
-        CloudPlayHeaders.registerSuffix(".uc.cn") { QuarkAuthProvider.getPlayHeaders() }
+        // 注册 UC 播放头（后缀匹配覆盖 *.quark.cn 和 *.uc.cn 子域名）。
+        // 取本次播放账号、而不是全局 QuarkAuthProvider，避免和夸克串号。
+        CloudPlayHeaders.registerSuffix(".quark.cn") { client.featureHeaders() }
+        CloudPlayHeaders.registerSuffix(".uc.cn") { client.featureHeaders() }
 
         val playResult = client.getVideoPlayInfo(fileId).getOrNull()
         if (playResult != null && playResult.urls.isNotEmpty()) {
@@ -458,6 +476,10 @@ class CloudUriResolver @Inject constructor(
         val url = client.getVideoPlayUrl(fileId).getOrNull()
         Log.d(TAG, "resolveCloud189 fileId=$fileId url=${url?.let(::sanitizeUrl)}")
         if (url != null) return url + "#189Play=true#"
+        // 转码地址只覆盖已完成转码的视频；其它情况退回原始文件下载地址（与 wenxi 的 playback=download 一致）
+        val downloadUrl = client.getDownloadUrl(fileId).getOrNull()
+        Log.d(TAG, "resolveCloud189 fallback downloadUrl=${downloadUrl?.let(::sanitizeUrl)}")
+        if (downloadUrl != null) return downloadUrl + "#189Play=true#"
         return null
     }
 
@@ -474,10 +496,10 @@ class CloudUriResolver @Inject constructor(
         val playUrl = client.getVideoPreviewUrl(fileId).getOrNull()
         if (playUrl != null) return playUrl + "#yun139Play=true#"
 
-        if (fileMetadata != null) {
-            val dlUrl = client.getDownloadUrl(fileId, fileMetadata.fileName).getOrNull()
-            if (dlUrl != null) return dlUrl + "#yun139Play=true#"
-        }
+        // 预览地址只对有转码的视频可用，其余（音频、未转码）退回下载地址。
+        // 元数据只在进入过视频列表时才有，所以文件名缺失也要继续尝试。
+        val dlUrl = client.getDownloadUrl(fileId, fileMetadata?.fileName.orEmpty()).getOrNull()
+        if (dlUrl != null) return dlUrl + "#yun139Play=true#"
         return null
     }
 
