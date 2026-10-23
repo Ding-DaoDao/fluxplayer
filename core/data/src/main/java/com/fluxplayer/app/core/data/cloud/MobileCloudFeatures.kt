@@ -163,8 +163,10 @@ internal suspend fun CloudProviderFeatures.mobileListShare(session: CloudShareSe
             }
         val fresh = batch.filter { seen.add(it.id) }
         files.addAll(fresh)
-        if (batch.size < 200) return files
+        if (batch.isEmpty()) return files
+        // 整页重复说明分页没前进，不能静默当成读完
         check(fresh.isNotEmpty()) { "移动分享分页重复，请重试" }
+        if (batch.size < 200) return files
     }
     error("分享文件过多，请进入子目录后重试")
 }

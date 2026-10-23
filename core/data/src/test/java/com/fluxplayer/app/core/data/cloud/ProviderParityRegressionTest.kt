@@ -351,15 +351,19 @@ class ProviderParityRegressionTest {
     }
 
     @Test
-    fun pan123PersonalListingUsesServerCursorAndStopsOnNextMinusOne() = runBlocking {
-        val cursors = mutableListOf<String>()
+    fun pan123PersonalListingPagesWithLowercasePageAndUsesCursorWhenGiven() = runBlocking {
+        val calls = mutableListOf<Pair<String?, String?>>()
         val http = client { request, _ ->
-            val cursor = request.url.queryParameter("next") ?: ""
-            cursors += cursor
-            assertEquals("1", request.url.queryParameter("Page"))
-            when (cursor) {
-                "0" -> """{"code":0,"data":{"InfoList":[{"FileId":1,"FileName":"a","Type":0,"Size":1}],"Next":"cursor-2"}}"""
-                "cursor-2" -> """{"code":0,"data":{"InfoList":[{"FileId":2,"FileName":"b","Type":0,"Size":1}],"Next":"-1"}}"""
+            val page = request.url.queryParameter("page")
+            val cursor = request.url.queryParameter("next")
+            calls += page to cursor
+            // 自己网盘列表只认小写 page；大写 Page 属于分享接口，出现即回归
+            assertEquals(null, request.url.queryParameter("Page"))
+            when {
+                cursor == null && page == "1" ->
+                    """{"code":0,"data":{"InfoList":[{"FileId":1,"FileName":"a","Type":0,"Size":1}],"Next":"cursor-2"}}"""
+                cursor == "cursor-2" ->
+                    """{"code":0,"data":{"InfoList":[{"FileId":2,"FileName":"b","Type":0,"Size":1}],"Next":"-1"}}"""
                 else -> """{"code":0,"data":{"InfoList":[],"Next":"-1"}}"""
             }
         }
@@ -371,7 +375,9 @@ class ProviderParityRegressionTest {
         val second = api.listFiles(parentFileId = "0", next = checkNotNull(first.nextCursor)).getOrThrow()
         assertEquals(1, second.items.size)
         assertFalse(second.hasMore)
-        assertEquals(listOf("0", "cursor-2"), cursors)
+        // 首次请求不带 next（不能发 next=0，否则服务端按游标从头开始）；
+        // 拿到游标后才带上，并按 wenxi 口径把 page 固定为 1、只推进游标
+        assertEquals(listOf("1" to null, "1" to "cursor-2"), calls)
     }
 
     @Test

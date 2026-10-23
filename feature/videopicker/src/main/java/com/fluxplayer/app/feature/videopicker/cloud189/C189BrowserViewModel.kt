@@ -373,8 +373,9 @@ class C189BrowserViewModel @Inject constructor(
         val state = _uiState.value
         // API 不支持 filesize 排序，用 lastOpTime 获取后客户端排序
         val apiOrderBy = if (state.orderBy == "filesize") "lastOpTime" else state.orderBy
+        // 全新读目录一律从第 1 页开始；调用方可能带着上一个目录的页码进来（如会话恢复）
         val result = apiClient.listFiles(
-            parentFileId, state.currentPage, 100, apiOrderBy, state.descending
+            parentFileId, 1, 100, apiOrderBy, state.descending
         )
 
         val listResult = result.getOrThrow()

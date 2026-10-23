@@ -37,10 +37,13 @@ internal class Pan123ShareGateway(private val client: Pan123ApiClient) : CloudSh
             if (batch.isEmpty()) return result
             // 整页重复说明页码没前进，不能静默当成读完
             check(fresh.isNotEmpty()) { "123 分享分页重复，请刷新重试" }
-            // 服务端可能把 limit 截断到更小的页长，因此不能用“本页是否满 100”判断结束；
-            // total 缺失时只把它当成上界提示，继续翻页。
-            if (listing.total > batch.size && result.size >= listing.total) return result
-            if (batch.size < 100) return result
+            // 服务端可能把 limit 截断到更小的页长，因此优先用总数判断；
+            // total 缺失时才退回「本页是否满 100」。
+            if (listing.total > 0) {
+                if (result.size >= listing.total) return result
+            } else if (batch.size < 100) {
+                return result
+            }
         }
         error("分享目录过大，请进入子目录")
     }

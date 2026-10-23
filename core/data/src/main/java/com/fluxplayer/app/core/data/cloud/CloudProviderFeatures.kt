@@ -71,22 +71,30 @@ class CloudProviderFeatures private constructor(
 
         fun from(client: Pan123ApiClient) = CloudProviderFeatures("pan123", { path, body, _, _ ->
             client.featureRequest(path, body ?: JSONObject())
-        }, folderLoader = { parent, _ ->
-            // 123 用服务端 next 游标翻页，这里一次读完（与阿里/移动一致）
+        }, folderLoader = { parent, startPage ->
+            // 游标模式与页码模式都支持：有服务端游标就用游标，否则按页码递增
             val result = mutableListOf<CloudRemoteFile>()
             val seen = mutableSetOf<String>()
-            var next = "0"
-            val cursors = mutableSetOf<String>()
-            do {
-                val listing = client.listFiles(parentFileId = parent, next = next).getOrThrow()
+            val seenCursors = mutableSetOf<String>()
+            var page = startPage
+            var cursor: String? = null
+            var finished = false
+            var rounds = 0
+            while (!finished) {
+                check(rounds++ < 200) { "目录过大，请缩小范围" }
+                val listing = client.listFiles(parentFileId = parent, page = page, next = cursor).getOrThrow()
                 check(listing.items.all { seen.add(it.fileId) }) { "目录分页重复，请刷新" }
                 result.addAll(listing.items.map { CloudRemoteFile(it.fileId, it.fileName, it.isDirectory, it.size, jsonObject("etag" to it.etag, "s3" to it.s3keyFlag).toString(), parent) })
-                val cursor = listing.nextCursor
-                if (cursor == null) break
-                check(cursors.add(cursor)) { "目录分页重复，请重试" }
-                check(cursors.size < 200) { "目录过大，请缩小范围" }
-                next = cursor
-            } while (true)
+                if (!listing.hasMore) {
+                    finished = true
+                } else {
+                    listing.nextCursor?.let { next ->
+                        check(seenCursors.add(next)) { "目录分页重复，请重试" }
+                        cursor = next
+                    }
+                    page += 1
+                }
+            }
             result to false
         }, legacyShare = Pan123ShareGateway(client), resolvePersonal = { file ->
             // 与浏览器下载链路一致：fileDownloadInfo → HEAD 跟随 → CDN 直链
@@ -113,8 +121,11 @@ class CloudProviderFeatures private constructor(
             val params = body?.let { json -> json.keys().asSequence().associateWith { json.get(it).toString() } } ?: query
             client.featureRequest(path, params, body != null)
         }, folderLoader = { parent, page ->
-            val listing = client.listFiles(folderId = parent, pageNum = page, pageSize = 100).getOrThrow()
-            listing.items.map { CloudRemoteFile(it.id, it.name, it.isDir, it.size, parentId = parent) } to (listing.items.size >= 100 && page * 100 < listing.totalCount)
+            val pageSize = 100
+            val listing = client.listFiles(folderId = parent, pageNum = page, pageSize = pageSize).getOrThrow()
+            // 服务端可能把 pageSize 截断，优先用总数判断是否还有下一页
+            val more = if (listing.totalCount > 0) page * pageSize < listing.totalCount else listing.items.size >= pageSize
+            listing.items.map { CloudRemoteFile(it.id, it.name, it.isDir, it.size, parentId = parent) } to more
         }, legacyShare = C189ShareGateway(client), resolvePersonal = { file -> client.getDownloadUrl(file.id).getOrThrow() }, httpClient = client.featureHttpClient)
     }
 
@@ -267,11 +278,14 @@ class CloudProviderFeatures private constructor(
         }
     }
 
-    /** 阿里的分享 token 约两小时过期，每次列表/转存前重取（wenxi 同款）；失败时退回已存的 token。 */
-    private suspend fun alipanShareToken(session: CloudShareSession): String = runCatching {
-        post("/v2/share_link/get_share_token", jsonObject("share_id" to session.id, "share_pwd" to session.password))
-            .requiredString("share_token")
-    }.getOrElse { session.token }
+    /** 阿里的分享 token 约两小时过期，每次列表/转存前重取（wenxi 同款）；取不到就如实报错，不拿旧 token 掩盖。 */
+    private suspend fun alipanShareToken(session: CloudShareSession): String {
+        val token = runCatching {
+            post("/v2/share_link/get_share_token", jsonObject("share_id" to session.id, "share_pwd" to session.password))
+                .requiredString("share_token")
+        }.getOrElse { error("阿里未返回分享凭据，请检查提取码或重新打开分享：${it.message}") }
+        return token
+    }
 
     suspend fun listShare(session: CloudShareSession, parentId: String): List<CloudRemoteFile> {
         legacyShare?.let { return it.list(session, parentId) }
@@ -476,7 +490,9 @@ class CloudProviderFeatures private constructor(
         if (Yun139AuthProvider.phoneNumber.isNotBlank()) return Yun139AuthProvider.phoneNumber
         val account = runCatching {
             val raw = Yun139AuthProvider.authorization.removePrefix("Basic").trim()
-            String(java.util.Base64.getDecoder().decode(raw)).split(':').getOrNull(1).orEmpty()
+            // 凭据可能是无 padding 的 Base64（wenxi 用 base64.normalize 补齐），这里同样补齐
+            val padded = raw + "=".repeat((4 - raw.length % 4) % 4)
+            String(java.util.Base64.getDecoder().decode(padded)).split(':').getOrNull(1).orEmpty()
         }.getOrDefault("")
         check(account.isNotBlank()) { "移动云盘账号信息缺失，请重新登录" }
         return account

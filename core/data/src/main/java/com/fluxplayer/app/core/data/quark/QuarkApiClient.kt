@@ -114,16 +114,21 @@ class QuarkApiClient(
         )
     }
 
-    private fun updateCookieFromResponse(resp: okhttp3.Response) {
+    private fun updateCookieFromResponse(resp: okhttp3.Response, loginFailed: Boolean = false) {
         val setCookies = resp.headers("set-cookie")
         if (setCookies.isEmpty()) return
-        // 失败响应不写回会话（与 wenxi 一致），避免把过期/拒绝时下发的 cookie 存下来
-        if (!resp.isSuccessful || resp.code == 401) return
-        // 只收会话相关的 cookie，边缘节点下发的 __cf_bm/埋点 cookie 不能混进主会话
+        // 失败响应不写回会话（与 wenxi 一致），避免把过期/拒绝时下发的 cookie 存下来；
+        // 这里同时看 HTTP 状态与业务层的登录失效，两者都不写。
+        if (!resp.isSuccessful || resp.code == 401 || loginFailed) return
+        // 只收会话相关的 cookie，边缘节点下发的 __cf_bm/埋点 cookie 不能混进主会话；
+        // 空值（如 __puus=; Max-Age=0 的清理 cookie）必须跳过，否则会把会话清掉
         val accepted = setCookies.mapNotNull { raw ->
             val pair = raw.substringBefore(';')
-            val name = pair.substringBefore('=').trim()
-            pair.takeIf { name in setOf("__pus", "__puus", "__pugs") && it.isNotBlank() }
+            val separator = pair.indexOf('=')
+            if (separator <= 0) return@mapNotNull null
+            val name = pair.substring(0, separator).trim()
+            val value = pair.substring(separator + 1).trim()
+            pair.takeIf { name in setOf("__pus", "__puus", "__pugs") && value.isNotEmpty() }
         }
         if (accepted.isEmpty()) return
         accepted.forEach { cookieManager.add(it) }
@@ -137,14 +142,15 @@ class QuarkApiClient(
         val builder = Request.Builder().url(url).get()
         (buildHeaders() + extraHeaders).forEach { (k, v) -> builder.header(k, v) }
         val resp = executeRequestAndGetResponse(builder.build())
-        updateCookieFromResponse(resp)
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
         if (resp.code == 401 && retry && refreshCookie()) return apiGet(url, false, extraHeaders)
         if (!resp.isSuccessful) {
             throw IllegalStateException("HTTP ${resp.code} from $url: ${respBody.take(200)}")
         }
         val json = JSONObject(respBody)
-        if (retry && (json.optInt("code") == 31001 || json.optInt("status") == 401) && refreshCookie()) return apiGet(url, false, extraHeaders)
+        val loginFailed = json.optInt("code") == 31001 || json.optInt("status") == 401
+        updateCookieFromResponse(resp, loginFailed)
+        if (retry && loginFailed && refreshCookie()) return apiGet(url, false, extraHeaders)
         return json
     }
 
@@ -157,14 +163,15 @@ class QuarkApiClient(
         }
         (buildHeaders() + extraHeaders).forEach { (k, v) -> builder.header(k, v) }
         val resp = executeRequestAndGetResponse(builder.build())
-        updateCookieFromResponse(resp)
         val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
         if (resp.code == 401 && retry && refreshCookie()) return apiPost(url, body, false, extraHeaders)
         if (!resp.isSuccessful) {
             throw IllegalStateException("HTTP ${resp.code} from $url: ${respBody.take(200)}")
         }
         val json = JSONObject(respBody)
-        if (retry && (json.optInt("code") == 31001 || json.optInt("status") == 401) && refreshCookie()) return apiPost(url, body, false, extraHeaders)
+        val loginFailed = json.optInt("code") == 31001 || json.optInt("status") == 401
+        updateCookieFromResponse(resp, loginFailed)
+        if (retry && loginFailed && refreshCookie()) return apiPost(url, body, false, extraHeaders)
         return json
     }
 

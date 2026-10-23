@@ -97,6 +97,9 @@ class Pan123BrowserViewModel @Inject constructor(
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
     /** 目录 → (下一页游标, 是否还有下一页)。游标为 null 表示已读完。 */
     private val directoryPaginationCache = mutableMapOf<String, Pair<String?, Boolean>>()
+
+    /** 已提交的搜索词；翻页要用它，不能用输入框里的实时文本。 */
+    private var submittedSearchQuery: String = ""
     private var downloadJob: Job? = null
 
     data class DownloadProgressData(
@@ -303,7 +306,7 @@ class Pan123BrowserViewModel @Inject constructor(
         loadDirectoryJob = viewModelScope.launch {
             val result = apiClient.listFiles(
                 parentFileId,
-                next = "0",
+                page = 1,
                 orderBy = _uiState.value.orderBy,
                 orderDirection = _uiState.value.orderDirection,
             )
@@ -366,7 +369,6 @@ class Pan123BrowserViewModel @Inject constructor(
             loadingMore = false
             loadSequence++
             val pagination = directoryPaginationCache[fileId]
-            val hasMore = pagination?.second ?: (cached.size % 100 == 0 && cached.isNotEmpty())
             updateUiState {
                 it.copy(
                     items = cached,
@@ -374,11 +376,16 @@ class Pan123BrowserViewModel @Inject constructor(
                     isLoading = false,
                     isLoadingMore = false,
                     error = null,
-                    hasMore = hasMore,
+                    hasMore = pagination?.second ?: false,
                     currentPage = maxOf(1, (cached.size + 99) / 100),
                 )
             }
             syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
+            if (pagination == null) {
+                // 进程重建后没有页码/游标状态，先用缓存顶着，再回源同步一次，
+                // 否则「加载更多」会退化成重拉首页并把结果全部滤掉。
+                loadDirectory(fileId)
+            }
         } else {
             updateUiState { it.copy(items = emptyList(), currentFileId = fileId) }
             syncStackTop { it.copy(items = emptyList(), isLoading = true, error = null) }
@@ -393,10 +400,12 @@ class Pan123BrowserViewModel @Inject constructor(
     fun loadMore() {
         val state = _uiState.value
         if (!state.hasMore || loadingMore || state.isLoading) return
-        // 搜索结果与目录共用一套分页状态，游标按「搜索词 / 目录」分开存
-        val searching = state.searchQuery.isNotBlank()
-        val paginationKey = if (searching) "search:${state.searchQuery}" else state.currentFileId
-        val cursor = directoryPaginationCache[paginationKey]?.first ?: "0"
+        // 搜索结果与目录共用一套分页状态，游标按「已提交的搜索词 / 目录」分开存；
+        // 不能用输入框里的实时文本，否则边打字边翻页会串到别的关键词。
+        val searching = submittedSearchQuery.isNotBlank()
+        val paginationKey = if (searching) "search:$submittedSearchQuery" else state.currentFileId
+        val cursor = directoryPaginationCache[paginationKey]?.first
+        val nextPage = state.currentPage + 1
         val seq = loadSequence
         loadingMore = true
         updateUiState { it.copy(isLoadingMore = true, error = null) }
@@ -406,10 +415,11 @@ class Pan123BrowserViewModel @Inject constructor(
             try {
                 val result = apiClient.listFiles(
                     parentFileId = if (searching) "0" else state.currentFileId,
-                    next = cursor,
+                    page = nextPage,
                     orderBy = state.orderBy,
                     orderDirection = state.orderDirection,
-                    searchData = if (searching) state.searchQuery else "",
+                    searchData = if (searching) submittedSearchQuery else "",
+                    next = cursor,
                 )
                 if (seq != loadSequence) return@launch
                 result.fold(
@@ -447,7 +457,7 @@ class Pan123BrowserViewModel @Inject constructor(
                         updateUiState {
                             it.copy(
                                 items = allItems, isLoadingMore = false,
-                                hasMore = hasMore, currentPage = state.currentPage + 1,
+                                hasMore = hasMore, currentPage = nextPage,
                             )
                         }
                         syncStackTop { it.copy(items = allItems, isLoading = false, error = null) }
@@ -625,10 +635,10 @@ class Pan123BrowserViewModel @Inject constructor(
             val state = _uiState.value
             updateUiState { it.copy(pickerIsLoading = true) }
             val actualFolderId = folderId.ifEmpty { "0" }
-            val result = apiClient.listFiles(parentFileId = actualFolderId)
+            val result = runCatching { listAllFolders(actualFolderId) }
             result.fold(
-                onSuccess = { listResult ->
-                    val folders = listResult.items
+                onSuccess = { items ->
+                    val folders = items
                         .filter { it.type == 1 && it.fileId != state.moveFileId }
                         .map { fileToResource(it) }
                     updateUiState { it.copy(pickerFolders = folders, pickerIsLoading = false) }
@@ -809,11 +819,14 @@ class Pan123BrowserViewModel @Inject constructor(
 
     fun submitSearch(query: String) {
         if (query.isBlank()) return
+        submittedSearchQuery = query
         updateUiState { it.copy(isLoading = true, error = null, searchQuery = query) }
         viewModelScope.launch {
             val result = apiClient.listFiles(
                 parentFileId = "0",
-                next = "0",
+                page = 1,
+                orderBy = _uiState.value.orderBy,
+                orderDirection = _uiState.value.orderDirection,
                 searchData = query,
             )
             result.fold(
@@ -1067,17 +1080,22 @@ class Pan123BrowserViewModel @Inject constructor(
         }
     }
 
-    /** 选目录用：按游标读完整个目录，避免单页 100 条被截断。 */
+    /** 选目录用：读完整个目录，避免单页 100 条被截断。游标模式与页码模式都支持。 */
     private suspend fun listAllFolders(parentFileId: String): List<Pan123FileItem> {
         val all = mutableListOf<Pan123FileItem>()
         val seen = mutableSetOf<String>()
-        var next = "0"
+        var page = 1
+        var cursor: String? = null
+        val seenCursors = mutableSetOf<String>()
         repeat(100) {
-            val page = apiClient.listFiles(parentFileId = parentFileId, next = next).getOrThrow()
-            page.items.forEach { if (seen.add(it.fileId)) all += it }
-            val cursor = page.nextCursor
-            if (!page.hasMore || cursor == null) return all
-            next = cursor
+            val result = apiClient.listFiles(parentFileId = parentFileId, page = page, next = cursor).getOrThrow()
+            result.items.forEach { if (seen.add(it.fileId)) all += it }
+            if (!result.hasMore) return all
+            result.nextCursor?.let { next ->
+                check(seenCursors.add(next)) { "目录分页重复，请刷新重试" }
+                cursor = next
+            }
+            page += 1
         }
         return all
     }

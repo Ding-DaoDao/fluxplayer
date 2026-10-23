@@ -350,27 +350,30 @@ class Pan123ApiClient(
     // region ==================== 文件操作 ====================
 
     /**
-     * 列出文件 — 使用 Web API + `page` 页码分页。
-     * API: https://api.123278.com/b/api/file/list/new
+     * 列出文件 — 使用 Web API：`https://yun.123pan.cn/b/api/file/list/new`
      *
-     * 分页参数必须是小写 `page`：服务端只认小写，写成大写 `Page` 会被静默忽略，
-     * 导致 page=2 仍返回第 1 页数据（表现为「加载更多」转圈后列表不动）。
-     * 不要加 `next` 参数——`Page`/`next` 那套属于分享接口 [listShareFiles]，
-     * 误用到自己网盘列目录上会让分页失效。
+     * 分页有两套口径，都有实测依据，这里两套都兼容：
+     * - **页码模式**（docs/pan123-api.md，2026-10-05 真机验证）：必须发小写 `page`，
+     *   服务端忽略大写 `Page`；响应通常不带 `Next`，靠 `items.size` 判断是否还有下一页。
+     * - **游标模式**（wenxi `pan123.dart`）：上一页响应给出可用 `Next` 时，带上 `next` 继续翻。
+     *
+     * ⚠️ 不要在没有游标时发 `next=0`：服务端会按游标从头开始，`page` 被架空，
+     * page=2 仍返回第 1 页（`bd5b07a` 真机踩坑）。[listFiles] 只在拿到真实游标后才附带 `next`。
      */
     suspend fun listFiles(
         parentFileId: String = "0",
-        next: String = "0",
+        page: Int = 1,
         orderBy: String = "file_name",
         orderDirection: String = "asc",
         searchData: String = "",
+        next: String? = null,
     ): Result<Pan123ListResult> = runCatching {
-        // 与 wenxi 的 /b/api/file/list/new 一致：next 是服务端游标，Page 恒为 1
-        val url = "$WEB_API_BASE/file/list/new".toHttpUrl().newBuilder()
+        val builder = "$WEB_API_BASE/file/list/new".toHttpUrl().newBuilder()
             .addQueryParameter("driveId", "0")
             .addQueryParameter("limit", Pan123ListResult.PAGE_SIZE.toString())
-            .addQueryParameter("next", next)
-            .addQueryParameter("Page", "1")
+            // 有服务端游标时按 wenxi 的口径固定 page=1、只推进游标；
+            // 没有游标时才用小写 page 页码（大写 Page 属于分享接口，会被静默忽略）
+            .addQueryParameter("page", if (next != null) "1" else page.toString())
             .addQueryParameter("orderBy", orderBy)
             .addQueryParameter("orderDirection", orderDirection)
             .addQueryParameter("parentFileId", parentFileId)
@@ -382,7 +385,8 @@ class Pan123ApiClient(
             .addQueryParameter("inDirectSpace", "false")
             .addQueryParameter("fileCategory", "0")
             .addQueryParameter("isSearchOrder", "false")
-            .build().toString()
+        if (next != null) builder.addQueryParameter("next", next)
+        val url = builder.build().toString()
 
         val json = webGet(url)
 
@@ -422,10 +426,8 @@ class Pan123ApiClient(
                 raw = item,
             )
         }
-        // Next 是服务端游标；-1 或缺失表示没有下一页
-        val rawNext = data?.optString("Next").orEmpty()
-        val nextCursor = rawNext.takeIf { it.isNotBlank() && it != "null" && it != "-1" }
-        Pan123ListResult(items, nextCursor)
+        // 只有服务端真的下发可用游标时才按游标翻页；否则按「满一页才继续」判定
+        Pan123ListResult(items, Pan123ListResult.usableCursor(data?.optString("Next")))
     }
 
     suspend fun getFileDownloadUrl(item: Pan123FileItem): Result<String> = runCatching {
