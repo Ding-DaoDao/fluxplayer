@@ -149,10 +149,13 @@ class QuarkBrowserViewModel @Inject constructor(
         QuarkAuthProvider.cookie = cookie
         QuarkAuthProvider.referer = if (driveType == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
         QuarkAuthProvider.isActive = true
+        // 用本次账号的头快照注册，而不是在请求时回读全局：夸克/UC 共用 QuarkAuthProvider，
+        // 回读会让「打开另一家的浏览页」把正在播放那家的头改掉。
+        val headersSnapshot = apiClient.featureHeaders()
         if (driveType == "uc") {
-            CloudPlayHeaders.registerSuffix(".uc.cn") { QuarkAuthProvider.getPlayHeaders() }
+            CloudPlayHeaders.registerSuffix(".uc.cn", headersSnapshot)
         } else {
-            CloudPlayHeaders.registerSuffix(".quark.cn") { QuarkAuthProvider.getPlayHeaders() }
+            CloudPlayHeaders.registerSuffix(".quark.cn", headersSnapshot)
         }
 
         updateUiState { it.copy(isLoggedIn = true, driveType = driveType) }
@@ -185,10 +188,12 @@ class QuarkBrowserViewModel @Inject constructor(
             QuarkAuthProvider.cookie = cookie
             QuarkAuthProvider.referer = if (type == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
             QuarkAuthProvider.isActive = true
+            // 同样用本次账号的头快照，避免切换账号/切到另一家时改掉正在播放那家的头
+            val headersSnapshot = apiClient.featureHeaders()
             if (type == "uc") {
-                CloudPlayHeaders.registerSuffix(".uc.cn") { QuarkAuthProvider.getPlayHeaders() }
+                CloudPlayHeaders.registerSuffix(".uc.cn", headersSnapshot)
             } else {
-                CloudPlayHeaders.registerSuffix(".quark.cn") { QuarkAuthProvider.getPlayHeaders() }
+                CloudPlayHeaders.registerSuffix(".quark.cn", headersSnapshot)
             }
             updateUiState { it.copy(isLoggedIn = true, driveType = type, items = if (isSwitching) emptyList() else it.items, error = null, isLoading = true) }
             syncStackTop { it.copy(isLoading = true, error = null) }
@@ -619,7 +624,8 @@ class QuarkBrowserViewModel @Inject constructor(
                         val completed = cloudDownloadRepository.download(
                             url = url,
                             fileName = res.name,
-                            headers = if (useTv) emptyMap() else QuarkAuthProvider.getPlayHeaders(),
+                            // 用本账号客户端的头，而不是可能被另一家覆盖的全局值
+                            headers = if (useTv) emptyMap() else apiClient.featureHeaders(),
                             provider = provider,
                             onProgress = { event ->
                                 downloadContext.ensureActive()

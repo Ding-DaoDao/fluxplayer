@@ -125,7 +125,8 @@ class QuarkApiClient(
         onCookieUpdated = null
     }
 
-    internal fun featureHeaders(): Map<String, String> = buildHeaders()
+    /** 本账号的请求头快照。跨模块（浏览页/下载）也需要，避免误用全局 QuarkAuthProvider。 */
+    fun featureHeaders(): Map<String, String> = buildHeaders()
 
     private fun buildHeaders(): Map<String, String> {
         return mapOf(
