@@ -95,7 +95,8 @@ class Pan123BrowserViewModel @Inject constructor(
     private var loadMoreJob: kotlinx.coroutines.Job? = null
     private var loadingMore: Boolean = false
     private val directoryCache = mutableMapOf<String, List<WebDavResource>>()
-    private val directoryPaginationCache = mutableMapOf<String, Pair<Int, Boolean>>()
+    /** 目录 → (下一页游标, 是否还有下一页)。游标为 null 表示已读完。 */
+    private val directoryPaginationCache = mutableMapOf<String, Pair<String?, Boolean>>()
     private var downloadJob: Job? = null
 
     data class DownloadProgressData(
@@ -302,7 +303,7 @@ class Pan123BrowserViewModel @Inject constructor(
         loadDirectoryJob = viewModelScope.launch {
             val result = apiClient.listFiles(
                 parentFileId,
-                page = 1,
+                next = "0",
                 orderBy = _uiState.value.orderBy,
                 orderDirection = _uiState.value.orderDirection,
             )
@@ -332,7 +333,7 @@ class Pan123BrowserViewModel @Inject constructor(
                     directoryCache[parentFileId] = resources
                     CloudDirectoryCache.put(getApplication(), "pan123", parentFileId, resources)
                     val hasMore = listResult.hasMore
-                    directoryPaginationCache[parentFileId] = 1 to hasMore
+                    directoryPaginationCache[parentFileId] = listResult.nextCursor to hasMore
                     updateUiState {
                         it.copy(
                             items = resources,
@@ -365,7 +366,6 @@ class Pan123BrowserViewModel @Inject constructor(
             loadingMore = false
             loadSequence++
             val pagination = directoryPaginationCache[fileId]
-            val restoredPage = pagination?.first ?: maxOf(1, (cached.size + 99) / 100)
             val hasMore = pagination?.second ?: (cached.size % 100 == 0 && cached.isNotEmpty())
             updateUiState {
                 it.copy(
@@ -375,7 +375,7 @@ class Pan123BrowserViewModel @Inject constructor(
                     isLoadingMore = false,
                     error = null,
                     hasMore = hasMore,
-                    currentPage = restoredPage,
+                    currentPage = maxOf(1, (cached.size + 99) / 100),
                 )
             }
             syncStackTop { it.copy(items = cached, isLoading = false, error = null) }
@@ -393,7 +393,10 @@ class Pan123BrowserViewModel @Inject constructor(
     fun loadMore() {
         val state = _uiState.value
         if (!state.hasMore || loadingMore || state.isLoading) return
-        val nextPage = state.currentPage + 1
+        // 搜索结果与目录共用一套分页状态，游标按「搜索词 / 目录」分开存
+        val searching = state.searchQuery.isNotBlank()
+        val paginationKey = if (searching) "search:${state.searchQuery}" else state.currentFileId
+        val cursor = directoryPaginationCache[paginationKey]?.first ?: "0"
         val seq = loadSequence
         loadingMore = true
         updateUiState { it.copy(isLoadingMore = true, error = null) }
@@ -402,10 +405,11 @@ class Pan123BrowserViewModel @Inject constructor(
         loadMoreJob = viewModelScope.launch {
             try {
                 val result = apiClient.listFiles(
-                    parentFileId = state.currentFileId,
-                    page = nextPage,
+                    parentFileId = if (searching) "0" else state.currentFileId,
+                    next = cursor,
                     orderBy = state.orderBy,
                     orderDirection = state.orderDirection,
+                    searchData = if (searching) state.searchQuery else "",
                 )
                 if (seq != loadSequence) return@launch
                 result.fold(
@@ -432,18 +436,18 @@ class Pan123BrowserViewModel @Inject constructor(
                         val existingPaths = _uiState.value.items.map { it.path }.toSet()
                         val filtered = newItems.filter { it.path !in existingPaths }
                         if (filtered.isEmpty()) {
-                            directoryPaginationCache[state.currentFileId] = state.currentPage to false
+                            directoryPaginationCache[paginationKey] = null to false
                             updateUiState { it.copy(isLoadingMore = false, hasMore = false) }
                             return@fold
                         }
                         val allItems = _uiState.value.items + filtered
                         val hasMore = listResult.hasMore
-                        directoryCache[state.currentFileId] = allItems
-                        directoryPaginationCache[state.currentFileId] = nextPage to hasMore
+                        if (!searching) directoryCache[state.currentFileId] = allItems
+                        directoryPaginationCache[paginationKey] = listResult.nextCursor to hasMore
                         updateUiState {
                             it.copy(
                                 items = allItems, isLoadingMore = false,
-                                hasMore = hasMore, currentPage = nextPage,
+                                hasMore = hasMore, currentPage = state.currentPage + 1,
                             )
                         }
                         syncStackTop { it.copy(items = allItems, isLoading = false, error = null) }
@@ -805,22 +809,23 @@ class Pan123BrowserViewModel @Inject constructor(
 
     fun submitSearch(query: String) {
         if (query.isBlank()) return
-        updateUiState { it.copy(isLoading = true, error = null) }
+        updateUiState { it.copy(isLoading = true, error = null, searchQuery = query) }
         viewModelScope.launch {
             val result = apiClient.listFiles(
                 parentFileId = "0",
-                page = 1,
+                next = "0",
                 searchData = query,
             )
             result.fold(
                 onSuccess = { listResult ->
                     cachedFileItems = listResult.items
                     val resources = listResult.items.map { fileToResource(it) }
+                    directoryPaginationCache["search:$query"] = listResult.nextCursor to listResult.hasMore
                     updateUiState {
                         it.copy(
                             items = resources,
                             isLoading = false,
-                            hasMore = listResult.items.size >= 100,
+                            hasMore = listResult.hasMore,
                             currentPage = 1,
                         )
                     }
@@ -1048,10 +1053,9 @@ class Pan123BrowserViewModel @Inject constructor(
             )
         }
         viewModelScope.launch {
-            val result = apiClient.listFiles(parentFileId = currentFolderId, page = 1)
-            result.fold(
-                onSuccess = { listResult ->
-                    val folders = listResult.items
+            runCatching { listAllFolders(currentFolderId) }.fold(
+                onSuccess = { items ->
+                    val folders = items
                         .filter { it.isDirectory }
                         .map { fileToResource(it) }
                     updateUiState { it.copy(shareTargetPickerFolders = folders, shareTargetPickerIsLoading = false) }
@@ -1061,6 +1065,21 @@ class Pan123BrowserViewModel @Inject constructor(
                 },
             )
         }
+    }
+
+    /** 选目录用：按游标读完整个目录，避免单页 100 条被截断。 */
+    private suspend fun listAllFolders(parentFileId: String): List<Pan123FileItem> {
+        val all = mutableListOf<Pan123FileItem>()
+        val seen = mutableSetOf<String>()
+        var next = "0"
+        repeat(100) {
+            val page = apiClient.listFiles(parentFileId = parentFileId, next = next).getOrThrow()
+            page.items.forEach { if (seen.add(it.fileId)) all += it }
+            val cursor = page.nextCursor
+            if (!page.hasMore || cursor == null) return all
+            next = cursor
+        }
+        return all
     }
 
     fun dismissShareTargetPicker() {
@@ -1078,10 +1097,10 @@ class Pan123BrowserViewModel @Inject constructor(
             )
         }
         viewModelScope.launch {
-            val result = apiClient.listFiles(parentFileId = folderId, page = 1)
+            val result = runCatching { listAllFolders(folderId) }
             result.fold(
-                onSuccess = { listResult ->
-                    val folders = listResult.items
+                onSuccess = { items ->
+                    val folders = items
                         .filter { it.isDirectory }
                         .map { fileToResource(it) }
                     updateUiState { it.copy(shareTargetPickerFolders = folders, shareTargetPickerIsLoading = false) }
@@ -1100,10 +1119,10 @@ class Pan123BrowserViewModel @Inject constructor(
         val parentId = newPath.last().fileId
         updateUiState { it.copy(shareTargetPickerPath = newPath, shareTargetPickerFolders = emptyList(), shareTargetPickerIsLoading = true) }
         viewModelScope.launch {
-            val result = apiClient.listFiles(parentFileId = parentId, page = 1)
+            val result = runCatching { listAllFolders(parentId) }
             result.fold(
-                onSuccess = { listResult ->
-                    val folders = listResult.items.filter { it.isDirectory }.map { fileToResource(it) }
+                onSuccess = { items ->
+                    val folders = items.filter { it.isDirectory }.map { fileToResource(it) }
                     updateUiState { it.copy(shareTargetPickerFolders = folders, shareTargetPickerIsLoading = false) }
                 },
                 onFailure = {
@@ -1120,10 +1139,10 @@ class Pan123BrowserViewModel @Inject constructor(
         val newPath = path.subList(0, index + 1)
         updateUiState { it.copy(shareTargetPickerPath = newPath, shareTargetPickerFolders = emptyList(), shareTargetPickerIsLoading = true) }
         viewModelScope.launch {
-            val result = apiClient.listFiles(parentFileId = target.fileId, page = 1)
+            val result = runCatching { listAllFolders(target.fileId) }
             result.fold(
-                onSuccess = { listResult ->
-                    val folders = listResult.items.filter { it.isDirectory }.map { fileToResource(it) }
+                onSuccess = { items ->
+                    val folders = items.filter { it.isDirectory }.map { fileToResource(it) }
                     updateUiState { it.copy(shareTargetPickerFolders = folders, shareTargetPickerIsLoading = false) }
                 },
                 onFailure = {

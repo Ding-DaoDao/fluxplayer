@@ -78,6 +78,10 @@ class QuarkApiClient(
         val url = ("$baseUrl/1/clouddrive/$path").toHttpUrl().newBuilder()
             .addQueryParameter("pr", pr).addQueryParameter("fr", "pc").apply {
                 query.forEach { (key, value) -> addQueryParameter(key, value) }
+                // 夸克侧这些路径要带 uc_param_str（wenxi 的 url() 同款分流）
+                if (driveType == "quark" && path.removeSuffix("/") in setOf("file/delete", "file/rename", "file/move", "share", "share/password")) {
+                    addQueryParameter("uc_param_str", "")
+                }
             }.build().toString()
         val requestHeaders = (if (driveType == "uc" && path.startsWith("transfer_share/")) mapOf("referer" to "https://fast.uc.cn/", "Origin" to "https://fast.uc.cn") else emptyMap()) + headers
         val json = if (body == null) apiGet(url, extraHeaders = requestHeaders) else apiPost(url, body, extraHeaders = requestHeaders)
@@ -113,7 +117,16 @@ class QuarkApiClient(
     private fun updateCookieFromResponse(resp: okhttp3.Response) {
         val setCookies = resp.headers("set-cookie")
         if (setCookies.isEmpty()) return
-        setCookies.forEach { cookieManager.add(it.substringBefore(';')) }
+        // 失败响应不写回会话（与 wenxi 一致），避免把过期/拒绝时下发的 cookie 存下来
+        if (!resp.isSuccessful || resp.code == 401) return
+        // 只收会话相关的 cookie，边缘节点下发的 __cf_bm/埋点 cookie 不能混进主会话
+        val accepted = setCookies.mapNotNull { raw ->
+            val pair = raw.substringBefore(';')
+            val name = pair.substringBefore('=').trim()
+            pair.takeIf { name in setOf("__pus", "__puus", "__pugs") && it.isNotBlank() }
+        }
+        if (accepted.isEmpty()) return
+        accepted.forEach { cookieManager.add(it) }
         val merged = cookieManager.get()
         QuarkAuthProvider.cookie = merged
         onCookieUpdated?.invoke(merged)
@@ -185,9 +198,14 @@ class QuarkApiClient(
 
             append("&_page=$page")
             append("&_size=$pageSize")
-            append("&uc_param_str=")
             append("&_fetch_total=1")
             append("&_fetch_sub_dirs=0")
+            if (driveType == "quark") {
+                // 夸克侧需要这组参数才能看到全部文件（含风险文件名），UC 不需要
+                append("&uc_param_str=")
+                append("&fetch_all_file=1")
+                append("&fetch_risk_file_name=1")
+            }
             append("&__t=${System.currentTimeMillis()}")
             append("&__dt=1000")
             append("&_sort=file_type:asc,$orderBy")
@@ -336,7 +354,8 @@ class QuarkApiClient(
         val body = JSONObject().apply {
             put("pdir_fid", parentFid)
             put("file_name", name)
-            put("dir", true)
+            put("dir_path", "")
+            put("dir_init_lock", false)
         }
         val json = apiPost("$baseUrl/1/clouddrive/file?pr=$pr&fr=pc", body)
         finishMutation(json)
@@ -347,7 +366,7 @@ class QuarkApiClient(
             put("fid", fid)
             put("file_name", newName)
         }
-        val json = apiPost("$baseUrl/1/clouddrive/file/rename?pr=$pr&fr=pc", body)
+        val json = apiPost("$baseUrl/1/clouddrive/file/rename?pr=$pr&fr=pc$mutationQuery", body)
         finishMutation(json)
     }
 
@@ -357,20 +376,25 @@ class QuarkApiClient(
             put("filelist", JSONArray(fids))
             put("exclude_fids", JSONArray())
         }
-        val json = apiPost("$baseUrl/1/clouddrive/file/delete?pr=$pr&fr=pc", body)
+        val json = apiPost("$baseUrl/1/clouddrive/file/delete?pr=$pr&fr=pc$mutationQuery", body)
         finishMutation(json)
     }
 
     suspend fun moveFiles(fids: List<String>, toPdirFid: String): Result<Boolean> = runCatching {
         val body = JSONObject().apply {
-            put("action_type", 2)
+            // action_type=1 才是移动；2 是删除（wenxi 的 move 同为 1）
+            put("action_type", 1)
             put("filelist", JSONArray(fids))
             put("to_pdir_fid", toPdirFid)
             put("exclude_fids", JSONArray())
         }
-        val json = apiPost("$baseUrl/1/clouddrive/file/move?pr=$pr&fr=pc", body)
+        val json = apiPost("$baseUrl/1/clouddrive/file/move?pr=$pr&fr=pc$mutationQuery", body)
         finishMutation(json)
     }
+
+    /** 夸克的写操作要带 uc_param_str，UC 不需要（与 wenxi 的 url() 分流一致） */
+    private val mutationQuery: String
+        get() = if (driveType == "quark") "&uc_param_str=" else ""
 
     private suspend fun finishMutation(json: JSONObject): Boolean {
         check(json.optInt("code", 0) == 0 && json.optInt("status", 200) == 200) { json.optString("message", "网盘操作失败") }

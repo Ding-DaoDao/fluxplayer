@@ -130,7 +130,14 @@ class Yun139ApiClient(
         val bodyStr = body?.toString() ?: ""
         val builder = Request.Builder().url(url)
             .post(bodyStr.toRequestBody(jsonMediaType))
-        headers.forEach { (k, v) -> builder.header(k, v) }
+        // hcy 云盘接口一律要带 mcloud-sign（wenxi 的 cloud() 对 file/list、
+        // getDownloadUrl、task/get 都签）；登录/刷新接口保持原样。
+        val requestHeaders = if (headers.containsKey("mcloud-sign") || !url.contains("/hcy/")) {
+            headers
+        } else {
+            headers + ("mcloud-sign" to com.fluxplayer.app.core.data.cloud.MobileCloudProtocol.signature(bodyStr))
+        }
+        requestHeaders.forEach { (k, v) -> builder.header(k, v) }
         val req = builder.build()
         // 整个请求 + 读取 body 都在 IO 线程完成
         val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

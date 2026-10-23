@@ -34,9 +34,11 @@ internal class Pan123ShareGateway(private val client: Pan123ApiClient) : CloudSh
             }
             val fresh = batch.filter { seen.add(it.id) }
             result.addAll(fresh)
-            if (fresh.isEmpty()) return result
+            if (batch.isEmpty()) return result
+            // 整页重复说明页码没前进，不能静默当成读完
+            check(fresh.isNotEmpty()) { "123 分享分页重复，请刷新重试" }
             // 服务端可能把 limit 截断到更小的页长，因此不能用“本页是否满 100”判断结束；
-            // total 缺失时会退化成首页条数，此时只把它当成上界提示，继续翻页。
+            // total 缺失时只把它当成上界提示，继续翻页。
             if (listing.total > batch.size && result.size >= listing.total) return result
             if (batch.size < 100) return result
         }
@@ -75,7 +77,9 @@ internal class C189ShareGateway(private val client: C189ApiClient) : CloudShareG
             val listing = client.listShareDir(session.id, parent, if (parent == session.rootId) info.optBoolean("isFolder") else true, info.optInt("shareMode"), page, pageSize, session.password)
             val fresh = listing.items.filter { seen.add(it.id) }
             result.addAll(fresh.map { CloudRemoteFile(it.id, it.name, it.isDir, it.size, it.md5, parent) })
-            if (fresh.isEmpty()) return result
+            if (listing.items.isEmpty()) return result
+            // 整页重复说明页码没前进，不能静默当成读完
+            check(fresh.isNotEmpty()) { "天翼分享分页重复，请刷新重试" }
             // 服务端可能把 pageSize 截断，优先用返回的总数判断是否读完
             if (listing.totalCount > 0) {
                 if (result.size >= listing.totalCount) return result

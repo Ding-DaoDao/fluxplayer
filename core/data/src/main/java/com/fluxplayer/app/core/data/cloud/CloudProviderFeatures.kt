@@ -71,9 +71,23 @@ class CloudProviderFeatures private constructor(
 
         fun from(client: Pan123ApiClient) = CloudProviderFeatures("pan123", { path, body, _, _ ->
             client.featureRequest(path, body ?: JSONObject())
-        }, folderLoader = { parent, page ->
-            val listing = client.listFiles(parentFileId = parent, page = page).getOrThrow()
-            listing.items.map { CloudRemoteFile(it.fileId, it.fileName, it.isDirectory, it.size, jsonObject("etag" to it.etag, "s3" to it.s3keyFlag).toString(), parent) } to listing.hasMore
+        }, folderLoader = { parent, _ ->
+            // 123 用服务端 next 游标翻页，这里一次读完（与阿里/移动一致）
+            val result = mutableListOf<CloudRemoteFile>()
+            val seen = mutableSetOf<String>()
+            var next = "0"
+            val cursors = mutableSetOf<String>()
+            do {
+                val listing = client.listFiles(parentFileId = parent, next = next).getOrThrow()
+                check(listing.items.all { seen.add(it.fileId) }) { "目录分页重复，请刷新" }
+                result.addAll(listing.items.map { CloudRemoteFile(it.fileId, it.fileName, it.isDirectory, it.size, jsonObject("etag" to it.etag, "s3" to it.s3keyFlag).toString(), parent) })
+                val cursor = listing.nextCursor
+                if (cursor == null) break
+                check(cursors.add(cursor)) { "目录分页重复，请重试" }
+                check(cursors.size < 200) { "目录过大，请缩小范围" }
+                next = cursor
+            } while (true)
+            result to false
         }, legacyShare = Pan123ShareGateway(client), resolvePersonal = { file ->
             // 与浏览器下载链路一致：fileDownloadInfo → HEAD 跟随 → CDN 直链
             client.resolveDownloadUrlViaHead(pan123Item(file)).getOrThrow()
@@ -253,11 +267,19 @@ class CloudProviderFeatures private constructor(
         }
     }
 
+    /** 阿里的分享 token 约两小时过期，每次列表/转存前重取（wenxi 同款）；失败时退回已存的 token。 */
+    private suspend fun alipanShareToken(session: CloudShareSession): String = runCatching {
+        post("/v2/share_link/get_share_token", jsonObject("share_id" to session.id, "share_pwd" to session.password))
+            .requiredString("share_token")
+    }.getOrElse { session.token }
+
     suspend fun listShare(session: CloudShareSession, parentId: String): List<CloudRemoteFile> {
         legacyShare?.let { return it.list(session, parentId) }
         val result = mutableListOf<CloudRemoteFile>()
         val seen = mutableSetOf<String>()
         var marker = ""
+        // 阿里的分享 token 短命，进入目录前先刷一次
+        val shareToken = if (provider == "alipan") alipanShareToken(session) else session.token
         repeat(200) { page ->
             val response = when (provider) {
                 "alipan" -> call(
@@ -271,18 +293,36 @@ class CloudProviderFeatures private constructor(
                         "order_direction" to "ASC",
                     ),
                     emptyMap(),
-                    mapOf("X-Share-Token" to session.token),
+                    mapOf("X-Share-Token" to shareToken),
                 )
-                "quark", "uc" -> data(
-                    get(
-                        if (provider == "quark") "share/sharepage/detail" else "transfer_share/detail",
-                        mapOf(
-                            "pwd_id" to session.id, "stoken" to session.token, "pdir_fid" to parentId,
-                            "_page" to (page + 1).toString(), "_size" to "50", "_fetch_total" to "1", "ver" to "2",
-                            "entry" to "ft", "fetch_file_list" to "1", "_fetch_share" to "1", "_fetch_task" to "1", "passcode" to session.password,
-                        ),
-                    ),
-                )
+                "quark", "uc" -> {
+                    // 夸克与 UC 的分享接口参数不同（wenxi quark_uc.dart 的 list 分流）
+                    val quark = provider == "quark"
+                    val query = buildMap {
+                        put("pwd_id", session.id)
+                        put("stoken", session.token)
+                        put("pdir_fid", parentId)
+                        put("_page", (page + 1).toString())
+                        put("_size", if (quark) "100" else "50")
+                        put("_fetch_total", "1")
+                        if (quark) {
+                            put("ver", "2")
+                            put("_sort", "file_type:asc,file_name:asc")
+                            put("force", "0")
+                            put("_fetch_banner", "0")
+                            put("_fetch_share", "0")
+                            put("fetch_relate_conversation", "0")
+                        } else {
+                            put("entry", "ft")
+                            put("fetch_file_list", "1")
+                            put("passcode", "")
+                            put("_fetch_task", "1")
+                            put("_fetch_share", "1")
+                            put("_sort", "")
+                        }
+                    }
+                    data(get(if (quark) "share/sharepage/detail" else "transfer_share/detail", query))
+                }
                 else -> return mobileListShare(session, parentId)
             }
             val array = if (provider == "alipan") {
@@ -305,7 +345,13 @@ class CloudProviderFeatures private constructor(
                 if (next.isBlank()) return result
                 check(next != marker && fresh.isNotEmpty()) { "阿里分享分页重复，请刷新重试" }
                 marker = next
-            } else if (batch.size < 50) return result else check(fresh.isNotEmpty()) { "分享分页重复，请刷新重试" }
+            } else {
+                // 夸克每页 100、UC 每页 50；整页重复说明游标没前进，不能当读完静默返回
+                val pageSize = if (provider == "quark") 100 else 50
+                if (batch.isEmpty()) return result
+                check(fresh.isNotEmpty()) { "分享分页重复，请刷新重试" }
+                if (batch.size < pageSize) return result
+            }
         }
         error("分享目录过大，请缩小范围")
     }
@@ -317,34 +363,37 @@ class CloudProviderFeatures private constructor(
             return
         }
         when (provider) {
-            "alipan" -> files.forEach { file ->
-                val response = call(
-                    "/v2/file/copy",
-                    jsonObject(
-                        "share_id" to session.id,
-                        "file_id" to file.id,
-                        "to_drive_id" to driveId(),
-                        "to_parent_file_id" to target,
-                        "auto_rename" to true,
-                    ),
-                    emptyMap(),
-                    mapOf("X-Share-Token" to session.token),
-                )
-                response.optString("async_task_id").takeIf { it.isNotBlank() }?.let { taskId ->
-                    var finished = false
-                    for (attempt in 0 until 40) {
-                        val task = post("/v2/async_task/get", jsonObject("async_task_id" to taskId))
-                        val state = task.optString("state").lowercase(Locale.US)
-                        check(state !in setOf("failed", "fail", "cancelled")) { "阿里转存任务失败" }
-                        if (state in setOf("succeed", "success")) {
-                            finished = true
-                            break
+            "alipan" -> {
+                val shareToken = alipanShareToken(session)
+                files.forEach { file ->
+                    val response = call(
+                        "/v2/file/copy",
+                        jsonObject(
+                            "share_id" to session.id,
+                            "file_id" to file.id,
+                            "to_drive_id" to driveId(),
+                            "to_parent_file_id" to target,
+                            "auto_rename" to true,
+                        ),
+                        emptyMap(),
+                        mapOf("X-Share-Token" to shareToken),
+                    )
+                    response.optString("async_task_id").takeIf { it.isNotBlank() }?.let { taskId ->
+                        var finished = false
+                        for (attempt in 0 until 40) {
+                            val task = post("/v2/async_task/get", jsonObject("async_task_id" to taskId))
+                            val state = task.optString("state").lowercase(Locale.US)
+                            check(state !in setOf("failed", "fail", "cancelled")) { "阿里转存任务失败" }
+                            if (state in setOf("succeed", "success")) {
+                                finished = true
+                                break
+                            }
+                            delay(750)
                         }
-                        delay(750)
+                        check(finished) { "阿里转存超时，请刷新目标目录确认" }
                     }
-                    check(finished) { "阿里转存超时，请刷新目标目录确认" }
+                    check(response.has("file_id") || response.has("async_task_id")) { "阿里未确认转存结果" }
                 }
-                check(response.has("file_id") || response.has("async_task_id")) { "阿里未确认转存结果" }
             }
             "quark", "uc" -> {
                 require(files.all { it.token.isNotBlank() }) { "分享凭证缺失，请重新打开链接" }

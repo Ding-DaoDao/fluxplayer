@@ -360,15 +360,17 @@ class Pan123ApiClient(
      */
     suspend fun listFiles(
         parentFileId: String = "0",
-        page: Int = 1,
+        next: String = "0",
         orderBy: String = "file_name",
         orderDirection: String = "asc",
         searchData: String = "",
     ): Result<Pan123ListResult> = runCatching {
+        // 与 wenxi 的 /b/api/file/list/new 一致：next 是服务端游标，Page 恒为 1
         val url = "$WEB_API_BASE/file/list/new".toHttpUrl().newBuilder()
             .addQueryParameter("driveId", "0")
-            .addQueryParameter("limit", "100")
-            .addQueryParameter("page", page.toString())
+            .addQueryParameter("limit", Pan123ListResult.PAGE_SIZE.toString())
+            .addQueryParameter("next", next)
+            .addQueryParameter("Page", "1")
             .addQueryParameter("orderBy", orderBy)
             .addQueryParameter("orderDirection", orderDirection)
             .addQueryParameter("parentFileId", parentFileId)
@@ -420,9 +422,10 @@ class Pan123ApiClient(
                 raw = item,
             )
         }
-        // 自己网盘响应不含 Next 游标；仅当服务端异常下发时才透传，hasMore 不依赖它。
-        val next = data?.optString("Next")?.takeIf { it.isNotBlank() && it != "null" && it != "-1" }
-        Pan123ListResult(items, next)
+        // Next 是服务端游标；-1 或缺失表示没有下一页
+        val rawNext = data?.optString("Next").orEmpty()
+        val nextCursor = rawNext.takeIf { it.isNotBlank() && it != "null" && it != "-1" }
+        Pan123ListResult(items, nextCursor)
     }
 
     suspend fun getFileDownloadUrl(item: Pan123FileItem): Result<String> = runCatching {

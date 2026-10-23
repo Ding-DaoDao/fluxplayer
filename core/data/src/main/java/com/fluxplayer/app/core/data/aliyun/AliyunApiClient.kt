@@ -244,9 +244,12 @@ class AliyunApiClient(
         val body = JSONObject().apply {
             put("drive_id", driveId)
             put("file_id", fileId)
+            // 默认约 15 分钟过期，排队下载/续播容易 403，与 wenxi 一样要 4 小时
+            put("expire_sec", 14400)
         }
         val json = apiPost("https://api.aliyundrive.com/v2/file/get_download_url", body)
-        json.getString("url")
+        json.optString("download_url").ifBlank { json.optString("cdn_url") }.ifBlank { json.optString("url") }
+            .also { check(it.isNotBlank()) { "阿里未返回下载地址" } }
     }
 
     suspend fun createFolder(name: String, parentFileId: String): Result<Boolean> = runCatching {

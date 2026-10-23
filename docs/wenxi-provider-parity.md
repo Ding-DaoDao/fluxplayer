@@ -72,20 +72,32 @@ FluxPlayer 已有六家网盘的个人目录浏览、播放、下载、新建文
 | 阿里相册未开通时整个空间入口报错 | 相册是可选能力 | 探测失败返回空列表 |
 | 夸克/移动登出未清内存鉴权 | 旧 Cookie 继续带给 CDN | 登出时清 `QuarkAuthProvider` / `Yun139AuthProvider` |
 
-### 未修（需要实测或需要明确产品取舍）
+### 未修（按 wenxi 对齐原则，剩下的属于功能移植规模或产品取舍）
 
-1. **夸克/UC 分享列表参数未分流**：现在把 UC 用的 `entry/fetch_file_list/_fetch_task/_fetch_share/passcode` 一起发给夸克，且两家都没发 `_sort`。分页顺序不稳时可能触发「分页重复」或漏项。需要抓包确认夸克侧是否容忍这些参数。
-2. **夸克/UC 的移动 `action_type`**：FluxPlayer 用 `2`，wenxi 用 `1`。两者都自洽（删除也是 2），但需真机验证一次移动。
-3. **123 个人列表用 `page` 而非 `next` 游标**，`hasMore` 靠「满 100 条」猜；若服务端只认 `next`，>100 项的目录会重复或截断。需实测一个大目录。
-4. **移动列表/取链不带 `mcloud-sign`**：wenxi 对 `file/list`、`getDownloadUrl`、`task/get` 都签名。若服务端强制校验，移动的浏览/下载会失败——目前能跑说明至少当前版本不强制，但属于隐性风险。
-5. **移动家庭云缺 `familyRootPath` 一致性校验**：只校验 `root:/` 前缀与分段合法性，不校验「当前目录的 path 与 parent 一致」，跨目录错位时可能取到别的文件的下载地址。
-6. **UC 网页播放/下载没有内容一致性校验**：wenxi 用 md5 + 长度探针拦「会员提示片」，FluxPlayer 列表里连 md5 都没保留。UC 受限时可能把提示片当原片。
-7. **分享直链下载（游客免转存）没有**：wenxi 有完整双通道（游客隔离 + 账号直连 + 状态分类）。当前只保留「转存并播放/下载」。
-8. **列表限流/429 退避没有**：wenxi 对 list 类请求有节流 + 指数退避，FluxPlayer 连续请求。大目录或频繁刷新会撞限流。
-9. **天翼 `webFeatureRequest` 失败后不重登重试**（签名通道有重试，网页通道没有）；移动整条链路没有「需重新登录」的识别。
-10. **阿里下载地址缺 `expire_sec=14400`**，默认约 900 秒过期，而播放地址缓存也是 15 分钟，排队下载/续播容易 403。
-11. **夸克/UC 的 Cookie 合并无白名单**（wenxi 只收 `__pus/__puus/__pugs`，且只在成功响应上写回），边缘节点带的 cookie 会被并进主会话。
-12. **阿里设备签名仍带硬编码默认 deviceId/signature**，未登录浏览分享时可能触发 `SignatureInvalid` 后报「账号已变化」。
+对齐原则：wenxi 能跑通的实现就是基准，不确定的地方直接照抄它的参数与判定，不再以「需要抓包确认」为由搁置。下列条目都是照 wenxi 能改的，只是改动规模更大或牵涉产品取舍：
+
+1. **夸克/UC 分享直链下载（游客免转存）**：wenxi 有完整双通道（游客隔离 cookie + 账号直连 + 401/403/14001 状态分类 + 域名白名单 + 落盘前长度校验）。属于新增能力，与「转存并播放会把文件留在用户目录」的既有边界并存，需要你确认是否要。
+2. **UC 网页播放/下载的内容一致性校验**：wenxi 用 md5 + 长度探针拦「会员提示片」。要在列表里保留 md5，并在取址后加探针请求，改动面较大。
+3. **转存临时目录 + 自动清理**：wenxi 每次转存建独立临时目录并登记 cleanup。当前刻意改成「留在用户选择的目录」，两者不能同时成立，需要产品取舍。
+4. **列表限流 / 429 指数退避**：wenxi 对 list 类请求有节流 + 退避。可以照抄，属于健壮性增强。
+5. **天翼 `webFeatureRequest` 失败后重登重试**（签名通道已有重试，网页通道没有）；移动整条链路的「需重新登录」识别。可以照抄 wenxi 的 `_renew` 流程。
+6. **移动家庭云 `familyRootPath` 一致性校验**：wenxi 的 `_checkFamilyPath` 会校验「当前目录 path 与 parent 一致」，防止跨目录错位取到别的文件。可以照抄。
+7. **阿里分享转存端点**：wenxi 走 `/adrive/v4/batch` + `share_id`，FluxPlayer 走 `/v2/file/copy`。若阿里侧行为不一致，需要改成 wenxi 的 batch 形式。
+8. **123/夸克列表的限流节流与分页退避**（与第 4 条同类）。
+
+### 已按 wenxi 对齐（第三轮，直接照抄参考实现）
+
+| 问题 | wenxi 依据 | 改动 |
+| --- | --- | --- |
+| 夸克分享列表把 UC 专用参数一起发出、且缺 `_sort` | `quark_uc.dart` list() 严格分流 | 夸克发 `ver=2` + `_sort=file_type:asc,file_name:asc` + `force/_fetch_banner/_fetch_share/fetch_relate_conversation=0`；UC 发 `entry/fetch_file_list/passcode/_fetch_task/_fetch_share`；页长夸克 100、UC 50 |
+| 夸克移动 `action_type` 写成 2（那是删除） | `quark_uc.dart` move() 用 1、delete() 用 2 | 移动改 1 |
+| 夸克建目录缺 `dir_path`/`dir_init_lock`、多 `dir` | `_folder()` 的 body | 按 wenxi 改 |
+| 夸克 `file/sort` 缺 `fetch_all_file`/`fetch_risk_file_name`，且 `uc_param_str` 两家都发 | `cookie_cloud.dart` url() 分流 | 按 wenxi 分流，写操作只给夸克带 `uc_param_str` |
+| 123 个人列表用 `page` 而非 `next` 游标 | `pan123.dart` list() 用 `next` 游标 + `Page=1`，`Next=='-1'` 终止 | 改成游标翻页；选目录入口读完整个目录；搜索结果的分页游标与目录分开存 |
+| 移动 `file/list`、`getDownloadUrl`、`task/get` 不带 `mcloud-sign` | `c139.dart` 的 `cloud()` 对三者都签名 | apiPost 对 `/hcy/` 路径自动补签名 |
+| 夸克 Cookie 合并无白名单、失败响应也写回 | `cookie_cloud.dart` 只收 `__pus/__puus/__pugs` 且只在成功响应写回 | 按 wenxi 白名单 + 成功判定；Cookie 拼接改 `; ` |
+| 阿里下载地址缺 `expire_sec` | `aliyun.dart` 用 14400 | 加 `expire_sec=14400`，并按 `download_url`→`cdn_url`→`url` 取值 |
+| 阿里分享 token 只在打开时取一次 | `aliyun.dart` 每次 list/save 前 `_shareToken()` | 列表/转存前重取，失败退回已存 token |
 
 ### 已知架构差异（不算缺陷）
 

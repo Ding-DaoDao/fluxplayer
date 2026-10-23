@@ -332,5 +332,70 @@ class ProviderParityRegressionTest {
         assertTrue(api.moveFile("123", "0").getOrThrow())
     }
 
+    @Test
+    fun quarkMoveUsesActionTypeOneAndDeleteUsesTwo() = runBlocking {
+        val seen = mutableListOf<Pair<String, Int>>()
+        val http = client { request, text ->
+            val path = request.url.encodedPath
+            if (path.endsWith("/file/move") || path.endsWith("/file/delete")) {
+                seen += path.substringAfterLast("/") to JSONObject(text).optInt("action_type")
+                """{"status":200,"code":0,"data":{}}"""
+            } else {
+                """{"status":200,"code":0,"data":{"list":[]}}"""
+            }
+        }
+        val api = QuarkApiClient(http).apply { setCookie("__uid=user;__pus=a;__puus=b") }
+        assertTrue(api.moveFiles(listOf("a"), "0").getOrThrow())
+        assertTrue(api.deleteFiles(listOf("a")).getOrThrow())
+        assertEquals(listOf("move" to 1, "delete" to 2), seen)
+    }
+
+    @Test
+    fun pan123PersonalListingUsesServerCursorAndStopsOnNextMinusOne() = runBlocking {
+        val cursors = mutableListOf<String>()
+        val http = client { request, _ ->
+            val cursor = request.url.queryParameter("next") ?: ""
+            cursors += cursor
+            assertEquals("1", request.url.queryParameter("Page"))
+            when (cursor) {
+                "0" -> """{"code":0,"data":{"InfoList":[{"FileId":1,"FileName":"a","Type":0,"Size":1}],"Next":"cursor-2"}}"""
+                "cursor-2" -> """{"code":0,"data":{"InfoList":[{"FileId":2,"FileName":"b","Type":0,"Size":1}],"Next":"-1"}}"""
+                else -> """{"code":0,"data":{"InfoList":[],"Next":"-1"}}"""
+            }
+        }
+        val api = Pan123ApiClient(http).apply { setToken("fixture") }
+        val first = api.listFiles(parentFileId = "0").getOrThrow()
+        assertEquals(1, first.items.size)
+        assertEquals("cursor-2", first.nextCursor)
+        assertTrue(first.hasMore)
+        val second = api.listFiles(parentFileId = "0", next = checkNotNull(first.nextCursor)).getOrThrow()
+        assertEquals(1, second.items.size)
+        assertFalse(second.hasMore)
+        assertEquals(listOf("0", "cursor-2"), cursors)
+    }
+
+    @Test
+    fun quarkShareListingKeepsQuarkParamsAndIgnoresUcOnlyOnes() = runBlocking {
+        val http = client { request, _ ->
+            when {
+                request.url.encodedPath.endsWith("share/sharepage/token") ->
+                    """{"status":200,"code":0,"data":{"stoken":"st","first_fid":"root"}}"""
+                request.url.encodedPath.endsWith("share/sharepage/detail") -> {
+                    assertEquals("2", request.url.queryParameter("ver"))
+                    assertEquals("file_type:asc,file_name:asc", request.url.queryParameter("_sort"))
+                    assertEquals("100", request.url.queryParameter("_size"))
+                    assertEquals(null, request.url.queryParameter("entry"))
+                    assertEquals(null, request.url.queryParameter("fetch_file_list"))
+                    assertEquals(null, request.url.queryParameter("passcode"))
+                    """{"status":200,"code":0,"data":{"list":[{"fid":"f1","file_name":"x","dir":0,"size":1,"share_fid_token":"t"}]}}"""
+                }
+                else -> """{"status":200,"code":0,"data":{}}"""
+            }
+        }
+        val features = CloudProviderFeatures.from(QuarkApiClient(http).apply { setCookie("__uid=u;__pus=a;__puus=b") }, "quark")
+        val session = features.openShare("https://pan.quark.cn/s/abc", "1234")
+        assertEquals(1, features.listShare(session, session.rootId).size)
+    }
+
     private fun md5(text: String) = MessageDigest.getInstance("MD5").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 }

@@ -95,7 +95,8 @@ class CloudProviderFeaturesTest {
 
     @Test
     fun refusesRepeatedSharePaginationInsteadOfReturningPartialSuccess() = runBlocking {
-        val array = JSONArray((1..50).map { jsonObject("fid" to it.toString(), "file_name" to "视频$it") })
+        // 夸克分享每页 100 条；喂两页完全相同的数据，应报「分页重复」而不是悄悄返回半份列表
+        val array = JSONArray((1..100).map { jsonObject("fid" to it.toString(), "file_name" to "视频$it") })
         val http = client { _, _ -> jsonObject("data" to jsonObject("list" to array)).toString() }
         val features = CloudProviderFeatures.from(QuarkApiClient(http), "quark")
         val error = runCatching { features.listShare(CloudShareSession("share", "", "token"), "0") }.exceptionOrNull()
