@@ -20,8 +20,25 @@ class QuarkApiClient(
         sessionContext = context.applicationContext
     }
 
+    /**
+     * 把「本次播放的账号」写进夸克/UC 共用的全局鉴权。
+     * 特性层（搜索、分享转存）播报时也要走这一步，否则全局还停在上一次另一家的账号上。
+     */
+    private fun syncPlaybackAuth() {
+        val headers = featureHeaders()
+        com.fluxplayer.app.core.common.CloudPlayHeaders.activeProvider = driveType
+        com.fluxplayer.app.core.data.quark.QuarkAuthProvider.isActive = true
+        com.fluxplayer.app.core.data.quark.QuarkAuthProvider.cookie = getCookie()
+        headers["User-Agent"]?.let { com.fluxplayer.app.core.data.quark.QuarkAuthProvider.userAgent = it }
+        com.fluxplayer.app.core.data.quark.QuarkAuthProvider.referer = headers["referer"] ?: homeUrl
+        com.fluxplayer.app.core.common.CloudPlayHeaders.registerSuffix(".quark.cn") { featureHeaders() }
+        if (driveType == "uc") com.fluxplayer.app.core.common.CloudPlayHeaders.registerSuffix(".uc.cn") { featureHeaders() }
+    }
+
     suspend fun resolvePlaybackUrl(fid: String, name: String): String {
         val video = Regex("\\.(mp4|mkv|avi|mov|webm|flv|m4v|ts|wmv|rmvb)$", RegexOption.IGNORE_CASE).containsMatchIn(name)
+        // 本次播放的来源与账号先同步到全局，避免另一家的凭据/注册被沿用
+        syncPlaybackAuth()
         if (video) {
             sessionContext?.let { context ->
                 if (driveType == "uc") {
@@ -29,7 +46,10 @@ class QuarkApiClient(
                     // TV 授权失效时不能让整条播放挂掉，回落到网页转码/下载
                     if (tv.isAuthorized()) {
                         runCatching { tv.playback(fid).first().first }.getOrNull()?.let { url ->
-                            android.net.Uri.parse(url).host?.let { host -> com.fluxplayer.app.core.common.CloudPlayHeaders.register(host) { emptyMap() } }
+                            // 预签名地址标记为匿名，但只在 UC 播放时生效，不影响夸克同域名播放
+                            android.net.Uri.parse(url).host?.let { host ->
+                                com.fluxplayer.app.core.common.CloudPlayHeaders.registerAnonymous(host, "uc")
+                            }
                             return url
                         }
                     }

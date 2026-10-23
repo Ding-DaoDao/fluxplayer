@@ -1,5 +1,6 @@
 package com.fluxplayer.app.core.data.cloud
 
+import com.fluxplayer.app.core.common.CloudPlayHeaders
 import com.fluxplayer.app.core.data.cloud189.C189ApiClient
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.pan123.Pan123ApiClient
@@ -426,6 +427,25 @@ class ProviderParityRegressionTest {
         assertEquals(listOf("batch_send", "acquire_dl_token", "download"), paths)
         // 返回的文件不是所选文件时必须失败，不能把别人的地址交给播放器
         assertTrue(api(downloadFid = "other").getOriginalPlaybackUrl("f1", "a.mp4").isFailure)
+    }
+
+    @Test
+    fun ucTvAnonymousHostDoesNotBlockQuarkPlaybackOnSameHost() {
+        // 夸克与 UC 共用阿里 CDN 域名：UC TV 的预签名地址不能把域名永久标成匿名
+        CloudPlayHeaders.clear()
+        CloudPlayHeaders.activeProvider = "uc"
+        CloudPlayHeaders.registerAnonymous("cdn.example.test", "uc")
+        assertTrue(CloudPlayHeaders.isExplicitlyAnonymous("cdn.example.test"))
+
+        // 换到夸克播放同一域名时必须重新注入夸克的头
+        CloudPlayHeaders.activeProvider = "quark"
+        assertFalse(CloudPlayHeaders.isExplicitlyAnonymous("cdn.example.test"))
+
+        // 回到 UC 播放时匿名标记仍然生效
+        CloudPlayHeaders.activeProvider = "uc"
+        assertTrue(CloudPlayHeaders.isExplicitlyAnonymous("cdn.example.test"))
+        CloudPlayHeaders.clear()
+        assertFalse(CloudPlayHeaders.isExplicitlyAnonymous("cdn.example.test"))
     }
 
     private fun md5(text: String) = MessageDigest.getInstance("MD5").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }

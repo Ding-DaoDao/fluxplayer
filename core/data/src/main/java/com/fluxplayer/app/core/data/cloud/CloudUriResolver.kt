@@ -425,8 +425,11 @@ class CloudUriResolver @Inject constructor(
 
         val tvService = com.fluxplayer.app.core.data.quark.UcTvService(context)
         if (tvService.isAuthorized()) {
+            // TV 地址是预签名链接，不能注入账号头；但匿名标记只对 UC 生效，
+            // 否则会把夸克同一 CDN 域名上的播放头一起屏蔽掉。
+            selectPlaybackProvider("uc")
             val qualities = tvService.playback(fileId)
-            qualities.forEach { (url, _) -> Uri.parse(url).host?.let { host -> CloudPlayHeaders.register(host) { emptyMap() } } }
+            qualities.forEach { (url, _) -> Uri.parse(url).host?.let { host -> CloudPlayHeaders.registerAnonymous(host, "uc") } }
             val options = qualities.map { (url, name) -> VideoQualityCache.QualityOption(label = name, url = url) }
             videoQualityCache.cacheQualityOptions("uc", fileId, fileId, options)
             return qualities.first().first

@@ -13,7 +13,18 @@ import android.net.Uri
 object CloudPlayHeaders {
     @Volatile var activeProvider: String = ""
 
-    fun isExplicitlyAnonymous(domain: String): Boolean = exactMatchers[domain]?.invoke()?.isEmpty() == true
+    fun isExplicitlyAnonymous(domain: String): Boolean = anonymousHosts[domain] == activeProvider
+
+    /**
+     * 明确「不需要任何认证头」的域名 → 注册它的来源。
+     * 必须带来源作用域：夸克与 UC 共用阿里 CDN 域名，UC TV 的预签名地址
+     * 如果无条件把域名标成匿名，会把夸克同一域名上的播放头一起屏蔽掉。
+     */
+    private val anonymousHosts = mutableMapOf<String, String>()
+
+    fun registerAnonymous(domain: String, provider: String) {
+        anonymousHosts[domain] = provider
+    }
 
     private val exactMatchers = mutableMapOf<String, () -> Map<String, String>>()
     private val suffixMatchers = mutableMapOf<String, () -> Map<String, String>>()
@@ -70,5 +81,6 @@ object CloudPlayHeaders {
         activeProvider = ""
         exactMatchers.clear()
         suffixMatchers.clear()
+        anonymousHosts.clear()
     }
 }
