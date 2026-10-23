@@ -24,6 +24,7 @@ private fun pan123Item(file: CloudRemoteFile): com.fluxplayer.app.core.data.pan1
         type = if (file.directory) 1 else 0,
         size = file.size,
         etag = metadata.optString("etag"),
+        raw = metadata.optJSONObject("raw"),
         s3keyFlag = metadata.optString("s3"),
         downloadUrl = "",
         createAt = "",
@@ -43,6 +44,8 @@ class CloudProviderFeatures private constructor(
     internal val httpClient: okhttp3.OkHttpClient = CloudHttpClient.DEFAULT,
     internal val mediaHeaders: () -> Map<String, String> = { emptyMap() },
     private val resolveDownload: suspend (CloudRemoteFile) -> String = resolvePersonal,
+    private val searchAccount: () -> String = { "" },
+    internal val manageFiles: suspend (List<CloudRemoteFile>, String?) -> Unit = { _, _ -> error("当前网盘不支持批量管理") },
 ) {
     companion object {
         fun from(client: AliyunApiClient) = CloudProviderFeatures("alipan", { path, body, _, headers ->
@@ -60,7 +63,7 @@ class CloudProviderFeatures private constructor(
                 check(markers.size < 200) { "目录过大，请缩小范围" }
             } while (marker != null)
             result to false
-        }, resolvePersonal = { file -> client.getDownloadUrl(file.id).getOrThrow() }, httpClient = client.featureHttpClient)
+        }, resolvePersonal = { file -> client.getDownloadUrl(file.id).getOrThrow() }, httpClient = client.featureHttpClient, searchAccount = { client.driveId }, manageFiles = { files, target -> client.manageFiles(files.map { it.id }, target).getOrThrow() })
 
         /** [type] 必须与 client 的来源一致；默认直接取客户端来源，避免两处传参不一致。 */
         fun from(client: QuarkApiClient, type: String = client.provider) = CloudProviderFeatures(type, { path, body, query, headers ->
@@ -68,7 +71,13 @@ class CloudProviderFeatures private constructor(
         }, folderLoader = { parent, page ->
             val items = client.listFiles(parent, page).getOrThrow()
             items.map { CloudRemoteFile(it.fid, it.fileName, it.dir, it.size, parentId = parent) } to (items.size >= client.pageSize)
-        }, resolvePersonal = { file -> client.resolvePlaybackUrl(file.id, file.name) }, httpClient = client.featureHttpClient, mediaHeaders = { client.featureHeaders() }, resolveDownload = { client.getDownloadUrl(it.id).getOrThrow() })
+        }, resolvePersonal = { file -> client.resolvePlaybackUrl(file.id, file.name) }, httpClient = client.featureHttpClient, mediaHeaders = { client.featureHeaders() }, resolveDownload = { client.getDownloadUrl(it.id).getOrThrow() }, searchAccount = {
+            val cookie = client.getCookie()
+            val identity = Regex("(?:^|;\\s*)(__uid|__pus)=([^;]+)").findAll(cookie).associate { it.groupValues[1] to it.groupValues[2] }.toSortedMap().entries.joinToString(";") { "${it.key}=${it.value}" }
+            identity.ifBlank { cookie }
+        }, manageFiles = { files, target ->
+            check((if (target == null) client.deleteFiles(files.map { it.id }) else client.moveFiles(files.map { it.id }, target)).getOrThrow()) { "网盘未确认文件操作" }
+        })
 
         fun from(client: Pan123ApiClient) = CloudProviderFeatures("pan123", { path, body, _, _ ->
             client.featureRequest(path, body ?: JSONObject())
@@ -84,8 +93,9 @@ class CloudProviderFeatures private constructor(
             while (!finished) {
                 check(rounds++ < 200) { "目录过大，请缩小范围" }
                 val listing = client.listFiles(parentFileId = parent, page = page, next = cursor).getOrThrow()
-                check(listing.items.all { seen.add(it.fileId) }) { "目录分页重复，请刷新" }
-                result.addAll(listing.items.map { CloudRemoteFile(it.fileId, it.fileName, it.isDirectory, it.size, jsonObject("etag" to it.etag, "s3" to it.s3keyFlag).toString(), parent) })
+                val unique = listing.items.filter { seen.add(it.fileId) }
+                check(unique.isNotEmpty() || !listing.hasMore) { "目录分页重复，请刷新" }
+                result.addAll(unique.map { CloudRemoteFile(it.fileId, it.fileName, it.isDirectory, it.size, jsonObject("etag" to it.etag, "s3" to it.s3keyFlag, "raw" to it.raw).toString(), parent) })
                 if (!listing.hasMore) {
                     finished = true
                 } else {
@@ -100,7 +110,9 @@ class CloudProviderFeatures private constructor(
         }, legacyShare = Pan123ShareGateway(client), resolvePersonal = { file ->
             // 与浏览器下载链路一致：fileDownloadInfo → HEAD 跟随 → CDN 直链
             client.resolveDownloadUrlViaHead(pan123Item(file)).getOrThrow()
-        }, httpClient = client.featureHttpClient)
+        }, httpClient = client.featureHttpClient, searchAccount = { searchTokenAccount(client.getToken().orEmpty()) }, manageFiles = { files, target ->
+            check((if (target == null) client.trashFile(files.map(::pan123Item)) else client.moveFiles(files.map { it.id }, target)).getOrThrow()) { "123 未确认文件操作" }
+        })
 
         fun from(client: Yun139ApiClient) = CloudProviderFeatures("yun139", { path, body, _, _ ->
             client.featureRequest(path, body ?: JSONObject())
@@ -116,19 +128,39 @@ class CloudProviderFeatures private constructor(
                 check(cursors.size < 200) { "目录过大，请缩小范围" }
             } while (cursor != null)
             result to false
-        }, resolvePersonal = { file -> client.getDownloadUrl(file.id, file.name).getOrThrow() }, httpClient = client.featureHttpClient)
+        }, resolvePersonal = { file -> client.getDownloadUrl(file.id, file.name).getOrThrow() }, httpClient = client.featureHttpClient, searchAccount = { Yun139AuthProvider.phoneNumber.ifBlank { Yun139AuthProvider.userDomainId }.ifBlank { Yun139AuthProvider.authorization } }, manageFiles = { files, target ->
+            check((if (target == null) client.deleteFiles(files.map { it.id }) else client.moveFiles(files.map { it.id }, target)).getOrThrow()) { "移动未确认文件操作" }
+        })
 
-        fun from(client: C189ApiClient) = CloudProviderFeatures("cloud189", { path, body, query, _ ->
+        fun from(client: C189ApiClient) = CloudProviderFeatures("cloud189", { path, body, query, headers ->
             val params = body?.let { json -> json.keys().asSequence().associateWith { json.get(it).toString() } } ?: query
-            client.featureRequest(path, params, body != null)
-        }, folderLoader = { parent, page ->
+            client.featureRequest(path, params, body != null, headers)
+        }, folderLoader = { parent, _ ->
             val pageSize = 100
-            val listing = client.listFiles(folderId = parent, pageNum = page, pageSize = pageSize).getOrThrow()
-            // 服务端可能把 pageSize 截断，优先用总数判断是否还有下一页
-            val more = if (listing.totalCount > 0) page * pageSize < listing.totalCount else listing.items.size >= pageSize
-            listing.items.map { CloudRemoteFile(it.id, it.name, it.isDir, it.size, parentId = parent) } to more
-        }, legacyShare = C189ShareGateway(client), resolvePersonal = { file -> client.getDownloadUrl(file.id).getOrThrow() }, httpClient = client.featureHttpClient)
+            val result = mutableListOf<CloudRemoteFile>()
+            val seen = mutableSetOf<String>()
+            var finished = false
+            for (page in 1..200) {
+                val listing = client.listFiles(folderId = parent, pageNum = page, pageSize = pageSize).getOrThrow()
+                val unique = listing.items.filter { seen.add(it.id) }
+                result.addAll(unique.map { CloudRemoteFile(it.id, it.name, it.isDir, it.size, parentId = parent) })
+                // 用实际累计数量判断，服务端缩小每页数量时也不会漏掉后面的文件。
+                finished = if (listing.totalCount > 0) result.size >= listing.totalCount else listing.items.size < pageSize
+                if (finished) break
+                check(unique.isNotEmpty()) { "天翼目录分页未完整返回，请刷新重试" }
+            }
+            check(finished) { "目录过大，请缩小范围" }
+            result to false
+        }, legacyShare = C189ShareGateway(client), resolvePersonal = { file -> client.getDownloadUrl(file.id).getOrThrow() }, httpClient = client.featureHttpClient, searchAccount = { com.fluxplayer.app.core.data.cloud189.C189AuthProvider.searchIdentity }, manageFiles = { files, target ->
+            val entries = files.map { com.fluxplayer.app.core.data.cloud189.C189FileItem(it.id, it.name, it.directory, it.size) }
+            check((if (target == null) client.deleteFiles(entries) else client.moveFiles(entries, target)).getOrThrow()) { "天翼未确认文件操作" }
+        })
     }
+
+    /** 只暴露不可逆的账号空间摘要，不把令牌和 Cookie 写入历史键。 */
+    fun searchSessionKey(): String = java.security.MessageDigest.getInstance("SHA-256")
+        .digest("$provider\u0000${searchAccount()}\u0000${driveId()}".toByteArray())
+        .joinToString("") { "%02x".format(it) }
 
     val rootId: String get() = when (provider) {
         "alipan" -> "root"
@@ -146,15 +178,16 @@ class CloudProviderFeatures private constructor(
         val seen = mutableSetOf<String>()
         for (page in 1..200) {
             val (items, more) = folderLoader(parent, page)
-            check(items.all { seen.add(it.id) }) { "目标目录分页重复，请刷新" }
-            result.addAll(items)
+            val unique = items.filter { seen.add(it.id) }
+            check(unique.isNotEmpty() || !more) { "目标目录分页重复，请刷新" }
+            result.addAll(unique)
             if (!more) return result
         }
         error("目录过大，请缩小范围")
     }
 
     internal suspend fun post(path: String, body: JSONObject): JSONObject = call(path, body, emptyMap(), emptyMap())
-    internal suspend fun get(path: String, query: Map<String, String>): JSONObject = call(path, null, query, emptyMap())
+    internal suspend fun get(path: String, query: Map<String, String>, headers: Map<String, String> = emptyMap()): JSONObject = call(path, null, query, headers)
     internal fun data(json: JSONObject): JSONObject = json.optJSONObject("data") ?: json
 
     suspend fun createShare(files: List<CloudRemoteFile>, options: CloudShareOptions): CloudCreatedShare {
@@ -455,7 +488,12 @@ class CloudProviderFeatures private constructor(
         saveShare(session, listOf(file), target)
         repeat(10) {
             val matches = listPersonalFiles(target).filter { !it.directory && it.id !in before && (file.size <= 0 || it.size == file.size) }
-            if (matches.size == 1) return matches.single().id to if (forPlayback) resolvePersonal(matches.single()) else resolveDownload(matches.single())
+            if (matches.size == 1) {
+                val actual = matches.single()
+                val url = if (forPlayback) resolvePersonal(actual) else resolveDownload(actual)
+                if (forPlayback) com.fluxplayer.app.core.common.CloudPlaylistCache.putResolvedUrl(provider, actual.id, url)
+                return actual.id to url
+            }
             check(matches.size <= 1) { "目标目录同时新增了多个文件，请在网盘中选择转存文件播放" }
             delay(800)
         }
@@ -469,17 +507,21 @@ class CloudProviderFeatures private constructor(
 
     suspend fun resolvePersonalDownload(file: CloudRemoteFile): String {
         require(!file.directory) { "文件夹不能直接下载" }
-        return resolveDownload(file)
+        val complete = if (provider == "pan123" && file.token.isBlank()) listPersonalFiles(file.parentId).single { it.id == file.id } else file
+        return resolveDownload(complete)
     }
 
-    fun fileHeaders(): Map<String, String> = mapOf("Referer" to when (provider) {
-        "alipan" -> "https://www.alipan.com/"
-        "quark" -> "https://pan.quark.cn/"
-        "uc" -> "https://drive.uc.cn/"
-        "yun139" -> "https://yun.139.com/"
-        "cloud189" -> "https://cloud.189.cn/"
-        else -> "https://yun.123pan.cn/"
-    }, "User-Agent" to "Mozilla/5.0") + mediaHeaders().filterKeys { !it.equals("Authorization", true) }
+    fun fileHeaders(): Map<String, String> = mapOf(
+        "Referer" to when (provider) {
+            "alipan" -> "https://www.alipan.com/"
+            "quark" -> "https://pan.quark.cn/"
+            "uc" -> "https://drive.uc.cn/"
+            "yun139" -> "https://yun.139.com/"
+            "cloud189" -> "https://cloud.189.cn/"
+            else -> "https://yun.123pan.cn/"
+        },
+        "User-Agent" to "Mozilla/5.0",
+    ) + mediaHeaders().filterKeys { !it.equals("Authorization", true) }
 
     internal fun mobileAccount() = jsonObject("account" to mobileAccountNumber(), "accountType" to 1)
 

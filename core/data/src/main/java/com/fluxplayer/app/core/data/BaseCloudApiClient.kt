@@ -1,5 +1,7 @@
 package com.fluxplayer.app.core.data
 
+import com.fluxplayer.app.core.data.cloud.CloudMutationScope
+import com.fluxplayer.app.core.data.cloud.CloudSearchReadScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -16,7 +18,7 @@ abstract class BaseCloudApiClient(
 
     protected suspend fun executeRequest(request: Request): String {
         return withContext(Dispatchers.IO) {
-            client.newCall(request).execute().use { resp ->
+            searchAwareExecute(request).use { resp ->
                 val body = resp.body?.string()
                     ?: throw IllegalStateException("Empty response from ${request.url}")
                 if (!resp.isSuccessful) {
@@ -29,7 +31,7 @@ abstract class BaseCloudApiClient(
 
     protected suspend fun executeRequestOrNull(request: Request): String? {
         return withContext(Dispatchers.IO) {
-            client.newCall(request).execute().use { resp ->
+            searchAwareExecute(request).use { resp ->
                 resp.body?.string()
             }
         }
@@ -40,8 +42,19 @@ abstract class BaseCloudApiClient(
      */
     protected suspend fun executeRequestAndGetResponse(request: Request): Response {
         return withContext(Dispatchers.IO) {
-            client.newCall(request).execute()
+            searchAwareExecute(request)
         }
+    }
+
+    private suspend fun searchAwareExecute(request: Request): Response {
+        CloudMutationScope.current.get()?.let { return it.execute(client, request) }
+        val scope = CloudSearchReadScope.current.get()
+        fun send(): Response {
+            val call = (scope?.client(client) ?: client).newCall(request)
+            scope?.register(call)
+            return call.execute()
+        }
+        return if (scope == null) send() else scope.execute(::send)
     }
 
     protected fun buildUrl(base: String, params: Map<String, String>): String {

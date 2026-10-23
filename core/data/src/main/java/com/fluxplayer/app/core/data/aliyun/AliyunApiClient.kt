@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
+import com.fluxplayer.app.core.data.cloud.CloudListGate
 import com.fluxplayer.app.core.data.security.getSecret
 import com.fluxplayer.app.core.data.security.putSecret
 import kotlinx.coroutines.sync.Mutex
@@ -171,31 +172,35 @@ class AliyunApiClient(
         if (nextMarker != null) put("marker", nextMarker)
     }
 
+    private val listingGate = CloudListGate(1000, afterCompletion = true)
+
     suspend fun listFiles(
         parentFileId: String,
         orderBy: String = "name",
         orderDirection: String = "ASC",
         nextMarker: String? = null,
     ): Result<AliyunListResult> = runCatching {
-        val body = buildListBody(parentFileId, orderBy = orderBy, orderDirection = orderDirection, nextMarker = nextMarker)
-        val json = apiPost("https://api.aliyundrive.com/adrive/v3/file/list", body)
-        val itemsArray = json.optJSONArray("items") ?: JSONArray()
-        val items = (0 until itemsArray.length()).map { i ->
-            val item = itemsArray.getJSONObject(i)
-            AliyunFileItem(
-                fileId = item.getString("file_id"),
-                fileName = item.getString("name"),
-                type = item.getString("type"),
-                category = item.optString("category", ""),
-                size = item.optLong("size", 0),
-                createdAt = item.optString("created_at", ""),
-                updatedAt = item.optString("updated_at", ""),
-                thumbnail = item.optString("thumbnail", ""),
-                mimeType = item.optString("mime_type", ""),
-                parentFileId = item.optString("parent_file_id", ""),
-            )
+        listingGate.run {
+            val body = buildListBody(parentFileId, orderBy = orderBy, orderDirection = orderDirection, nextMarker = nextMarker)
+            val json = apiPost("https://api.aliyundrive.com/adrive/v3/file/list", body)
+            val itemsArray = json.optJSONArray("items") ?: JSONArray()
+            val items = (0 until itemsArray.length()).map { i ->
+                val item = itemsArray.getJSONObject(i)
+                AliyunFileItem(
+                    fileId = item.getString("file_id"),
+                    fileName = item.getString("name"),
+                    type = item.getString("type"),
+                    category = item.optString("category", ""),
+                    size = item.optLong("size", 0),
+                    createdAt = item.optString("created_at", ""),
+                    updatedAt = item.optString("updated_at", ""),
+                    thumbnail = item.optString("thumbnail", ""),
+                    mimeType = item.optString("mime_type", ""),
+                    parentFileId = item.optString("parent_file_id", ""),
+                )
+            }
+            AliyunListResult(items, json.optString("next_marker", ""))
         }
-        AliyunListResult(items, json.optString("next_marker", ""))
     }
 
     suspend fun getVideoPreviewPlayInfo(fileId: String): Result<AliyunPlayResult> = runCatching {
@@ -309,9 +314,42 @@ class AliyunApiClient(
         true
     }
 
+    /** 批量结果逐项核对，避免顶层成功掩盖部分失败。 */
+    suspend fun manageFiles(fileIds: List<String>, target: String?): Result<Unit> = runCatching {
+        require(fileIds.isNotEmpty() && fileIds.size <= 100) { "阿里单批操作支持 1 至 100 项" }
+        val requests = fileIds.mapIndexed { index, id ->
+            JSONObject().put("id", index.toString()).put("method", "POST")
+                .put("url", if (target == null) "/recyclebin/trash" else "/file/move")
+                .put("headers", JSONObject().put("Content-Type", "application/json"))
+                .put(
+                    "body",
+                    JSONObject().put("drive_id", driveId).put("file_id", id).apply {
+                        if (target != null) {
+                            put("to_drive_id", driveId)
+                            put("to_parent_file_id", target)
+                            put("check_name_mode", "refuse")
+                        }
+                    },
+                )
+        }
+        val result = featureRequest("/adrive/v4/batch", JSONObject().put("resource", "file").put("requests", org.json.JSONArray(requests)))
+        val replies = result.getJSONArray("responses")
+        val entries = (0 until replies.length()).map { replies.getJSONObject(it) }
+        check(entries.size == fileIds.size && entries.map { it.optString("id") }.toSet() == fileIds.indices.map { it.toString() }.toSet()) { "阿里未返回完整操作结果，请刷新确认" }
+        entries.forEach { reply ->
+            check(reply.optInt("status") in 200..299) { "阿里部分文件操作失败，请刷新确认" }
+            val body = reply.getJSONObject("body")
+            check(body.optString("code") in setOf("", "0")) { body.optString("message", "阿里文件操作失败") }
+            if (body.optString("async_task_id").isNotBlank()) awaitMutation(body)
+        }
+    }
+
     private suspend fun awaitMutation(response: JSONObject) {
         val id = response.optString("async_task_id")
-        if (id.isBlank()) { check(response.has("file_id")) { "阿里未确认文件操作" }; return }
+        if (id.isBlank()) {
+            check(response.has("file_id")) { "阿里未确认文件操作" }
+            return
+        }
         repeat(80) {
             val result = apiPost("https://api.aliyundrive.com/v2/async_task/get", JSONObject().put("async_task_id", id))
             val state = result.optString("state").lowercase(java.util.Locale.US)

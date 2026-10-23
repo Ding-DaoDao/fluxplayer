@@ -204,6 +204,7 @@ fun Pan123BrowserTabContent(
             cloudProviderKey = "pan123",
             notificationEvents = viewModel.messageEvents,
             providerFeatures = remember(viewModel.apiClient) { com.fluxplayer.app.core.data.cloud.CloudProviderFeatures.from(viewModel.apiClient) },
+            isCurrentDirectoryComplete = !state.hasMore,
             currentFolderId = state.currentFileId,
             onPlayExtraFile = onPlayVideo,
             providerMenuItems = { onDismiss ->

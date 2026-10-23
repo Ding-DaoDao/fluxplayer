@@ -186,6 +186,7 @@ fun Yun139BrowserTabContent(
             cloudProviderKey = "yun139",
             notificationEvents = viewModel.messageEvents,
             providerFeatures = remember(viewModel.apiClient) { com.fluxplayer.app.core.data.cloud.CloudProviderFeatures.from(viewModel.apiClient) },
+            isCurrentDirectoryComplete = !state.hasMore,
             currentFolderId = state.currentFolderId,
             onPlayExtraFile = onPlayVideo,
         )

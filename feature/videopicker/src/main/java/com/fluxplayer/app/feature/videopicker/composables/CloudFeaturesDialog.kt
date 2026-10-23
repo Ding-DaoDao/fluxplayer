@@ -53,9 +53,9 @@ import com.fluxplayer.app.core.data.cloud.listSpace
 import com.fluxplayer.app.core.data.cloud.listSpaces
 import com.fluxplayer.app.core.data.cloud.resolveSpaceFile
 import com.fluxplayer.app.core.data.cloud.spaceFileUri
-import com.fluxplayer.app.core.ui.components.FluxLinearProgressIndicator
 import com.fluxplayer.app.core.data.quark.UcTvService
 import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.ui.components.FluxLinearProgressIndicator
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -259,7 +259,7 @@ fun CloudFeaturesDialog(
                     Switch(preferOriginal, {
                         preferOriginal = it
                         playbackPreferences.edit().putBoolean("prefer_original_playback", it).apply()
-                        com.fluxplayer.app.core.common.CloudPlaylistCache.clear()
+                        com.fluxplayer.app.core.common.CloudPlaylistCache.clearResolvedUrls("quark")
                     })
                 }
             } else {
@@ -319,7 +319,10 @@ fun CloudFeaturesDialog(
                 }
             },
             // 忙碌时返回即停止，不再放独立的「停止」按钮
-            onStop = { job?.cancel(); message = "已停止，请刷新网盘确认已完成的操作" },
+            onStop = {
+                job?.cancel()
+                message = "已停止，请刷新网盘确认已完成的操作"
+            },
             onClose = { onDismiss() },
             toolbarActions = {
                 if (mode == "import" || mode == "spaces" && space != null) TextButton(enabled = !busy, onClick = { showSearch = true }) { Text("搜索") }
@@ -391,7 +394,6 @@ fun CloudFeaturesDialog(
                                 if (media) {
                                     actions += "播放" to {
                                         runOperation {
-                                            features.resolveSpaceFile(checkNotNull(space), file)
                                             onPlay(features.spaceFileUri(checkNotNull(space), file), file.name)
                                         }
                                     }
@@ -429,28 +431,30 @@ fun CloudFeaturesDialog(
         }
     }
 
-    if (showSearch) CloudSearchDialog(
-        features, onPlay, onDismiss = { showSearch = false },
-        rootId = if (mode == "import") checkNotNull(session).rootId else if (features.provider == "alipan") "root" else "",
-        rootLabel = if (mode == "import") "分享" else checkNotNull(space).name,
-        readDirectory = { directory -> if (mode == "import") features.listShare(checkNotNull(session), directory) else features.listSpace(checkNotNull(space), directory) },
-        canAccessFiles = mode != "import" || isLoggedIn,
-        playLabel = if (mode == "import") "转存并播放" else "播放",
-        downloadLabel = if (mode == "import") "转存并下载" else "下载",
-        resolvePlay = { file ->
-            if (mode == "import") {
-                val (id, _) = features.transferAndResolve(checkNotNull(session), file, target)
-                onRefresh()
-                Uri.Builder().scheme("cloud").authority(features.provider).appendPath(id).appendQueryParameter("extra_parent", target).appendQueryParameter("file_name", file.name).build()
-            } else {
-                features.resolveSpaceFile(checkNotNull(space), file)
-                features.spaceFileUri(checkNotNull(space), file)
-            }
-        },
-        resolveDownload = { file ->
-            if (mode == "import") features.transferAndResolve(checkNotNull(session), file, target, forPlayback = false).second.also { onRefresh() } else features.resolveSpaceFile(checkNotNull(space), file)
-        },
-    )
+    if (showSearch) {
+        CloudSearchDialog(
+            features, onPlay, onDismiss = { showSearch = false },
+            rootId = if (mode == "import") checkNotNull(session).rootId else if (features.provider == "alipan") "root" else "",
+            rootLabel = if (mode == "import") "分享" else checkNotNull(space).name,
+            historyScope = if (mode == "import") "share:${checkNotNull(session).id}" else "space:${checkNotNull(space).id}",
+            readDirectory = { directory -> if (mode == "import") features.listShare(checkNotNull(session), directory) else features.listSpace(checkNotNull(space), directory) },
+            canAccessFiles = mode != "import" || isLoggedIn,
+            playLabel = if (mode == "import") "转存并播放" else "播放",
+            downloadLabel = if (mode == "import") "转存并下载" else "下载",
+            resolvePlay = { file ->
+                if (mode == "import") {
+                    val (id, _) = features.transferAndResolve(checkNotNull(session), file, target)
+                    onRefresh()
+                    Uri.Builder().scheme("cloud").authority(features.provider).appendPath(id).appendQueryParameter("extra_parent", target).appendQueryParameter("file_name", file.name).build()
+                } else {
+                    features.spaceFileUri(checkNotNull(space), file)
+                }
+            },
+            resolveDownload = { file ->
+                if (mode == "import") features.transferAndResolve(checkNotNull(session), file, target, forPlayback = false).second.also { onRefresh() } else features.resolveSpaceFile(checkNotNull(space), file)
+            },
+        )
+    }
 
     if (configuringShare) {
         val share = createdShare
@@ -515,7 +519,10 @@ fun CloudFeaturesDialog(
                     choosingTarget = false
                 }
             },
-            onStop = { job?.cancel(); message = "已停止，请刷新网盘确认已完成的操作" },
+            onStop = {
+                job?.cancel()
+                message = "已停止，请刷新网盘确认已完成的操作"
+            },
             onClose = { choosingTarget = false },
             bottomBar = {
                 Button(enabled = !busy, modifier = Modifier.fillMaxWidth().padding(20.dp), onClick = {

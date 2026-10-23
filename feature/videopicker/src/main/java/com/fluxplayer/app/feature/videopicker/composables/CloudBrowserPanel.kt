@@ -28,6 +28,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.rounded.Menu
@@ -41,6 +43,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,11 +62,19 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.fluxplayer.app.core.data.cloud.CloudDirectorySearchCache
+import com.fluxplayer.app.core.data.cloud.CloudRemoteFile
+import com.fluxplayer.app.core.data.cloud.CloudSearchCategory
 import com.fluxplayer.app.core.model.FluxMessageEvent
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.ui.R
@@ -117,6 +128,7 @@ fun <T> CloudBrowserPanel(
     providerFeatures: com.fluxplayer.app.core.data.cloud.CloudProviderFeatures? = null,
     currentFolderId: String = "",
     onPlayExtraFile: (android.net.Uri, String?) -> Unit = { _, _ -> },
+    isCurrentDirectoryComplete: Boolean = false,
 ) {
     // 从 navigationStack 或扁平参数获取当前目录状态
     val topEntry = navigationStack.lastOrNull()
@@ -126,6 +138,61 @@ fun <T> CloudBrowserPanel(
     var showExitConfirm by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var featureAction by remember { mutableStateOf<CloudFeatureAction?>(null) }
+
+    val searchSession = providerFeatures?.searchSessionKey().orEmpty()
+    var searchVisible by remember(searchSession, currentFolderId, isConfigured) { mutableStateOf(false) }
+    var searchQuery by remember(searchSession, isConfigured) { mutableStateOf("") }
+    var submittedQuery by remember(searchSession, isConfigured) { mutableStateOf<String?>(null) }
+    var entireDrive by remember(searchSession) { mutableStateOf(true) }
+    var category by remember(searchSession) { mutableStateOf(CloudSearchCategory.All) }
+    var searchFocused by remember { mutableStateOf(false) }
+    val history = rememberSearchHistory(searchSession + ":personal")
+    var searchRequest by remember(providerFeatures, isConfigured) { mutableIntStateOf(0) }
+    val searchCache = remember(searchSession, isConfigured) { CloudDirectorySearchCache() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val batchSelection = if (providerFeatures != null && isConfigured) {
+        rememberCloudBatchSelection(providerFeatures, currentFolderId, curItems, isCurrentDirectoryComplete && !curLoading && curError == null) {
+            searchCache.clear()
+            onRefresh()
+        }
+    } else {
+        null
+    }
+    val batchBusy = batchSelection?.busy == true
+    val refreshDirectory = {
+        if (!batchBusy) {
+            batchSelection?.clear()
+            searchCache.clear()
+            onRefresh()
+        }
+    }
+    fun submitSearch() {
+        if (batchBusy || searchQuery.isBlank() && category == CloudSearchCategory.All) return
+        batchSelection?.clear()
+        history.remember(searchQuery)
+        submittedQuery = searchQuery.trim()
+        searchRequest++
+        keyboard?.hide()
+    }
+    LaunchedEffect(curItems, currentFolderId, curLoading, isCurrentDirectoryComplete, searchCache) {
+        searchCache.invalidate(currentFolderId)
+        if (!curLoading && curError == null && isCurrentDirectoryComplete) {
+            searchCache.put(currentFolderId, curItems.map { CloudRemoteFile(it.path, it.name, it.isDirectory, it.size, parentId = currentFolderId) })
+        }
+    }
+    LaunchedEffect(currentFolderId) {
+        searchQuery = ""
+        submittedQuery = null
+    }
+
+    fun closeSearch() {
+        searchVisible = false
+        searchQuery = ""
+        submittedQuery = null
+        searchFocused = false
+        keyboard?.hide()
+    }
+    androidx.activity.compose.BackHandler(enabled = searchVisible) { closeSearch() }
 
     // 缓存每层目录的 LazyListState，使得返回时滚动位置保持不变
     val listStateCache = remember { mutableStateMapOf<String, androidx.compose.foundation.lazy.LazyListState>() }
@@ -150,199 +217,286 @@ fun <T> CloudBrowserPanel(
                 // 顶层：网盘名 + 设置按钮
                 ProviderTopBar(
                     providerName = providerName,
-                    onSettingsClick = onSettingsClick,
+                    onSettingsClick = if (batchBusy) null else onSettingsClick,
                 )
 
-                // 面包屑行：路径 + 排序 + 驱动切换(阿里云盘) + 菜单
-                BreadcrumbBar(
-                    breadcrumbs = breadcrumbs,
-                    breadcrumbLabel = breadcrumbLabel,
-                    onNavigateToBreadcrumb = onBreadcrumbClick,
-                    onSortClick = onSortClick,
-                    actions = breadcrumbActions,
-                    showMenu = showMenu,
-                    onMenuClick = if (onExitClick != null) ({ showMenu = true }) else null,
-                    onMenuDismiss = { showMenu = false },
-                    menuContent = {
-                        providerMenuItems.invoke({ showMenu = false })
-                        if (providerFeatures != null) {
-                            HorizontalDivider()
-                            val actions = buildList {
-                                add(CloudFeatureAction.Search)
-                                add(CloudFeatureAction.Upload)
-                                add(CloudFeatureAction.Create)
-                                add(CloudFeatureAction.Import)
-                                if (providerFeatures.provider in setOf("alipan", "yun139", "cloud189")) add(CloudFeatureAction.Spaces)
-                                if (providerFeatures.provider in setOf("alipan", "quark", "uc", "yun139")) add(CloudFeatureAction.Account)
-                                if (providerFeatures.provider in setOf("quark", "uc")) add(CloudFeatureAction.Playback)
+                if (providerFeatures != null && searchVisible) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = ::closeSearch) { Text("返回目录") }
+                        Text("搜索网盘", style = MaterialTheme.typography.titleMedium)
+                    }
+                    OutlinedTextField(
+                        value = searchQuery,
+                        enabled = !batchBusy,
+                        onValueChange = {
+                            searchQuery = it
+                            if (it.isBlank()) submittedQuery = null
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).onFocusChanged { searchFocused = it.isFocused },
+                        placeholder = { Text("搜索文件及子文件夹") },
+                        leadingIcon = { Icon(NextIcons.Search, null) },
+                        trailingIcon = {
+                            Row {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = {
+                                        searchQuery = ""
+                                        submittedQuery = null
+                                    }) { Icon(NextIcons.Close, "清除搜索") }
+                                }
+                                TextButton(enabled = searchQuery.isNotBlank() || category != CloudSearchCategory.All, onClick = ::submitSearch) { Text("搜索") }
                             }
-                            actions.forEach { action ->
-                                DropdownMenuItem(
-                                    text = { Text(if (action == CloudFeatureAction.Spaces && providerFeatures.provider == "alipan") "相册" else action.label) },
-                                    onClick = {
-                                        showMenu = false
-                                        featureAction = action
-                                    },
-                                )
-                            }
-                        }
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("退出") },
-                            onClick = {
-                                showMenu = false
-                                showExitConfirm = true
+                        },
+                        shape = MaterialTheme.shapes.large,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { submitSearch() }),
+                    )
+                    if (searchVisible) {
+                        CloudSearchControls(
+                            category,
+                            onCategory = {
+                                category = it
+                                if (it == CloudSearchCategory.All && searchQuery.isBlank()) {
+                                    submittedQuery = null
+                                } else if (submittedQuery != null || it != CloudSearchCategory.All) submitSearch()
+                            },
+                            history = history,
+                            showHistory = submittedQuery == null,
+                            onHistory = {
+                                searchQuery = it
+                                submitSearch()
+                            },
+                            entireDrive = entireDrive,
+                            onScope = {
+                                entireDrive = it
+                                if (submittedQuery != null) submitSearch()
                             },
                         )
-                    },
-                    showSortMenu = showSortMenu,
-                    onSortMenuDismiss = onSortMenuDismiss,
-                    sortMenuContent = sortMenuContent,
-                )
+                    }
+                }
 
-                // 统计行
-                val summaryText = remember(curItems) { ItemCounts.from(curItems).toSummaryText() }
-                if (summaryText != null) {
-                    Text(
-                        text = summaryText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 2.dp),
+                // 面包屑行：路径 + 排序 + 驱动切换(阿里云盘) + 菜单
+                run {
+                    BreadcrumbBar(
+                        breadcrumbs = breadcrumbs,
+                        breadcrumbLabel = breadcrumbLabel,
+                        onNavigateToBreadcrumb = { if (!batchBusy) onBreadcrumbClick(it) },
+                        onSortClick = if (batchBusy) null else onSortClick,
+                        actions = breadcrumbActions,
+                        showMenu = showMenu,
+                        onMenuClick = if ((onExitClick != null || providerFeatures != null) && !batchBusy) ({ showMenu = true }) else null,
+                        onMenuDismiss = { showMenu = false },
+                        menuContent = {
+                            providerMenuItems.invoke({ showMenu = false })
+                            if (providerFeatures != null) {
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("搜索") },
+                                    onClick = {
+                                        showMenu = false
+                                        batchSelection?.clear()
+                                        searchVisible = true
+                                    },
+                                )
+                                val actions = buildList {
+                                    add(CloudFeatureAction.Upload)
+                                    add(CloudFeatureAction.Create)
+                                    add(CloudFeatureAction.Import)
+                                    if (providerFeatures.provider in setOf("alipan", "yun139", "cloud189")) add(CloudFeatureAction.Spaces)
+                                    if (providerFeatures.provider in setOf("alipan", "quark", "uc", "yun139")) add(CloudFeatureAction.Account)
+                                    if (providerFeatures.provider in setOf("quark", "uc")) add(CloudFeatureAction.Playback)
+                                }
+                                actions.forEach { action ->
+                                    DropdownMenuItem(
+                                        text = { Text(if (action == CloudFeatureAction.Spaces && providerFeatures.provider == "alipan") "相册" else action.label) },
+                                        onClick = {
+                                            showMenu = false
+                                            featureAction = action
+                                        },
+                                    )
+                                }
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("退出") },
+                                onClick = {
+                                    showMenu = false
+                                    showExitConfirm = true
+                                },
+                            )
+                        },
+                        showSortMenu = showSortMenu,
+                        onSortMenuDismiss = onSortMenuDismiss,
+                        sortMenuContent = sortMenuContent,
                     )
                 }
 
-                if (navigationStack.isNotEmpty()) {
-                    // 栈式渲染 + 目录导航动画
-                    var prevStackSize by remember { mutableIntStateOf(navigationStack.size) }
-                    var stackGrowing by remember { mutableStateOf(true) }
-                    LaunchedEffect(navigationStack.size) {
-                        stackGrowing = navigationStack.size >= prevStackSize
-                        prevStackSize = navigationStack.size
+                if (submittedQuery != null && providerFeatures != null) {
+                    Box(Modifier.weight(1f)) {
+                        CloudSearchDialog(
+                            providerFeatures,
+                            onPlayExtraFile,
+                            onDismiss = {
+                                closeSearch()
+                            },
+                            embedded = true,
+                            queryRequest = submittedQuery,
+                            requestId = searchRequest,
+                            directoryCache = searchCache,
+                            categoryRequest = category,
+                            rootId = if (entireDrive) providerFeatures.rootId else currentFolderId.ifBlank { providerFeatures.rootId },
+                            rootLabel = if (entireDrive) providerName.ifBlank { "网盘" } else breadcrumbs.lastOrNull()?.let(breadcrumbLabel) ?: "当前文件夹",
+                            sessionKeyRequest = searchSession,
+                        )
+                    }
+                } else {
+                    if (batchSelection != null) key(searchSession, currentFolderId) { CloudBatchToolbar(batchSelection) }
+                    // 统计行
+                    val summaryText = remember(curItems) { ItemCounts.from(curItems).toSummaryText() }
+                    if (summaryText != null) {
+                        Text(
+                            text = summaryText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 2.dp),
+                        )
                     }
 
-                    val dirTween = tween<IntOffset>(280, easing = EaseOutCubic)
-                    val dirAlphaTween = tween<Float>(280, easing = EaseOutCubic)
+                    if (navigationStack.isNotEmpty()) {
+                        // 栈式渲染 + 目录导航动画
+                        var prevStackSize by remember { mutableIntStateOf(navigationStack.size) }
+                        var stackGrowing by remember { mutableStateOf(true) }
+                        LaunchedEffect(navigationStack.size) {
+                            stackGrowing = navigationStack.size >= prevStackSize
+                            prevStackSize = navigationStack.size
+                        }
 
-                    Box(modifier = Modifier.weight(1f)) {
-                        AnimatedContent(
-                            targetState = navigationStack.lastOrNull()?.key,
-                            transitionSpec = {
-                                if (stackGrowing) {
-                                    slideInHorizontally(dirTween) { it / 4 } + fadeIn(dirAlphaTween) togetherWith
-                                        slideOutHorizontally(dirTween) { -it / 4 } + fadeOut(dirAlphaTween)
+                        val dirTween = tween<IntOffset>(280, easing = EaseOutCubic)
+                        val dirAlphaTween = tween<Float>(280, easing = EaseOutCubic)
+
+                        Box(modifier = Modifier.weight(1f)) {
+                            AnimatedContent(
+                                targetState = navigationStack.lastOrNull()?.key,
+                                transitionSpec = {
+                                    if (stackGrowing) {
+                                        slideInHorizontally(dirTween) { it / 4 } + fadeIn(dirAlphaTween) togetherWith
+                                            slideOutHorizontally(dirTween) { -it / 4 } + fadeOut(dirAlphaTween)
+                                    } else {
+                                        slideInHorizontally(dirTween) { -it / 4 } + fadeIn(dirAlphaTween) togetherWith
+                                            slideOutHorizontally(dirTween) { it / 4 } + fadeOut(dirAlphaTween)
+                                    }.using(SizeTransform(clip = false))
+                                },
+                                label = "DirectoryTransition",
+                            ) { targetKey ->
+                                val entry = if (targetKey != null) {
+                                    navigationStack.lastOrNull { it.key == targetKey }
                                 } else {
-                                    slideInHorizontally(dirTween) { -it / 4 } + fadeIn(dirAlphaTween) togetherWith
-                                        slideOutHorizontally(dirTween) { it / 4 } + fadeOut(dirAlphaTween)
-                                }.using(SizeTransform(clip = false))
-                            },
-                            label = "DirectoryTransition",
-                        ) { targetKey ->
-                            val entry = if (targetKey != null) {
-                                navigationStack.lastOrNull { it.key == targetKey }
-                            } else {
-                                null
-                            }
-                            if (targetKey != null && entry != null) {
-                                key(entry.key) {
-                                    val listState = listStateCache.getOrPut(entry.key) { rememberLazyListState() }
-                                    DirectoryStackContent(
-                                        entry = entry,
-                                        listState = listState,
-                                        isLoadingMore = isLoadingMore,
-                                        onItemClick = onItemClick,
-                                        onItemMoreClick = onItemMoreClick,
-                                        expandedMenuIndex = expandedMenuIndex,
-                                        onMenuDismiss = onMenuDismiss,
-                                        menuContent = menuContent,
-                                        onRefresh = onRefresh,
-                                        onLoadMore = onLoadMore,
-                                        onNearBottomChanged = { isNearBottom = it },
-                                        playedUriSet = playedUriSet,
-                                        cloudProviderKey = cloudProviderKey,
-                                    )
+                                    null
+                                }
+                                if (targetKey != null && entry != null) {
+                                    key(entry.key) {
+                                        val listState = listStateCache.getOrPut(entry.key) { rememberLazyListState() }
+                                        DirectoryStackContent(
+                                            entry = entry,
+                                            listState = listState,
+                                            isLoadingMore = isLoadingMore,
+                                            onItemClick = { if (!batchBusy) onItemClick(it) },
+                                            onItemMoreClick = if (batchBusy) null else onItemMoreClick,
+                                            batchSelection = if (entry === navigationStack.lastOrNull()) batchSelection else null,
+                                            expandedMenuIndex = expandedMenuIndex,
+                                            onMenuDismiss = onMenuDismiss,
+                                            menuContent = menuContent,
+                                            onRefresh = refreshDirectory,
+                                            onLoadMore = onLoadMore,
+                                            onNearBottomChanged = { isNearBottom = it },
+                                            playedUriSet = playedUriSet,
+                                            cloudProviderKey = cloudProviderKey,
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
-                } else {
-                    PullToRefreshBox(
-                        isRefreshing = curLoading && curItems.isNotEmpty(),
-                        onRefresh = onRefresh,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            when {
-                                curLoading && curItems.isEmpty() -> {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        com.fluxplayer.app.core.ui.components.MediaListSkeleton()
-                                    }
-                                }
-                                curItems.isEmpty() && curError == null -> {
-                                    EmptyPlaceholder()
-                                }
-                                curError != null && curItems.isEmpty() -> {
-                                    ErrorPlaceholder(
-                                        message = curError ?: "未知错误",
-                                        onRetry = onRefresh,
-                                    )
-                                }
-                                else -> {
-                                    val flatListState = rememberLazyListState()
-                                    // 派生为布尔值，仅在翻转时触发，避免滚动每帧回调
-                                    val currentOnLoadMore by rememberUpdatedState(onLoadMore)
-                                    val nearLoadMore by remember(flatListState, curItems.size) {
-                                        derivedStateOf {
-                                            val info = flatListState.layoutInfo
-                                            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                                            curItems.isNotEmpty() && lastVisible >= curItems.size - 5
+                    } else {
+                        PullToRefreshBox(
+                            isRefreshing = curLoading && curItems.isNotEmpty(),
+                            onRefresh = refreshDirectory,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                when {
+                                    curLoading && curItems.isEmpty() -> {
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            com.fluxplayer.app.core.ui.components.MediaListSkeleton()
                                         }
                                     }
-                                    val nearBottom by remember {
-                                        derivedStateOf {
-                                            val info = flatListState.layoutInfo
-                                            if (info.totalItemsCount <= 0) return@derivedStateOf false
-                                            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                                            // 只有当可见项数量 < 总数量时，才认为内容溢出（需要滚动），
-                                            // 避免文件不足一屏时也触发 FAB 隐藏
-                                            lastVisible >= info.totalItemsCount - 3 &&
-                                                info.visibleItemsInfo.size < info.totalItemsCount
+                                    curItems.isEmpty() && curError == null -> {
+                                        EmptyPlaceholder()
+                                    }
+                                    curError != null && curItems.isEmpty() -> {
+                                        ErrorPlaceholder(
+                                            message = curError ?: "未知错误",
+                                            onRetry = refreshDirectory,
+                                        )
+                                    }
+                                    else -> {
+                                        val flatListState = rememberLazyListState()
+                                        // 派生为布尔值，仅在翻转时触发，避免滚动每帧回调
+                                        val currentOnLoadMore by rememberUpdatedState(onLoadMore)
+                                        val nearLoadMore by remember(flatListState, curItems.size) {
+                                            derivedStateOf {
+                                                val info = flatListState.layoutInfo
+                                                val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                                                curItems.isNotEmpty() && lastVisible >= curItems.size - 5
+                                            }
                                         }
-                                    }
-                                    // Only restart for new data or a directory refresh, not loading/error recompositions.
-                                    LaunchedEffect(flatListState, curItems.size, curLoading) {
-                                        if (!curLoading) {
-                                            snapshotFlow { nearLoadMore }.collect { if (it) currentOnLoadMore() }
+                                        val nearBottom by remember {
+                                            derivedStateOf {
+                                                val info = flatListState.layoutInfo
+                                                if (info.totalItemsCount <= 0) return@derivedStateOf false
+                                                val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                                                // 只有当可见项数量 < 总数量时，才认为内容溢出（需要滚动），
+                                                // 避免文件不足一屏时也触发 FAB 隐藏
+                                                lastVisible >= info.totalItemsCount - 3 &&
+                                                    info.visibleItemsInfo.size < info.totalItemsCount
+                                            }
                                         }
-                                    }
-                                    LaunchedEffect(flatListState) {
-                                        snapshotFlow { nearBottom }.collect { isNearBottom = it }
-                                    }
-                                    LazyColumn(
-                                        state = flatListState,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 80.dp),
-                                    ) {
-                                        itemsIndexed(curItems, key = { _, item -> item.path }) { index, item ->
-                                            val isPlayed = !item.isDirectory && (
-                                                item.path in playedUriSet ||
-                                                    (cloudProviderKey.isNotEmpty() && "cloud://$cloudProviderKey/${item.path}" in playedUriSet)
+                                        // Only restart for new data or a directory refresh, not loading/error recompositions.
+                                        LaunchedEffect(flatListState, curItems.size, curLoading) {
+                                            if (!curLoading) {
+                                                snapshotFlow { nearLoadMore }.collect { if (it) currentOnLoadMore() }
+                                            }
+                                        }
+                                        LaunchedEffect(flatListState) {
+                                            snapshotFlow { nearBottom }.collect { isNearBottom = it }
+                                        }
+                                        LazyColumn(
+                                            state = flatListState,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 80.dp),
+                                        ) {
+                                            itemsIndexed(curItems, key = { _, item -> item.path }) { index, item ->
+                                                val isPlayed = !item.isDirectory && (
+                                                    item.path in playedUriSet ||
+                                                        (cloudProviderKey.isNotEmpty() && "cloud://$cloudProviderKey/${item.path}" in playedUriSet)
+                                                    )
+                                                ItemCard(
+                                                    item = item,
+                                                    index = index,
+                                                    isPlayed = isPlayed,
+                                                    onClick = { if (!batchBusy) onItemClick(item) },
+                                                    batchSelection = batchSelection,
+                                                    onItemMoreClick = if (batchBusy) null else onItemMoreClick,
+                                                    expandedMenuIndex = expandedMenuIndex,
+                                                    onMenuDismiss = onMenuDismiss,
+                                                    menuContent = menuContent,
                                                 )
-                                            ItemCard(
-                                                item = item,
-                                                index = index,
-                                                isPlayed = isPlayed,
-                                                onClick = { onItemClick(item) },
-                                                onItemMoreClick = onItemMoreClick,
-                                                expandedMenuIndex = expandedMenuIndex,
-                                                onMenuDismiss = onMenuDismiss,
-                                                menuContent = menuContent,
-                                            )
-                                        }
+                                            }
 
-                                        if (isLoadingMore) {
-                                            item {
-                                                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                                    MediaLoadingIndicator(modifier = Modifier.size(24.dp))
+                                            if (isLoadingMore) {
+                                                item {
+                                                    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                                        MediaLoadingIndicator(modifier = Modifier.size(24.dp))
+                                                    }
                                                 }
                                             }
                                         }
@@ -351,19 +505,19 @@ fun <T> CloudBrowserPanel(
                             }
                         }
                     }
-                }
 
-                if (curError != null && curItems.isNotEmpty()) {
-                    ErrorBanner(
-                        message = curError ?: "",
-                        onRetry = onRefresh,
-                    )
+                    if (curError != null && curItems.isNotEmpty()) {
+                        ErrorBanner(
+                            message = curError ?: "",
+                            onRetry = refreshDirectory,
+                        )
+                    }
                 }
             }
         }
 
         // 新建文件夹 FAB
-        if (isConfigured && onCreateFolder != null && !isNearBottom) {
+        if (isConfigured && !batchBusy && submittedQuery == null && onCreateFolder != null && !isNearBottom) {
             FloatingActionButton(
                 onClick = onCreateFolder,
                 modifier = Modifier
@@ -385,7 +539,7 @@ fun <T> CloudBrowserPanel(
             FluxNotificationBanner(
                 event = notificationState.currentEvent,
                 onDismiss = { notificationState.dismiss() },
-                onRetry = { onRefresh() },
+                onRetry = { refreshDirectory() },
                 modifier = Modifier
                     .align(Alignment.BottomCenter),
             )
@@ -398,7 +552,7 @@ fun <T> CloudBrowserPanel(
                 features = providerFeatures,
                 parentId = currentFolderId,
                 currentItems = curItems,
-                onRefresh = onRefresh,
+                onRefresh = refreshDirectory,
                 onPlay = onPlayExtraFile,
                 onDismiss = { featureAction = null },
                 isLoggedIn = isConfigured,
@@ -578,6 +732,7 @@ private fun DirectoryStackContent(
     onNearBottomChanged: (Boolean) -> Unit = {},
     playedUriSet: Set<String> = emptySet(),
     cloudProviderKey: String = "",
+    batchSelection: CloudBatchSelection? = null,
 ) {
     // 派生为布尔值，仅在翻转时触发，避免滚动每帧回调
     val currentOnLoadMore by rememberUpdatedState(onLoadMore)
@@ -643,6 +798,7 @@ private fun DirectoryStackContent(
                                 index = index,
                                 isPlayed = isPlayed,
                                 onClick = { onItemClick(item) },
+                                batchSelection = batchSelection,
                                 onItemMoreClick = onItemMoreClick,
                                 expandedMenuIndex = expandedMenuIndex,
                                 onMenuDismiss = onMenuDismiss,
@@ -669,6 +825,7 @@ private fun ItemCard(
     item: WebDavResource,
     index: Int,
     isPlayed: Boolean = false,
+    batchSelection: CloudBatchSelection? = null,
     onClick: () -> Unit,
     onItemMoreClick: ((Int) -> Unit)?,
     expandedMenuIndex: Int?,
@@ -694,6 +851,14 @@ private fun ItemCard(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (batchSelection != null) {
+                androidx.compose.material3.Checkbox(
+                    checked = item.path in batchSelection.selected,
+                    enabled = !batchSelection.busy,
+                    onCheckedChange = { batchSelection.toggle(item) },
+                    modifier = Modifier.semantics { contentDescription = "选择：${item.name}" },
+                )
+            }
             FileTypeIcon(
                 item = item,
                 modifier = Modifier

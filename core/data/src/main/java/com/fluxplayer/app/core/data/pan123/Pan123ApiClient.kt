@@ -7,6 +7,7 @@ import android.util.Log
 import com.fluxplayer.app.core.common.sanitizeUrl
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
+import com.fluxplayer.app.core.data.cloud.CloudListGate
 import com.fluxplayer.app.core.data.security.getSecret
 import com.fluxplayer.app.core.data.security.putSecret
 import java.util.UUID
@@ -360,6 +361,8 @@ class Pan123ApiClient(
      * ⚠️ 不要在没有游标时发 `next=0`：服务端会按游标从头开始，`page` 被架空，
      * page=2 仍返回第 1 页（`bd5b07a` 真机踩坑）。[listFiles] 只在拿到真实游标后才附带 `next`。
      */
+    private val listingGate = CloudListGate(600)
+
     suspend fun listFiles(
         parentFileId: String = "0",
         page: Int = 1,
@@ -368,66 +371,68 @@ class Pan123ApiClient(
         searchData: String = "",
         next: String? = null,
     ): Result<Pan123ListResult> = runCatching {
-        val builder = "$WEB_API_BASE/file/list/new".toHttpUrl().newBuilder()
-            .addQueryParameter("driveId", "0")
-            .addQueryParameter("limit", Pan123ListResult.PAGE_SIZE.toString())
-            // 有服务端游标时按 wenxi 的口径固定 page=1、只推进游标；
-            // 没有游标时才用小写 page 页码（大写 Page 属于分享接口，会被静默忽略）
-            .addQueryParameter("page", if (next != null) "1" else page.toString())
-            .addQueryParameter("orderBy", orderBy)
-            .addQueryParameter("orderDirection", orderDirection)
-            .addQueryParameter("parentFileId", parentFileId)
-            .addQueryParameter("trashed", "false")
-            .addQueryParameter("SearchData", searchData)
-            .addQueryParameter("OnlyLookAbnormalFile", "0")
-            .addQueryParameter("event", "homeListFile")
-            .addQueryParameter("operateType", "1")
-            .addQueryParameter("inDirectSpace", "false")
-            .addQueryParameter("fileCategory", "0")
-            .addQueryParameter("isSearchOrder", "false")
-        if (next != null) builder.addQueryParameter("next", next)
-        val url = builder.build().toString()
+        listingGate.run {
+            val builder = "$WEB_API_BASE/file/list/new".toHttpUrl().newBuilder()
+                .addQueryParameter("driveId", "0")
+                .addQueryParameter("limit", Pan123ListResult.PAGE_SIZE.toString())
+                // 有服务端游标时按 wenxi 的口径固定 page=1、只推进游标；
+                // 没有游标时才用小写 page 页码（大写 Page 属于分享接口，会被静默忽略）
+                .addQueryParameter("page", if (next != null) "1" else page.toString())
+                .addQueryParameter("orderBy", orderBy)
+                .addQueryParameter("orderDirection", orderDirection)
+                .addQueryParameter("parentFileId", parentFileId)
+                .addQueryParameter("trashed", "false")
+                .addQueryParameter("SearchData", searchData)
+                .addQueryParameter("OnlyLookAbnormalFile", "0")
+                .addQueryParameter("event", "homeListFile")
+                .addQueryParameter("operateType", "1")
+                .addQueryParameter("inDirectSpace", "false")
+                .addQueryParameter("fileCategory", "0")
+                .addQueryParameter("isSearchOrder", "false")
+            if (next != null) builder.addQueryParameter("next", next)
+            val url = builder.build().toString()
 
-        val json = webGet(url)
+            val json = webGet(url)
 
-        val code = json.optInt("code", -1)
-        if (code != 0) {
-            val msg = json.optString("message", "未知错误")
-            throw IllegalStateException("获取文件列表失败: $msg")
+            val code = json.optInt("code", -1)
+            if (code != 0) {
+                val msg = json.optString("message", "未知错误")
+                throw IllegalStateException("获取文件列表失败: $msg")
+            }
+
+            val data = json.optJSONObject("data")
+            val infoList = data?.optJSONArray("InfoList") ?: data?.optJSONObject("InfoList")?.optJSONArray("list") ?: data?.optJSONArray("infoList")
+                ?: throw IllegalStateException("123 文件列表响应不完整，请刷新重试")
+
+            val items = (0 until infoList.length()).map { i ->
+                val item = infoList.getJSONObject(i)
+                val downloadUrl = item.optString("DownloadUrl", "")
+                val thumbnail = item.optString("Thumbnail", "")
+                val thumbnailUrl = when {
+                    thumbnail.isNotBlank() -> thumbnail
+                    downloadUrl.contains("trade_key=123pan-thumbnail") -> downloadUrl
+                    else -> ""
+                }.ifBlank { null }
+
+                Pan123FileItem(
+                    fileId = parsePan123FileId(item.get("FileId")),
+                    fileName = item.getString("FileName"),
+                    type = item.getInt("Type"),
+                    size = item.optLong("Size", 0),
+                    category = item.optInt("Category", 0),
+                    etag = item.optString("Etag", ""),
+                    s3keyFlag = item.optString("S3KeyFlag", ""),
+                    downloadUrl = downloadUrl,
+                    createAt = item.optString("CreateAt", ""),
+                    trashedAt = item.optString("TrashedAt", ""),
+                    starredStatus = item.optInt("StarredStatus", 0),
+                    thumbnailUrl = thumbnailUrl,
+                    raw = item,
+                )
+            }
+            // 只有服务端真的下发可用游标时才按游标翻页；否则按「满一页才继续」判定
+            Pan123ListResult(items, Pan123ListResult.usableCursor(data?.optString("Next")))
         }
-
-        val data = json.optJSONObject("data")
-        val infoList = data?.optJSONArray("InfoList") ?: data?.optJSONObject("InfoList")?.optJSONArray("list") ?: data?.optJSONArray("infoList")
-            ?: throw IllegalStateException("123 文件列表响应不完整，请刷新重试")
-
-        val items = (0 until infoList.length()).map { i ->
-            val item = infoList.getJSONObject(i)
-            val downloadUrl = item.optString("DownloadUrl", "")
-            val thumbnail = item.optString("Thumbnail", "")
-            val thumbnailUrl = when {
-                thumbnail.isNotBlank() -> thumbnail
-                downloadUrl.contains("trade_key=123pan-thumbnail") -> downloadUrl
-                else -> ""
-            }.ifBlank { null }
-
-            Pan123FileItem(
-                fileId = parsePan123FileId(item.get("FileId")),
-                fileName = item.getString("FileName"),
-                type = item.getInt("Type"),
-                size = item.optLong("Size", 0),
-                category = item.optInt("Category", 0),
-                etag = item.optString("Etag", ""),
-                s3keyFlag = item.optString("S3KeyFlag", ""),
-                downloadUrl = downloadUrl,
-                createAt = item.optString("CreateAt", ""),
-                trashedAt = item.optString("TrashedAt", ""),
-                starredStatus = item.optInt("StarredStatus", 0),
-                thumbnailUrl = thumbnailUrl,
-                raw = item,
-            )
-        }
-        // 只有服务端真的下发可用游标时才按游标翻页；否则按「满一页才继续」判定
-        Pan123ListResult(items, Pan123ListResult.usableCursor(data?.optString("Next")))
     }
 
     suspend fun getFileDownloadUrl(item: Pan123FileItem): Result<String> = runCatching {
@@ -632,6 +637,12 @@ class Pan123ApiClient(
 
     suspend fun moveFile(fileId: String, parentFileId: String): Result<Boolean> = runCatching {
         featureRequest("file/mod_pid", JSONObject().put("fileIdList", JSONArray().put(JSONObject().put("FileId", fileId.toLong()))).put("parentFileId", parentFileId.toLong()).put("event", "fileMove").put("operatePlace", 1).put("RequestSource", JSONObject.NULL))
+        true
+    }
+
+    suspend fun moveFiles(fileIds: List<String>, parentFileId: String): Result<Boolean> = runCatching {
+        require(fileIds.isNotEmpty()) { "请先选择文件" }
+        featureRequest("file/mod_pid", JSONObject().put("fileIdList", JSONArray(fileIds.map { JSONObject().put("FileId", it.toLong()) })).put("parentFileId", parentFileId.toLong()).put("event", "fileMove").put("operatePlace", 1).put("RequestSource", JSONObject.NULL))
         true
     }
 

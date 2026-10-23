@@ -191,6 +191,7 @@ fun QuarkBrowserTabContent(
             cloudProviderKey = if (state.driveType == "uc") "uc" else "quark",
             notificationEvents = viewModel.messageEvents,
             providerFeatures = remember(viewModel.apiClient, state.driveType) { com.fluxplayer.app.core.data.cloud.CloudProviderFeatures.from(viewModel.apiClient, state.driveType) },
+            isCurrentDirectoryComplete = !state.hasMore,
             currentFolderId = state.currentFileId,
             onPlayExtraFile = onPlayVideo,
         )

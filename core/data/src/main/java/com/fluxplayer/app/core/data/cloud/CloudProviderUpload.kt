@@ -1,6 +1,5 @@
 package com.fluxplayer.app.core.data.cloud
 
-import java.net.URLEncoder
 import java.security.KeyFactory
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -20,21 +19,25 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import okio.ByteString.Companion.toByteString
 import okio.ByteString.Companion.decodeBase64
+import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
 
 internal class CloudProviderUpload(private val features: CloudProviderFeatures, private val client: OkHttpClient) {
-    private suspend fun post(path: String, body: JSONObject) = features.data(features.post(path, body))
+    private val storageClient = client.newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES)
+        .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
+    private suspend fun post(path: String, body: JSONObject) = uploadStage(features.provider, "上传接口 $path") { features.data(features.post(path, body)) }
 
     suspend fun upload(parent: String, source: CloudUploadSource): String =
-        when (features.provider) {
-            "alipan" -> aliyun(parent, source)
-            "pan123" -> pan123(parent, source)
-            "quark", "uc" -> quark(parent, source)
-            "yun139" -> mobile(parent, source)
-            "cloud189" -> tianyi(parent, source)
-            else -> error("未知网盘")
+        uploadStage(features.provider, "准备上传") {
+            when (features.provider) {
+                "alipan" -> aliyun(parent, source)
+                "pan123" -> pan123(parent, source)
+                "quark", "uc" -> quark(parent, source)
+                "yun139" -> mobile(parent, source)
+                "cloud189" -> tianyi(parent, source)
+                else -> error("未知网盘")
+            }
         }
 
     private suspend fun aliyun(parent: String, source: CloudUploadSource): String {
@@ -58,7 +61,9 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
             parts.forEachIndexed { index, part ->
                 check(part.optInt("part_number") == index + 1) { "上传分段序号错误" }
                 val headers = part.optString("content_type").takeIf { it.isNotBlank() }?.let { mapOf("Content-Type" to it) }.orEmpty()
-                source.send(client, part.requiredString("upload_url"), index * chunk, minOf(source.size, (index + 1) * chunk), headers)
+                uploadStage(features.provider, "上传第 ${index + 1} 段") {
+                    source.send(storageClient, part.requiredString("upload_url"), index * chunk, minOf(source.size, (index + 1) * chunk), headers)
+                }
             }
             post("/v2/file/complete", jsonObject("drive_id" to drive, "file_id" to id, "upload_id" to uploadId))
         }
@@ -78,21 +83,25 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
                 "type" to 0,
             ),
         )
-        val id = pre.optString("FileId").ifBlank { pre.optJSONObject("Info")?.optString("FileId").orEmpty() }
-        check(id.isNotBlank()) { "123 未返回上传文件标识" }
+        val id = pre.optString("FileId").takeIf { it.isNotBlank() && it != "null" }
+            ?: pre.optJSONObject("Info")?.optString("FileId").orEmpty()
+        check(id.isNotBlank() && id != "null") { "123 未返回上传文件标识" }
         if (pre.optBoolean("Reuse")) return id
-        if (pre.optString("AccessKeyId").isNotBlank() && pre.optString("SecretAccessKey").isNotBlank()) {
+        if (pre.uploadString("AccessKeyId").isNotEmpty() && pre.uploadString("SecretAccessKey").isNotEmpty()) {
             s3(pre, source)
             post("file/upload_complete", jsonObject("fileId" to id))
             return id
         }
         val chunk = 16L * 1024 * 1024
         val count = maxOf(1, ((source.size + chunk - 1) / chunk).toInt())
-        val body = jsonObject("StorageNode" to pre.opt("StorageNode"), "bucket" to pre.requiredString("Bucket"), "key" to pre.requiredString("Key"), "uploadId" to pre.requiredString("UploadId"))
+        // 单段预签名上传可以没有 UploadId，由签发接口判断；不能误判成缺少密钥。
+        val body = jsonObject("StorageNode" to pre.opt("StorageNode"), "bucket" to pre.requiredString("Bucket"), "key" to pre.requiredString("Key"), "uploadId" to (pre.opt("UploadId") ?: JSONObject.NULL))
         repeat(count) { index ->
             val request = JSONObject(body.toString()).put("partNumberStart", index + 1).put("partNumberEnd", index + 2)
             val urls = post(if (count == 1) "file/s3_upload_object/auth" else "file/s3_repare_upload_parts_batch", request)
-            source.send(client, urls.getJSONObject("presignedUrls").requiredString((index + 1).toString()), index * chunk, minOf(source.size, (index + 1) * chunk))
+            uploadStage(features.provider, "上传第 ${index + 1} 段") {
+                source.send(storageClient, urls.getJSONObject("presignedUrls").requiredString((index + 1).toString()), index * chunk, minOf(source.size, (index + 1) * chunk))
+            }
         }
         post("file/upload_complete/v2", body.put("fileId", id).put("fileSize", source.size).put("isMultipart", count > 1))
         return id
@@ -106,7 +115,7 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
         val pre = post(
             "create",
             jsonObject(
-                "contentHash" to hash, "contentHashAlgorithm" to "SHA256", "contentType" to source.mimeType,
+                "contentHash" to hash, "contentHashAlgorithm" to "SHA256", "contentType" to "application/octet-stream",
                 "parallelUpload" to false, "partInfos" to parts.take(100), "size" to source.size, "parentFileId" to parent,
                 "name" to source.name, "type" to "file", "fileRenameMode" to "auto_rename",
             ),
@@ -122,7 +131,9 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
             addresses.forEachIndexed { offset, part ->
                 val index = part.optInt("partNumber") - 1
                 check(index == first + offset) { "移动上传分段序号异常" }
-                source.send(client, part.requiredString("uploadUrl"), index * chunk, minOf(source.size, (index + 1) * chunk), mapOf("Content-Type" to source.mimeType, "Origin" to "https://yun.139.com", "Referer" to "https://yun.139.com/"))
+                uploadStage(features.provider, "上传第 ${index + 1} 段") {
+                    source.send(storageClient, part.requiredString("uploadUrl"), index * chunk, minOf(source.size, (index + 1) * chunk), mapOf("Content-Type" to "application/octet-stream", "Origin" to "https://yun.139.com", "Referer" to "https://yun.139.com/"))
+                }
             }
         }
         post("complete", jsonObject("contentHash" to hash, "contentHashAlgorithm" to "SHA256", "fileId" to id, "uploadId" to uploadId))
@@ -159,19 +170,21 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
             val date = httpDate()
             val auth = authorize("PUT\n\n${source.mimeType}\n$date\nx-oss-date:$date\nx-oss-user-agent:$agent\n/$bucket/$key?partNumber=${index + 1}&uploadId=$uploadId")
             val url = address.newBuilder().addQueryParameter("partNumber", (index + 1).toString()).addQueryParameter("uploadId", uploadId).build()
-            val etag = source.send(
-                client,
-                url.toString(),
-                index * chunk,
-                minOf(source.size, (index + 1) * chunk),
-                mapOf(
-                    "Authorization" to auth,
-                    "Content-Type" to source.mimeType,
-                    "Referer" to origin,
-                    "x-oss-date" to date,
-                    "x-oss-user-agent" to agent,
-                ),
-            )
+            val etag = uploadStage(features.provider, "上传第 ${index + 1} 段") {
+                source.send(
+                    storageClient,
+                    url.toString(),
+                    index * chunk,
+                    minOf(source.size, (index + 1) * chunk),
+                    mapOf(
+                        "Authorization" to auth,
+                        "Content-Type" to source.mimeType,
+                        "Referer" to origin,
+                        "x-oss-date" to date,
+                        "x-oss-user-agent" to agent,
+                    ),
+                )
+            }
             check(etag.isNotBlank()) { "网盘未确认上传分段" }
             etags.add(etag)
         }
@@ -182,22 +195,24 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
         val auth = authorize("POST\n$hash\napplication/xml\n$date\nx-oss-callback:$callback\nx-oss-date:$date\nx-oss-user-agent:$agent\n/$bucket/$key?uploadId=$uploadId")
         raw(
             Request.Builder().url(address.newBuilder().addQueryParameter("uploadId", uploadId).build())
-                .post(xml.toRequestBody("application/xml".toMediaType()))
+                .post(xml.toByteArray(Charsets.UTF_8).toRequestBody("application/xml".toMediaType()))
                 .header("Authorization", auth).header("Content-MD5", hash).header("Referer", origin)
                 .header("x-oss-callback", callback).header("x-oss-date", date).header("x-oss-user-agent", agent).build(),
+            "合并上传分段",
         )
         val finished = post("file/upload/finish", jsonObject("obj_key" to key, "task_id" to task))
         return finished.optString("fid").ifBlank { pre.optString("fid") }
     }
 
     private suspend fun tianyi(parent: String, source: CloudUploadSource): String {
-        val session = features.get("portal/v2/getUserBriefInfo.action", emptyMap()).requiredString("sessionKey")
+        val webHeaders = mapOf("User-Agent" to TIANYI_UPLOAD_UA)
+        val session = features.get("portal/v2/getUserBriefInfo.action", emptyMap(), webHeaders).requiredString("sessionKey")
         check(session.isNotBlank()) { "天翼上传会话已失效，请重新登录" }
-        val rsaInfo = features.get("security/generateRsaKey.action", emptyMap())
+        val rsaInfo = features.get("security/generateRsaKey.action", emptyMap(), webHeaders)
         val publicKey = rsaInfo.requiredString("pubKey").replace("-----BEGIN PUBLIC KEY-----", "").replace("-----END PUBLIC KEY-----", "").replace(Regex("\\s"), "")
         val rsa = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(publicKey.decodeBase64()?.toByteArray() ?: error("天翼返回的加密公钥无效")))
         val pkId = rsaInfo.requiredString("pkId")
-        suspend fun call(path: String, params: Map<String, String>): JSONObject {
+        suspend fun call(path: String, params: Map<String, String>, allowExisting: Boolean = false): JSONObject {
             val date = System.currentTimeMillis().toString()
             val secret = ByteArray(12).also { SecureRandom().nextBytes(it) }.hex()
             val plain = params.entries.joinToString("&") { "${it.key}=${it.value}" }
@@ -206,10 +221,13 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
             val signature = hmac("HmacSHA1", secret.toByteArray(), "SessionKey=$session&Operate=GET&RequestURI=$path&Date=$date&params=$encrypted".toByteArray()).hex()
             val encryptionText = base64(Cipher.getInstance("RSA/ECB/PKCS1Padding").apply { init(Cipher.ENCRYPT_MODE, rsa) }.doFinal(secret.toByteArray()))
             val request = Request.Builder().url(("https://upload.cloud.189.cn$path").toHttpUrl().newBuilder().addQueryParameter("params", encrypted).build())
-                .header("Accept", "application/json;charset=UTF-8").header("User-Agent", com.fluxplayer.app.core.data.cloud189.C189AuthProvider.userAgent).header("SessionKey", session).header("Signature", signature)
+                .header("Accept", "application/json;charset=UTF-8").header("User-Agent", TIANYI_UPLOAD_UA).header("SessionKey", session).header("Signature", signature)
                 .header("X-Request-Date", date).header("X-Request-ID", UUID.randomUUID().toString()).header("EncryptionText", encryptionText).header("PkId", pkId).build()
-            val result = JSONObject(raw(request))
-            check(result.optString("code") == "SUCCESS") { "天翼上传失败：${result.optString("code")}" }
+            val result = JSONObject(raw(request, "上传接口 $path"))
+            val code = result.optString("code")
+            uploadStage(features.provider, "上传接口 $path") {
+                check(code == "SUCCESS" || allowExisting && code == "FileDoesExist") { "天翼上传失败：$code${uploadErrorHint(code)}" }
+            }
             return result
         }
         val chunk = 10L * 1024 * 1024
@@ -220,38 +238,44 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
         val pre = features.data(
             call(
                 "/person/initMultiUpload",
-                linkedMapOf(
-                    "parentFolderId" to parent,
-                    "fileName" to URLEncoder.encode(source.name, "UTF-8"),
-                    "fileSize" to source.size.toString(),
-                    "sliceSize" to chunk.toString(),
-                    "fileMd5" to hash,
-                    "sliceMd5" to sliceHash,
-                ),
+                TianyiUploadProtocol.initialize(parent, source.name, source.size, chunk, hash, sliceHash),
             ),
         )
-        val uploadId = pre.requiredString("uploadFileId")
-        if (pre.optInt("fileDataExists") != 1) {
-            repeat(count) { index ->
-                val urls = call("/person/getMultiUploadUrls", mapOf("partInfo" to "${index + 1}-${base64(hashes[index])}", "uploadFileId" to uploadId))
+        var uploadId = pre.requiredString("uploadFileId")
+        var dataExists = pre.optInt("fileDataExists") == 1
+        if (count > 1 && !dataExists) {
+            val checked = features.data(call("/person/checkTransSecond", linkedMapOf("fileMd5" to hash, "sliceMd5" to sliceHash, "uploadFileId" to uploadId)))
+            checked.optString("uploadFileId").takeIf { it.isNotBlank() && it != "null" }?.let { uploadId = it }
+            dataExists = checked.optInt("fileDataExists") == 1
+        }
+        if (!dataExists) {
+            val state = call("/person/getUploadedPartsInfo", mapOf("uploadFileId" to uploadId), allowExisting = true)
+            dataExists = state.optString("code") == "FileDoesExist"
+            val uploaded = features.data(state).optString("uploadedPartList").split(',').mapNotNull { it.trim().toIntOrNull() }.toSet()
+            for (index in 0 until count) {
+                if (dataExists) break
+                if (index + 1 in uploaded) continue
+                val urls = call("/person/getMultiUploadUrls", mapOf("uploadFileId" to uploadId, "partInfo" to "${index + 1}-${base64(hashes[index])}"), allowExisting = true)
+                if (urls.optString("code") == "FileDoesExist") break
                 val part = urls.getJSONObject("uploadUrls").getJSONObject("partNumber_${index + 1}")
-                val headers = java.net.URLDecoder.decode(part.optString("requestHeader"), "UTF-8").split('&').mapNotNull { pair ->
-                    val position = pair.indexOf('=')
-                    if (position > 0) pair.take(position) to pair.substring(position + 1) else null
-                }.toMap()
-                source.send(client, part.requiredString("requestURL"), index * chunk, minOf(source.size, (index + 1) * chunk), headers)
+                val headers = TianyiUploadProtocol.headers(part.optString("requestHeader"))
+                uploadStage(features.provider, "上传第 ${index + 1} 段") {
+                    source.send(storageClient, part.requiredString("requestURL"), index * chunk, minOf(source.size, (index + 1) * chunk), headers)
+                }
             }
         }
-        val completed = call("/person/commitMultiUploadFile", mapOf("uploadFileId" to uploadId, "fileMd5" to hash, "sliceMd5" to sliceHash, "lazyCheck" to "1", "opertype" to "3"))
-        return features.data(completed).requiredString("fileId")
+        val completed = call("/person/commitMultiUploadFile", TianyiUploadProtocol.commit(uploadId, hash, sliceHash, count))
+        return TianyiUploadProtocol.completedId(completed)
     }
 
     private suspend fun s3(pre: JSONObject, source: CloudUploadSource) {
         val endpoint = pre.requiredString("EndPoint").let { if (it.contains("://")) it else "https://$it" }.toHttpUrl()
-        val url = endpoint.newBuilder().encodedPath("/").addPathSegment(pre.requiredString("Bucket")).addPathSegments(pre.requiredString("Key")).build()
-        val token = pre.optString("SessionToken")
+        val path = "/" + (listOf(pre.requiredString("Bucket")) + pre.requiredString("Key").split('/')).joinToString("/") { awsEscape(it) }
+        val url = endpoint.newBuilder().encodedPath(path).query(null).fragment(null).build()
+        val token = pre.uploadString("SessionToken")
         suspend fun request(method: String, query: Map<String, String>, text: String = "", start: Long? = null, end: Long = source.size): String {
-            val address = url.newBuilder().apply { query.toSortedMap().forEach { (key, value) -> addQueryParameter(key, value) } }.build()
+            val canonicalQuery = query.toSortedMap().entries.joinToString("&") { "${awsEscape(it.key)}=${awsEscape(it.value)}" }
+            val address = url.newBuilder().encodedQuery(canonicalQuery.takeIf { it.isNotEmpty() }).build()
             val date = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
             val shortDate = date.take(8)
             val hash = if (start != null) source.hash("SHA-256", start, end) else MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).hex()
@@ -266,12 +290,13 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
             val signature = hmac("HmacSHA256", key, toSign.toByteArray()).hex()
             val headers = mutableMapOf("Authorization" to "AWS4-HMAC-SHA256 Credential=${pre.requiredString("AccessKeyId")}/$scope, SignedHeaders=$signedHeaders, Signature=$signature", "x-amz-content-sha256" to hash, "x-amz-date" to date)
             if (token.isNotBlank()) headers["x-amz-security-token"] = token
-            if (start != null) return source.send(client, address.toString(), start, end, headers)
-            val builder = Request.Builder().url(address).method(method, if (method == "DELETE") null else text.toRequestBody("application/xml".toMediaType()))
+            if (start != null) return uploadStage(features.provider, "S3 上传文件分段") { source.send(storageClient, address.toString(), start, end, headers) }
+            val builder = Request.Builder().url(address).method(method, if (method == "DELETE") null else text.toByteArray(Charsets.UTF_8).toRequestBody("application/xml".toMediaType()))
             headers.forEach { (key, value) -> builder.header(key, value) }
-            return raw(builder.build())
+            return raw(builder.build(), "S3 ${if (method == "DELETE") "取消分段" else if ("uploads" in query) "创建分段任务" else "合并分段"}")
         }
-        if (source.size == 0L) {
+        val chunk = maxOf(8L * 1024 * 1024, (source.size + 8999) / 9000)
+        if (source.size <= chunk) {
             request("PUT", emptyMap(), start = 0)
             return
         }
@@ -279,7 +304,6 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
         val uploadId = Regex("<UploadId>([^<]+)</UploadId>").find(initialized)?.groupValues?.get(1) ?: error("123 未创建分段上传任务")
         var completed = false
         try {
-            val chunk = maxOf(16L * 1024 * 1024, (source.size + 8999) / 9000)
             val etags = mutableListOf<String>()
             var start = 0L
             while (start < source.size) {
@@ -301,12 +325,25 @@ internal class CloudProviderUpload(private val features: CloudProviderFeatures, 
         }
     }
 
-    private suspend fun raw(request: Request): String = withContext(Dispatchers.IO) {
-        client.newCall(request).execute().use { response ->
-            val text = response.body?.string().orEmpty()
-            check(response.isSuccessful && !text.contains("<Error>")) { "上传服务请求失败（HTTP ${response.code}）" }
-            text
+    private suspend fun raw(request: Request, stage: String): String = uploadStage(features.provider, stage) {
+        withContext(Dispatchers.IO) {
+            storageClient.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                check(response.isSuccessful && !uploadXmlError(text)) { "上传服务请求失败（${uploadResponseError(response, text)}）" }
+                text
+            }
         }
+    }
+
+    private fun JSONObject.uploadString(key: String): String = (opt(key) as? String)?.trim()?.takeUnless { it.isEmpty() || it.equals("null", true) }.orEmpty()
+
+    private fun awsEscape(value: String): String = value.toByteArray(Charsets.UTF_8).joinToString("") { byte ->
+        val code = byte.toInt() and 255
+        if (code in 65..90 || code in 97..122 || code in 48..57 || code in setOf(45, 46, 95, 126)) code.toChar().toString() else "%%%02X".format(code)
+    }
+
+    companion object {
+        private const val TIANYI_UPLOAD_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
 
     private fun httpDate(): String = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT") }.format(Date())

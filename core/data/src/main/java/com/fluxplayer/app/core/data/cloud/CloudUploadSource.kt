@@ -72,7 +72,7 @@ class CloudUploadSource(
     ): String = withContext(Dispatchers.IO) {
         val context = currentCoroutineContext()
         val body = object : RequestBody() {
-            override fun contentType() = headers["Content-Type"]?.toMediaType()
+            override fun contentType() = (headers.entries.firstOrNull { it.key.equals("Content-Type", true) }?.value ?: mimeType).toMediaType()
             override fun contentLength(): Long = end - start
             override fun writeTo(sink: BufferedSink) {
                 RandomAccessFile(file, "r").use { input ->
@@ -93,9 +93,14 @@ class CloudUploadSource(
         val request = Request.Builder().url(url).put(body).apply {
             headers.forEach { (key, value) -> header(key, value) }
         }.build()
-        client.newCall(request).execute().use { response ->
+        val uploadClient = client.newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES)
+            .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
+        uploadClient.newCall(request).execute().use { response ->
             if (response.code in setOf(408, 429, 500, 502, 503, 504)) throw java.io.IOException("上传分段暂不可用（HTTP ${response.code}）")
-            check(response.isSuccessful) { "上传分段失败（HTTP ${response.code}）" }
+            if (!response.isSuccessful) {
+                val text = response.body?.string().orEmpty()
+                error("上传分段失败（${uploadResponseError(response, text)}）")
+            }
             response.header("ETag").orEmpty()
         }
     }

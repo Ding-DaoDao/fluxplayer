@@ -9,7 +9,6 @@ import com.fluxplayer.app.core.common.CloudUriScheme
 import com.fluxplayer.app.core.common.Pan123FallbackCache
 import com.fluxplayer.app.core.common.VideoQualityCache
 import com.fluxplayer.app.core.common.sanitizeUrl
-import com.fluxplayer.app.core.data.GlobalCookieJar
 import com.fluxplayer.app.core.data.aliyun.AliyunApiClient
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
 import com.fluxplayer.app.core.data.cloud189.C189ApiClient
@@ -72,7 +71,8 @@ class CloudUriResolver @Inject constructor(
         if (uri.getQueryParameter("space") != null || uri.getQueryParameter("extra_parent") != null) {
             val features = extraFeatures(provider) ?: return null
             val spaceId = uri.getQueryParameter("space")
-            val url = if (spaceId != null) {
+            val cacheProvider = if (spaceId == null) provider else "$provider:space:$spaceId"
+            val url = CloudPlaylistCache.getResolvedUrl(cacheProvider, fileId) ?: if (spaceId != null) {
                 features.resolveSpaceFile(
                     CloudSpace(spaceId, uri.getQueryParameter("space_name").orEmpty()),
                     CloudRemoteFile(
@@ -86,6 +86,7 @@ class CloudUriResolver @Inject constructor(
             } else {
                 features.resolvePersonalFile(fileId, uri.getQueryParameter("extra_parent").orEmpty())
             }
+            CloudPlaylistCache.putResolvedUrl(cacheProvider, fileId, url)
             val host = Uri.parse(url).host.orEmpty()
             if (!CloudPlayHeaders.isExplicitlyAnonymous(host)) CloudPlayHeaders.registerFor(provider, host, features.fileHeaders())
             return Uri.parse(url)
@@ -394,8 +395,8 @@ class CloudUriResolver @Inject constructor(
         CloudPlayHeaders.registerSuffixFor("quark", ".quark.cn") { client.featureHeaders() }
 
         if (prefs.getBoolean("prefer_original_playback", false)) {
-            val original = client.getOriginalPlaybackUrl(fileId).getOrNull()
-            if (!original.isNullOrBlank()) return original + "#quarkPlay=true#"
+            val original = client.getOriginalPlaybackUrl(fileId, CloudPlaylistCache.getFileMetadata("quark", fileId)?.fileName ?: "视频").getOrNull()
+            if (!original.isNullOrBlank()) return original + "#quarkPlay=true&quarkOriginal=true"
         }
 
         val playResult = client.getVideoPlayInfo(fileId).getOrNull()

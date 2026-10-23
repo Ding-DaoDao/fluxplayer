@@ -4,11 +4,20 @@ import com.fluxplayer.app.core.common.CloudPlayHeaders
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import com.fluxplayer.app.core.data.GlobalCookieJar
+import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -62,7 +71,7 @@ class QuarkApiClient(
                         }
                     }
                 } else if (context.getSharedPreferences("quark", android.content.Context.MODE_PRIVATE).getBoolean("prefer_original_playback", false)) {
-                    getOriginalPlaybackUrl(fid, name).getOrNull()?.let { return it }
+                    getOriginalPlaybackUrl(fid, name).getOrNull()?.let { return "$it#quarkPlay=true&quarkOriginal=true" }
                 }
             }
             getVideoPlayInfo(fid).getOrNull()?.urls?.firstOrNull()?.let { return it }
@@ -72,6 +81,7 @@ class QuarkApiClient(
 
     companion object {
         private const val TAG = "QuarkApi"
+        private val originalPlaybackCache = QuarkOriginalPlaybackCache()
         private const val QUARK_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch"
     }
 
@@ -302,9 +312,11 @@ class QuarkApiClient(
     }
 
     suspend fun getDownloadUrl(fid: String): Result<String> = runCatching {
-        if (isUc) sessionContext?.let { context ->
-            val tv = UcTvService(context)
-            if (tv.isAuthorized()) return@runCatching tv.download(fid, 0)
+        if (isUc) {
+            sessionContext?.let { context ->
+                val tv = UcTvService(context)
+                if (tv.isAuthorized()) return@runCatching tv.download(fid, 0)
+            }
         }
         val body = JSONObject().put("fids", JSONArray().put(fid))
         val json = apiPost("$baseUrl/1/clouddrive/file/download?pr=$pr&fr=pc&sys=win32&ve=${if (isUc) "1.6.1" else "3.23.2"}", body)
@@ -317,6 +329,63 @@ class QuarkApiClient(
 
     /** 使用当前账号的发送到电脑会话获取原画播放地址。 */
     suspend fun getOriginalPlaybackUrl(fid: String, name: String = "视频"): Result<String> = runCatching {
+        val owner = originalPlaybackOwner()
+        withTimeoutOrNull(8_000) {
+            if (owner.isEmpty()) {
+                fetchOriginalPlaybackUrl(fid, name).getOrThrow()
+            } else {
+                originalPlaybackCache.resolve(owner, fid) {
+                    fetchOriginalPlaybackUrl(fid, name).getOrThrow().also { check(originalPlaybackOwner() == owner) { "夸克账号已变化，请重新播放" } }
+                }
+            }
+        } ?: error("原画取址耗时过长，尝试其他播放线路")
+    }.onFailure { if (it is CancellationException) throw it }
+
+    private fun originalPlaybackOwner(): String {
+        val cookie = getCookie()
+        if (cookie.isBlank()) return ""
+        val identity = cookie.split(';').map { it.trim() }.filter { it.startsWith("__uid=") || it.startsWith("__pus=") }.sorted().joinToString(";").ifBlank { cookie }
+        return java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
+    private class OriginalResponseError(message: String) : IllegalStateException(message)
+
+    /** 快传三步共用可取消的时间预算，网络失败不重复发送快传消息。 */
+    private suspend fun originalPost(url: String, body: JSONObject): JSONObject = suspendCancellableCoroutine { continuation ->
+        val request = Request.Builder().url(url).post(body.toString().toRequestBody(jsonMediaType))
+        buildHeaders().forEach { (key, value) -> request.header(key, value) }
+        val call = client.newCall(request.build())
+        continuation.invokeOnCancellation { call.cancel() }
+        val started = System.nanoTime()
+        val owner = originalPlaybackOwner()
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, error: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(error)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                if (!continuation.isActive) {
+                    response.close()
+                    return
+                }
+                try {
+                    val json = response.use {
+                        val value = JSONObject(it.body?.string() ?: error("夸克快传响应为空"))
+                        if (it.code == 401 || value.optInt("code") == 31001 || value.optInt("status") == 401) throw IllegalArgumentException("夸克登录已失效，请重新登录")
+                        if (!it.isSuccessful || value.optInt("code", -1) != 0 || value.optInt("status", 200) != 200) throw OriginalResponseError("夸克快传请求失败，请稍后重试")
+                        check(originalPlaybackOwner() == owner) { "夸克账号已变化，请重新播放" }
+                        updateCookieFromResponse(it)
+                        value
+                    }
+                    runCatching { android.util.Log.d(TAG, "原画取址 ${request.build().url.encodedPath.substringAfterLast('/')} 耗时 ${(System.nanoTime() - started) / 1_000_000} 毫秒") }
+                    if (continuation.isActive) continuation.resume(json)
+                } catch (error: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                }
+            }
+        })
+    }
+
+    private suspend fun fetchOriginalPlaybackUrl(fid: String, name: String): Result<String> = runCatching {
         check(!isUc) { "此播放方式仅适用于夸克" }
         val conversation = "3000008641494773"
         val base = "https://drive-social-api.quark.cn/1/clouddrive/chat/conv"
@@ -336,7 +405,7 @@ class QuarkApiClient(
                     ),
             ),
         )
-        val response = apiPost("$base/msg/batch_send$query", body)
+        val response = originalPost("$base/msg/batch_send$query", body)
         check(response.optInt("code", 0) == 0 && response.optInt("status", 200) == 200) { "夸克快传准备失败" }
         val data = response.optJSONObject("data") ?: throw IllegalStateException("夸克未返回快传信息")
         val raw = data.opt("send_msg_list") ?: data
@@ -346,19 +415,19 @@ class QuarkApiClient(
         check(messageId.isNotBlank() && messageId != "null") { "夸克未返回快传消息标识" }
         val targetConversation = message.optString("conversation_id").ifBlank { data.optString("conversation_id").ifBlank { conversation } }
         suspend fun token(target: String): String {
-            val json = apiPost("$base/file/acquire_dl_token$query", JSONObject().put("conversation_id", target).put("conversation_type", 3).put("msg_id", messageId))
+            val json = originalPost("$base/file/acquire_dl_token$query", JSONObject().put("conversation_id", target).put("conversation_type", 3).put("msg_id", messageId))
             check(json.optInt("code", 0) == 0 && json.optInt("status", 200) == 200) { "夸克快传授权失败" }
-            return json.getJSONObject("data").getString("token").also {
-                check(it.isNotBlank() && it.length <= 32768 && it != "null" && it.none(Char::isWhitespace)) { "夸克播放授权无效" }
+            return json.optJSONObject("data")?.optString("token").orEmpty().also {
+                if (it.isBlank() || it.length > 32768 || it == "null" || it.any(Char::isWhitespace)) throw OriginalResponseError("夸克播放授权无效")
             }
         }
         val authorization = try {
             token(targetConversation)
-        } catch (error: IllegalStateException) {
+        } catch (error: OriginalResponseError) {
             if (targetConversation == conversation) throw error
             token(conversation)
         }
-        val download = apiPost(
+        val download = originalPost(
             "https://drive-pc.quark.cn/1/clouddrive/file/download?pr=ucpro&fr=pc&sys=win32&ve=3.23.2",
             JSONObject()
                 .put("fids", JSONArray().put(fid)).put("speedup_session", "").put("token", authorization),

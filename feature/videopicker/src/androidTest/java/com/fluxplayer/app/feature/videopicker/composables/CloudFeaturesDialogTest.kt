@@ -1,6 +1,7 @@
 package com.fluxplayer.app.feature.videopicker.composables
 
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -10,6 +11,7 @@ import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.platform.app.InstrumentationRegistry
@@ -19,10 +21,12 @@ import com.fluxplayer.app.core.model.ApplicationPreferences
 import com.fluxplayer.app.core.model.WebDavResource
 import com.fluxplayer.app.core.ui.theme.NextPlayerTheme
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -30,7 +34,7 @@ class CloudFeaturesDialogTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private fun features(): CloudProviderFeatures {
+    private fun features(searchVideo: Boolean = false, searchGate: java.util.concurrent.CountDownLatch? = null): CloudProviderFeatures {
         val http = OkHttpClient.Builder().addInterceptor { chain ->
             val path = chain.request().url.encodedPath
             val body = when {
@@ -40,6 +44,11 @@ class CloudFeaturesDialogTest {
                 } else {
                     """{"status":200,"code":0,"data":{"list":[{"fid":"folder","file_name":"纪录片","dir":true},{"fid":"video","file_name":"第一集.mp4","size":1200000000}]}}"""
                 }
+                path.endsWith("/sort") && searchVideo && chain.request().url.queryParameter("pdir_fid") == "library" -> {
+                    searchGate?.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                    """{"status":200,"code":0,"data":{"list":[]}}"""
+                }
+                path.endsWith("/sort") && searchVideo -> """{"status":200,"code":0,"data":{"list":[{"fid":"video","file_name":"视频.mp4","size":100},{"fid":"library","file_name":"目录","dir":true}]}}"""
                 path.endsWith("/sort") -> if (chain.request().url.queryParameter("pdir_fid") == "library") {
                     """{"status":200,"code":0,"data":{"list":[]}}"""
                 } else {
@@ -147,6 +156,47 @@ class CloudFeaturesDialogTest {
         saveScreenshot("cloud-share-destination-dark.png")
         compose.onNodeWithText("保存到此目录").performClick()
         compose.onNodeWithText("根目录 / 影库").assertIsDisplayed()
+    }
+
+    @Test
+    fun rootMenuOpensSearchAndPlaysWithoutResolvingTwice() {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        try {
+            val features = features(searchVideo = true, searchGate = gate)
+            val played = AtomicReference<Uri?>()
+            compose.setContent {
+                NextPlayerTheme(darkTheme = false, mediaShell = true, preferences = ApplicationPreferences()) {
+                    CloudBrowserPanel(
+                        items = emptyList(), breadcrumbs = listOf("根目录"), isLoading = false, isConfigured = true,
+                        error = null, isLoadingMore = false, onItemClick = {}, onBreadcrumbClick = {}, onRefresh = {}, onLoadMore = {},
+                        breadcrumbLabel = { it }, loginContent = {}, providerName = "夸克网盘", onSortClick = {}, onExitClick = {},
+                        providerFeatures = features, currentFolderId = "0", onPlayExtraFile = { uri, _ -> played.set(uri) },
+                    )
+                }
+            }
+            compose.onNodeWithText("搜索文件及子文件夹").assertDoesNotExist()
+            compose.onNodeWithContentDescription("全选当前目录").assertDoesNotExist()
+            compose.onNodeWithContentDescription("菜单").performClick()
+            compose.onNodeWithText("搜索").performClick()
+            compose.onNodeWithText("搜索文件及子文件夹").performTextInput("视频")
+            compose.onNodeWithText("搜索").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodes(androidx.compose.ui.test.hasText("视频.mp4")).fetchSemanticsNodes().isNotEmpty() }
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            File(context.getExternalFilesDir(null), "cloud-root-inline-search.png").outputStream().use {
+                compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+            compose.onNodeWithContentDescription("视频.mp4 的更多操作").performClick()
+            compose.onNodeWithText("播放").performClick()
+            compose.waitUntil(3000) { played.get() != null }
+            assertEquals("cloud", played.get()!!.scheme)
+            assertEquals("0", played.get()!!.getQueryParameter("extra_parent"))
+            compose.onNodeWithContentDescription("清除搜索").performClick()
+            compose.onNodeWithText("返回目录").performClick()
+            compose.onNodeWithText("搜索文件及子文件夹").assertDoesNotExist()
+            compose.onNodeWithText("排序").assertExists()
+        } finally {
+            gate.countDown()
+        }
     }
 
     private fun saveScreenshot(name: String) {

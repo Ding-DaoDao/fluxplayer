@@ -16,6 +16,9 @@ object C189AuthProvider {
     }
 
     @Volatile private var credentials = Credentials()
+
+    @Volatile internal var searchIdentity: String = ""
+        private set
     private var preferences: SharedPreferences? = null
     internal val refreshMutex = Mutex()
 
@@ -46,6 +49,7 @@ object C189AuthProvider {
     @Synchronized
     private fun update(transform: Credentials.() -> Credentials) {
         val updated = credentials.transform()
+        if (updated.accessToken != credentials.accessToken) searchIdentity = java.util.UUID.randomUUID().toString()
         if (updated != credentials) credentials = updated
     }
 
@@ -70,6 +74,7 @@ object C189AuthProvider {
             refreshToken = prefs.getString("refreshToken", "").orEmpty(),
             expiresIn = prefs.getLong("expiresIn", 0),
         )
+        searchIdentity = prefs.getString("searchIdentity", null) ?: java.util.UUID.randomUUID().toString().also { prefs.edit().putString("searchIdentity", it).apply() }
         isActive = credentials.accessToken.isNotBlank() || credentials.refreshToken.isNotBlank()
         C189ApiClient().restoreCookies(prefs.getString("cookies", "").orEmpty())
     }
@@ -79,6 +84,7 @@ object C189AuthProvider {
 
     @Synchronized
     fun setTokens(accessToken: String, sessionKey: String, sessionSecret: String, refreshToken: String = "", expiresIn: Long = 0) {
+        if (accessToken != credentials.accessToken) searchIdentity = java.util.UUID.randomUUID().toString()
         credentials = Credentials(accessToken, sessionKey, sessionSecret, refreshToken, expiresIn)
         isActive = true
         persist()
@@ -99,6 +105,7 @@ object C189AuthProvider {
         val current = credentials
         preferences?.edit()
             ?.putString("accessToken", current.accessToken)
+            ?.putString("searchIdentity", searchIdentity)
             ?.putString("sessionKey", current.sessionKey)
             ?.putString("sessionSecret", current.sessionSecret)
             ?.putString("refreshToken", current.refreshToken)
@@ -114,6 +121,7 @@ object C189AuthProvider {
 
     @Synchronized
     fun clear() {
+        searchIdentity = ""
         credentials = Credentials()
         familySessionKey = ""
         familySessionSecret = ""

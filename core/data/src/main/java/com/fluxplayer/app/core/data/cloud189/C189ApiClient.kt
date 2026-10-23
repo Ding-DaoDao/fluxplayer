@@ -910,7 +910,7 @@ class C189ApiClient(
         token
     }
 
-    internal suspend fun featureRequest(path: String, params: Map<String, String>, post: Boolean = false): JSONObject {
+    internal suspend fun featureRequest(path: String, params: Map<String, String>, post: Boolean = false, extraHeaders: Map<String, String> = emptyMap()): JSONObject {
         if (path.startsWith("family/")) {
             repeat(2) { attempt ->
                 val token = familyAccessToken()
@@ -949,7 +949,7 @@ class C189ApiClient(
                     params["expireTime"]?.toIntOrNull()?.let { put("expireTime", it) }
                 }
             } else null
-            return webFeatureRequest(webPath, params, post, jsonBody = batchPayload != null, jsonPayload = batchPayload)
+            return webFeatureRequest(webPath, params, post, jsonBody = batchPayload != null, jsonPayload = batchPayload, extraHeaders = extraHeaders)
         }
         return if (post) openApiPost(path, params) else openApiGet(path, params)
     }

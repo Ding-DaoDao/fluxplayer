@@ -6,21 +6,21 @@ import android.net.Uri
 import android.util.Base64
 import android.util.Log
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.AssetDataSource
+import androidx.media3.datasource.ContentDataSource
 import androidx.media3.datasource.DataSource
-import com.fluxplayer.app.core.common.CloudPlayHeaders
-import com.fluxplayer.app.core.data.openlist.OpenListTokenProvider
-import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
-import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
-import com.fluxplayer.app.core.data.pan123.Pan123AuthProvider
-import com.fluxplayer.app.core.data.quark.quarkPlaybackAuth
-import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.HttpDataSource
-import androidx.media3.datasource.AssetDataSource
-import androidx.media3.datasource.ContentDataSource
 import androidx.media3.datasource.TransferListener
+import com.fluxplayer.app.core.common.CloudPlayHeaders
+import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
+import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
+import com.fluxplayer.app.core.data.openlist.OpenListTokenProvider
+import com.fluxplayer.app.core.data.pan123.Pan123AuthProvider
+import com.fluxplayer.app.core.data.quark.quarkPlaybackAuth
+import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 
 /**
  * DataSource.Factory 包装 —— 对 HTTP/HTTPS URI 从 userinfo（user:pass@host）
@@ -42,11 +42,15 @@ class AuthAwareDataSourceFactory(
 
     override fun createDataSource(): DataSource {
         httpFactory.setUserAgent(if (CloudPlayHeaders.activeProvider in setOf("quark", "uc")) quarkPlaybackAuth(CloudPlayHeaders.activeProvider).userAgent else userAgent)
-        return AuthAwareDataSource(
-            httpDelegate = httpFactory.createDataSource(),
-            fileDelegate = FileDataSource(),
-            contentDelegate = ContentDataSource(context),
-            assetDelegate = AssetDataSource(context),
+        return ParallelRangeDataSource(
+            DataSource.Factory {
+                AuthAwareDataSource(
+                    httpDelegate = httpFactory.createDataSource(),
+                    fileDelegate = FileDataSource(),
+                    contentDelegate = ContentDataSource(context),
+                    assetDelegate = AssetDataSource(context),
+                )
+            },
         )
     }
 }
@@ -119,8 +123,9 @@ private class AuthAwareDataSource(
             } catch (e: HttpDataSource.InvalidResponseCodeException) {
                 lastException = e
                 Log.w(TAG, "openWithRetry: attempt=$attempt HTTP ${e.responseCode}")
-                // 416 on seek: throw immediately so ExoPlayer can handle it fast
-                if (e.responseCode == 416 && dataSpec.position > 0) throw e
+                // 认证、链接失效和范围错误交给播放器处理，仅重试临时服务故障。
+                if (e.responseCode !in setOf(408, 429, 500, 502, 503, 504)) throw e
+                runCatching { delegate.close() }
                 if (attempt < maxAttempts - 1) {
                     if (Thread.currentThread().isInterrupted) throw e
                     try {
@@ -135,7 +140,8 @@ private class AuthAwareDataSource(
                 }
             } catch (e: HttpDataSource.HttpDataSourceException) {
                 lastException = e
-                Log.w(TAG, "openWithRetry: attempt=$attempt ${e.javaClass.simpleName} ${e.message}")
+                runCatching { delegate.close() }
+                Log.w(TAG, "openWithRetry: attempt=$attempt ${e.javaClass.simpleName}")
                 if (attempt < maxAttempts - 1) {
                     if (Thread.currentThread().isInterrupted) throw e
                     try {
@@ -156,15 +162,15 @@ private class AuthAwareDataSource(
     private fun applyCloudPlayHeaders(http: HttpDataSource, uri: Uri) {
         val host = uri.host ?: return
         Log.d(TAG, "applyCloudPlayHeaders: host=$host, uri=${uri.toString().take(150)}...")
-        
+
         if (CloudPlayHeaders.isSelfAuthenticatingUrl(uri.toString())) {
             Log.d(TAG, "applyCloudPlayHeaders: URL is self-authenticating, skipping")
             return
         }
-        
+
         val headers = CloudPlayHeaders.getHeaders(host)
         Log.d(TAG, "applyCloudPlayHeaders: Found ${headers.size} headers for host=$host")
-        
+
         for ((key, value) in headers) {
             http.setRequestProperty(key, value)
             // 不打印 value：Authorization/Cookie 等敏感信息不应进入 logcat
@@ -177,10 +183,10 @@ private class AuthAwareDataSource(
         val fragment = uri.fragment ?: ""
         val host = uri.host ?: ""
         val url = uri.toString().take(200)
-        
+
         Log.d(TAG, "========== applyHttpAuth START ==========")
         Log.d(TAG, "applyHttpAuth: host=$host, fragment=$fragment")
-        Log.d(TAG, "applyHttpAuth: url=${url}...")
+        Log.d(TAG, "applyHttpAuth: url=$url...")
 
         // 夸克/UC 播放认证：通过 URI fragment 检测。两家各自一份鉴权，按 fragment 取对应那家。
         val quarkLikeProvider = when {
@@ -213,7 +219,7 @@ private class AuthAwareDataSource(
             Log.d(TAG, "applyHttpAuth: Pan123AuthProvider.isActive=${Pan123AuthProvider.isActive}")
             Log.d(TAG, "applyHttpAuth: Pan123AuthProvider.referer=${Pan123AuthProvider.referer}")
             Log.d(TAG, "applyHttpAuth: Pan123AuthProvider.userAgent=${Pan123AuthProvider.userAgent}")
-            
+
             if (Pan123AuthProvider.isActive) {
                 Log.d(TAG, "applyHttpAuth: Applying Pan123 auth - setting headers")
                 http.setRequestProperty("Referer", Pan123AuthProvider.referer)

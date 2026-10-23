@@ -1,11 +1,11 @@
 package com.fluxplayer.app.core.data.cloud
 
 import com.fluxplayer.app.core.common.CloudPlayHeaders
-import com.fluxplayer.app.core.data.quark.quarkPlaybackAuth
 import com.fluxplayer.app.core.data.cloud189.C189ApiClient
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.pan123.Pan123ApiClient
 import com.fluxplayer.app.core.data.quark.QuarkApiClient
+import com.fluxplayer.app.core.data.quark.quarkPlaybackAuth
 import com.fluxplayer.app.core.data.yun139.Yun139ApiClient
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import java.io.File
@@ -164,7 +164,9 @@ class ProviderParityRegressionTest {
             val features = CloudProviderFeatures.from(C189ApiClient(http))
             assertEquals("file", CloudProviderUpload(features, http).upload("-11", CloudUploadSource(file, "测试.txt")))
             assertEquals(2, mutations)
-        } finally { file.delete() }
+        } finally {
+            file.delete()
+        }
     }
 
     @Test
@@ -194,16 +196,20 @@ class ProviderParityRegressionTest {
             val api = Pan123ApiClient(http).apply { setToken("fixture") }
             assertEquals("123", CloudProviderUpload(CloudProviderFeatures.from(api), http).upload("0", CloudUploadSource(file, "测试.txt")))
             assertEquals(4, paths.size)
-        } finally { file.delete() }
+        } finally {
+            file.delete()
+        }
     }
 
     @Test
     fun quarkShareAcceptsIdOnlyResultAndRejectsEitherFailureStatus() = runBlocking {
-        val http = client { request, _ -> when {
-            request.url.encodedPath.endsWith("/share") -> """{"data":{"task_id":"task"}}"""
-            request.url.encodedPath.endsWith("/task") -> """{"data":{"status":0,"task_status":2,"share_id":"id"}}"""
-            else -> """{"data":{"passcode":"1234"}}"""
-        } }
+        val http = client { request, _ ->
+            when {
+                request.url.encodedPath.endsWith("/share") -> """{"data":{"task_id":"task"}}"""
+                request.url.encodedPath.endsWith("/task") -> """{"data":{"status":0,"task_status":2,"share_id":"id"}}"""
+                else -> """{"data":{"passcode":"1234"}}"""
+            }
+        }
         val features = CloudProviderFeatures.from(QuarkApiClient(http), "quark")
         assertEquals("https://pan.quark.cn/s/id", features.createShare(listOf(CloudRemoteFile("file", "文件", false)), CloudShareOptions("文件")).url)
         val failed = client { _, _ -> """{"data":{"status":0,"task_status":3}}""" }
@@ -255,7 +261,10 @@ class ProviderParityRegressionTest {
     @Test
     fun tianyiFolderRenameAndBatchMoveUseCorrectKindsAndWaitForEveryItem() = runBlocking {
         val http = client { request, text ->
-            val params = text.split('&').associate { pair -> val fields = pair.split('=', limit = 2); fields.first() to java.net.URLDecoder.decode(fields.getOrElse(1) { "" }, "UTF-8") }
+            val params = text.split('&').associate { pair ->
+                val fields = pair.split('=', limit = 2)
+                fields.first() to java.net.URLDecoder.decode(fields.getOrElse(1) { "" }, "UTF-8")
+            }
             when {
                 request.url.encodedPath.endsWith("renameFolder.action") -> {
                     assertEquals("folder", params["folderId"])
@@ -289,7 +298,9 @@ class ProviderParityRegressionTest {
             if (request.url.encodedPath.endsWith("/move")) {
                 assertEquals("drive", JSONObject(text).getString("to_drive_id"))
                 """{"async_task_id":"task"}"""
-            } else """{"state":"failed"}"""
+            } else {
+                """{"state":"failed"}"""
+            }
         }
         assertTrue(com.fluxplayer.app.core.data.aliyun.AliyunApiClient(ali).apply { driveId = "drive" }.moveFile("file", "target").isFailure)
     }
@@ -421,7 +432,7 @@ class ProviderParityRegressionTest {
                     else -> """{"status":200,"code":0,"data":{}}"""
                 }
             }
-            return QuarkApiClient(http).apply { setCookie("__uid=user;__pus=a;__puus=b") }
+            return QuarkApiClient(http).apply { setCookie("__uid=user-$downloadFid;__pus=a;__puus=b") }
         }
         // 快传三步：batch_send → acquire_dl_token → file/download
         assertEquals("https://cdn.example.test/a.mp4", api().getOriginalPlaybackUrl("f1", "a.mp4").getOrThrow())
@@ -452,10 +463,14 @@ class ProviderParityRegressionTest {
     @Test
     fun quarkAndUcPlaybackAuthAreIndependent() {
         quarkPlaybackAuth("quark").apply {
-            cookie = "quark-cookie"; isActive = true; referer = "https://pan.quark.cn/"
+            cookie = "quark-cookie"
+            isActive = true
+            referer = "https://pan.quark.cn/"
         }
         quarkPlaybackAuth("uc").apply {
-            cookie = "uc-cookie"; isActive = true; referer = "https://drive.uc.cn/"
+            cookie = "uc-cookie"
+            isActive = true
+            referer = "https://drive.uc.cn/"
         }
         // 两家各持一份，互相看不到对方的 Cookie
         assertEquals("quark-cookie", quarkPlaybackAuth("quark").getPlayHeaders()["Cookie"])

@@ -14,7 +14,7 @@ object CloudPlaylistCache {
 
     private val resolvedUrls = mutableMapOf<String, MutableMap<String, CachedUrl>>()
     private val fileMetadata = mutableMapOf<String, MutableMap<String, FileMetadata>>()
-    private const val URL_TTL_MS = 15 * 60 * 1000L  // 15 分钟
+    private const val URL_TTL_MS = 15 * 60 * 1000L // 15 分钟
 
     fun getResolvedUrl(provider: String, fileId: String): String? {
         val entry = resolvedUrls[provider]?.get(fileId) ?: return null
@@ -36,6 +36,10 @@ object CloudPlaylistCache {
 
     fun putFileMetadata(provider: String, fileId: String, metadata: FileMetadata) {
         fileMetadata.getOrPut(provider) { mutableMapOf() }[fileId] = metadata
+    }
+
+    fun clearResolvedUrls(provider: String) {
+        resolvedUrls.remove(provider)
     }
 
     fun clear() {
