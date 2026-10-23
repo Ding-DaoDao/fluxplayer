@@ -53,6 +53,7 @@ import com.fluxplayer.app.core.data.cloud.listSpace
 import com.fluxplayer.app.core.data.cloud.listSpaces
 import com.fluxplayer.app.core.data.cloud.resolveSpaceFile
 import com.fluxplayer.app.core.data.cloud.spaceFileUri
+import com.fluxplayer.app.core.ui.components.FluxLinearProgressIndicator
 import com.fluxplayer.app.core.data.quark.UcTvService
 import com.fluxplayer.app.core.model.WebDavResource
 import java.io.File
@@ -212,7 +213,8 @@ fun CloudFeaturesDialog(
     @Composable
     fun status() {
         if (busy) {
-            if (progress < 0) LinearProgressIndicator(Modifier.fillMaxWidth()) else LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+            // 与全站一致的加载动画：不确定进度用形状变换，确定进度仍用进度条
+            FluxLinearProgressIndicator(progress = progress.takeIf { it >= 0f }, modifier = Modifier.fillMaxWidth())
         }
         if (message.isNotBlank()) Text(message, Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodyMedium)
     }
@@ -316,7 +318,9 @@ fun CloudFeaturesDialog(
                     onDismiss()
                 }
             },
-            onClose = ::stopOrClose,
+            // 忙碌时返回即停止，不再放独立的「停止」按钮
+            onStop = { job?.cancel(); message = "已停止，请刷新网盘确认已完成的操作" },
+            onClose = { onDismiss() },
             toolbarActions = {
                 if (mode == "import" || mode == "spaces" && space != null) TextButton(enabled = !busy, onClick = { showSearch = true }) { Text("搜索") }
             },
@@ -511,7 +515,8 @@ fun CloudFeaturesDialog(
                     choosingTarget = false
                 }
             },
-            onClose = { if (!busy) choosingTarget = false },
+            onStop = { job?.cancel(); message = "已停止，请刷新网盘确认已完成的操作" },
+            onClose = { choosingTarget = false },
             bottomBar = {
                 Button(enabled = !busy, modifier = Modifier.fillMaxWidth().padding(20.dp), onClick = {
                     target = targetPath.last().first

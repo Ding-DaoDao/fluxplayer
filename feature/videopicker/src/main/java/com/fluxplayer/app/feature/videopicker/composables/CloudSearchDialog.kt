@@ -2,10 +2,12 @@ package com.fluxplayer.app.feature.videopicker.composables
 
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
@@ -21,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -31,6 +34,8 @@ import com.fluxplayer.app.core.data.cloud.CloudSearchProgress
 import com.fluxplayer.app.core.data.cloud.CloudRemoteFile
 import com.fluxplayer.app.core.data.cloud.searchCloudTree
 import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.ui.components.MediaLoadingIndicator
+import com.fluxplayer.app.core.ui.components.MediaPageLoading
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -98,7 +103,11 @@ internal fun CloudSearchDialog(
                 folders = previous
             } else if (folders.isNotEmpty()) folders = emptyList() else onDismiss()
         },
-        onClose = { if (busy) { job?.cancel(); message = "已停止搜索，保留已找到的结果" } else onDismiss() },
+        // 忙碌时返回即停止搜索，不放独立的「停止」按钮
+        onStop = { job?.cancel(); message = "已停止搜索，保留已找到的结果" },
+        onClose = onDismiss,
+        // 加载态由本页自己画（空结果用整页加载，有结果时用行内指示），避免两个动画
+        showBusyIndicator = false,
         bottomBar = {},
     ) {
         if (folders.isEmpty()) {
@@ -108,10 +117,30 @@ internal fun CloudSearchDialog(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { search() }),
                 trailingIcon = { TextButton(enabled = !busy && query.isNotBlank(), onClick = ::search) { Text("搜索") } },
             )
-            Text(if (busy) "已搜索 ${progress.folders} 个目录 · 找到 ${progress.hits.size} 项" else message.ifBlank { "输入关键词，开始搜索" }, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (busy) MediaLoadingIndicator(Modifier.size(16.dp))
+                Text(
+                    if (busy) "已搜索 ${progress.folders} 个目录 · 找到 ${progress.hits.size} 项" else message.ifBlank { "输入关键词，开始搜索" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         } else if (message.isNotBlank()) Text(message, Modifier.padding(20.dp))
         val shown = if (folders.isEmpty()) progress.hits.map { it.file to it.folderPath } else files.map { it to folders.joinToString(" / ") { entry -> entry.second } }
-        if (shown.isEmpty()) CloudFeatureEmptyState(if (busy) "正在查找文件" else if (folders.isNotEmpty()) "此目录暂无文件" else "暂无搜索结果", Modifier.weight(1f)) else LazyColumn(Modifier.weight(1f)) {
+        if (shown.isEmpty()) {
+            if (busy) {
+                // 与全站一致的形状变换加载动画（居中的页面级加载）
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    MediaPageLoading(if (folders.isEmpty()) "正在查找文件" else "正在读取目录")
+                }
+            } else {
+                CloudFeatureEmptyState(if (folders.isNotEmpty()) "此目录暂无文件" else "暂无搜索结果", Modifier.weight(1f))
+            }
+        } else LazyColumn(Modifier.weight(1f)) {
             items(shown, key = { "${it.first.parentId}/${it.first.id}" }) { (file, path) ->
                 Column {
                     CloudFeatureFileRow(

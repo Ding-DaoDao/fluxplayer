@@ -26,7 +26,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -47,6 +46,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.fluxplayer.app.core.data.cloud.CloudRemoteFile
 import com.fluxplayer.app.core.model.WebDavResource
+import com.fluxplayer.app.core.ui.components.FluxLinearProgressIndicator
 import com.fluxplayer.app.core.ui.components.MediaDropdownMenu
 import com.fluxplayer.app.core.ui.components.NextDialog
 import com.fluxplayer.app.core.ui.designsystem.NextIcons
@@ -94,15 +94,26 @@ internal fun CloudFeatureBrowser(
     busy: Boolean,
     onBack: () -> Unit,
     onClose: () -> Unit,
+    onStop: (() -> Unit)? = null,
+    /** 是否在内容顶部显示忙碌指示；页面自己要画加载态时可以关掉，避免出现两个动画。 */
+    showBusyIndicator: Boolean = true,
     bottomBar: @Composable () -> Unit,
     toolbarActions: @Composable () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // 忙碌时返回即停止（不再把返回吞掉），停止后回到当前页继续看结果
+    val handleBack = {
+        when {
+            busy && onStop != null -> onStop()
+            !busy -> onBack()
+            else -> Unit
+        }
+    }
     Dialog(
-        onDismissRequest = { if (!busy) onBack() },
+        onDismissRequest = handleBack,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        BackHandler { if (!busy) onBack() }
+        BackHandler(onBack = handleBack)
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                 Scaffold(
@@ -115,8 +126,12 @@ internal fun CloudFeatureBrowser(
                                     Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             },
-                            navigationIcon = { IconButton(onClick = onBack, enabled = !busy) { Icon(NextIcons.ArrowBack, "返回") } },
-                            actions = { toolbarActions(); TextButton(onClick = onClose) { Text(if (busy) "停止" else "关闭") } },
+                            navigationIcon = { IconButton(onClick = handleBack, enabled = !busy || onStop != null) { Icon(NextIcons.ArrowBack, "返回") } },
+                            actions = {
+                                toolbarActions()
+                                // 不放「停止」按钮：忙碌时用返回停止，空闲时只剩关闭
+                                if (!busy) TextButton(onClick = onClose) { Text("关闭") }
+                            },
                         )
                     },
                     bottomBar = {
@@ -129,7 +144,8 @@ internal fun CloudFeatureBrowser(
                     },
                 ) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding)) {
-                        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        // 加载动画与全站一致（形状变换），不再用 Material 细条
+                        if (busy && showBusyIndicator) FluxLinearProgressIndicator(Modifier.fillMaxWidth())
                         content()
                     }
                 }
