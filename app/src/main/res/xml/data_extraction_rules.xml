@@ -4,6 +4,8 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
+        <!-- 多账号配置文件名包含账号 ID，统一排除 SharedPreferences；主设置和历史使用 DataStore / Room。 -->
+        <exclude domain="sharedpref" path="."/>
         <exclude domain="sharedpref" path="openlist_prefs.xml"/>
         <exclude domain="sharedpref" path="alipan.xml"/>
         <exclude domain="sharedpref" path="cloud189.xml"/>
@@ -15,6 +17,8 @@
         <exclude domain="file" path="datastore/backup_webdav.json"/>
     </cloud-backup>
     <device-transfer>
+        <!-- 多账号配置文件名包含账号 ID，统一排除 SharedPreferences；主设置和历史使用 DataStore / Room。 -->
+        <exclude domain="sharedpref" path="."/>
         <exclude domain="sharedpref" path="openlist_prefs.xml"/>
         <exclude domain="sharedpref" path="alipan.xml"/>
         <exclude domain="sharedpref" path="cloud189.xml"/>

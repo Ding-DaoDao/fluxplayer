@@ -517,7 +517,7 @@
     <string name="resume_disabled_summary">每次从头开始播放</string>
     <string name="backup_contents_description">包含应用和播放器设置、听书目录、进度及在线书籍封面图片、WebDAV 账号、OpenList 数据及云盘登录信息。视频文件和视频播放历史不包含在内；备份 OpenList 数据前请停止其本地服务。</string>
     <string name="backup_export_local">导出备份文件</string>
-    <string name="backup_export_local_desc">选择保存位置，导出 ZIP 备份</string>
+    <string name="backup_export_local_desc">选择保存位置，导出密码加密备份</string>
     <string name="backup_automatic_section">自动备份与检查</string>
     <string name="backup_auto_local">自动备份到本地目录</string>
     <string name="backup_auto_local_desc">按下面的计划保存到所选目录；可与 WebDAV 自动备份同时开启</string>

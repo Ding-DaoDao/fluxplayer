@@ -407,7 +407,7 @@ fun CloudFeaturesDialog(
                                             val (id, url) = features.transferAndResolve(checkNotNull(session), file, target, forPlayback = media)
                                             onRefresh()
                                             if (media) {
-                                                val uri = Uri.Builder().scheme("cloud").authority(features.provider).appendPath(id).appendQueryParameter("extra_parent", target).appendQueryParameter("file_name", file.name).build()
+                                                val uri = Uri.Builder().scheme("cloud").authority(features.provider).appendQueryParameter("account", features.accountId).appendPath(id).appendQueryParameter("extra_parent", target).appendQueryParameter("file_name", file.name).build()
                                                 onPlay(uri, file.name)
                                             } else {
                                                 download(url, file)
@@ -445,7 +445,7 @@ fun CloudFeaturesDialog(
                 if (mode == "import") {
                     val (id, _) = features.transferAndResolve(checkNotNull(session), file, target)
                     onRefresh()
-                    Uri.Builder().scheme("cloud").authority(features.provider).appendPath(id).appendQueryParameter("extra_parent", target).appendQueryParameter("file_name", file.name).build()
+                    Uri.Builder().scheme("cloud").authority(features.provider).appendQueryParameter("account", features.accountId).appendPath(id).appendQueryParameter("extra_parent", target).appendQueryParameter("file_name", file.name).build()
                 } else {
                     features.spaceFileUri(checkNotNull(space), file)
                 }

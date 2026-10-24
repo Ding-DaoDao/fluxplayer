@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import com.fluxplayer.app.core.data.backup.BackupArchive
 import com.fluxplayer.app.core.data.backup.BackupExportResult
 import com.fluxplayer.app.core.data.backup.BackupManager
+import com.fluxplayer.app.core.data.backup.BackupPasswordInvalid
+import com.fluxplayer.app.core.data.backup.BackupPasswordRequired
 import com.fluxplayer.app.core.data.webdav.WebDavClient
 import com.fluxplayer.app.core.datastore.datasource.BackupWebDavDataSource
 import com.fluxplayer.app.core.datastore.datasource.WebDavServersDataSource
@@ -37,9 +39,11 @@ class BackupViewModel @Inject constructor(
     private val webDavServersDataSource: WebDavServersDataSource,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
-    private val state = MutableStateFlow(BackupUiState())
+    private val state = MutableStateFlow(BackupUiState(passwordConfigured = backupManager.hasBackupPassword()))
     val uiState: StateFlow<BackupUiState> = state.asStateFlow()
     val config = backupWebDavDataSource.config.stateIn(viewModelScope, SharingStarted.Eagerly, BackupWebDavConfig())
+    private var restoreUri: Uri? = null
+    private var restorePath: String? = null
     private var pendingArchive: BackupArchive? = null
     private var operation: Job? = null
 
@@ -52,6 +56,10 @@ class BackupViewModel @Inject constructor(
                 block()
             } catch (error: CancellationException) {
                 throw error
+            } catch (error: BackupPasswordRequired) {
+                state.update { it.copy(passwordRequired = restoreUri != null || restorePath != null, passwordSetupRequired = restoreUri == null && restorePath == null, passwordError = null) }
+            } catch (error: BackupPasswordInvalid) {
+                state.update { it.copy(passwordRequired = true, passwordError = error.message) }
             } catch (error: Exception) {
                 val message = appContext.getString(R.string.backup_operation_failed, error.message.orEmpty())
                 state.update { it.copy(errorMessage = message, operationError = message) }
@@ -149,17 +157,52 @@ class BackupViewModel @Inject constructor(
         state.update { it.copy(coverWarnings = emptyList()) }
     }
 
+    fun setBackupPassword(password: CharArray) {
+        execute {
+            try {
+                backupManager.setBackupPassword(password)
+            } finally {
+                password.fill('\u0000')
+            }
+            state.update { it.copy(passwordConfigured = true, passwordSetupRequired = false, successMessage = "备份密码已保存，新备份将使用此密码") }
+        }
+    }
+
     fun restoreBackup(uri: Uri) {
+        restoreUri = uri
+        restorePath = null
         execute { prepareRestore(backupManager.importFromUri(uri).getOrThrow()) }
     }
 
     fun restoreFromRemoteFile(path: String) {
+        restoreUri = null
+        restorePath = path
+        execute { prepareRestore(backupManager.downloadFromCloud(backupWebDavDataSource.config.first(), path).getOrThrow()) }
+    }
+
+    fun unlockBackup(password: CharArray) {
         execute {
-            prepareRestore(backupManager.downloadFromCloud(backupWebDavDataSource.config.first(), path).getOrThrow())
+            try {
+                val archive = restoreUri?.let { backupManager.importFromUri(it, password).getOrThrow() }
+                    ?: restorePath?.let { backupManager.downloadFromCloud(backupWebDavDataSource.config.first(), it, password).getOrThrow() }
+                    ?: error("请重新选择备份文件")
+                state.update { it.copy(passwordRequired = false, passwordError = null) }
+                prepareRestore(archive)
+            } finally {
+                password.fill('\u0000')
+            }
         }
     }
 
+    fun cancelPassword() {
+        restoreUri = null
+        restorePath = null
+        state.update { it.copy(passwordRequired = false, passwordSetupRequired = false, passwordError = null) }
+    }
+
     private fun prepareRestore(archive: BackupArchive) {
+        restoreUri = null
+        restorePath = null
         pendingArchive = archive
         state.update {
             it.copy(
@@ -219,6 +262,10 @@ class BackupViewModel @Inject constructor(
 }
 
 data class BackupUiState(
+    val passwordSetupRequired: Boolean = false,
+    val passwordConfigured: Boolean = false,
+    val passwordRequired: Boolean = false,
+    val passwordError: String? = null,
     val isLoading: Boolean = false,
     val successMessage: String? = null,
     val errorMessage: String? = null,

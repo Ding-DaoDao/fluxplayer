@@ -86,6 +86,7 @@ fun QuarkBrowserTabContent(
 
     Box(modifier = modifier.fillMaxSize()) {
         SharedCloudBrowserPanel(
+            onAccountChanged = viewModel::reloadAccount,
             modifier = Modifier.fillMaxSize(),
             items = state.items,
             breadcrumbs = state.breadcrumbs,

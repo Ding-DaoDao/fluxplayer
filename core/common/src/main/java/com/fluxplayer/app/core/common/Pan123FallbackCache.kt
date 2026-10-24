@@ -11,12 +11,12 @@ object Pan123FallbackCache {
     private val fallbackMap = mutableMapOf<String, String>()
 
     fun put(fileId: String, hlsUrl: String) {
-        fallbackMap[fileId] = hlsUrl
+        fallbackMap["${CloudAccountIdentity.cacheKey("pan123")}:$fileId"] = hlsUrl
     }
 
-    fun get(fileId: String): String? = fallbackMap[fileId]
+    fun get(fileId: String): String? = fallbackMap["${CloudAccountIdentity.cacheKey("pan123")}:$fileId"]
 
     fun remove(fileId: String) {
-        fallbackMap.remove(fileId)
+        fallbackMap.remove("${CloudAccountIdentity.cacheKey("pan123")}:$fileId")
     }
 }

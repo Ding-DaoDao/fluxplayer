@@ -19,6 +19,43 @@ import org.junit.Test
 
 class QuarkRangeHttpTest {
     @Test
+    fun browserSwitchDoesNotChangeOriginalAccountOnParallelHttpRequests() {
+        val identity = com.fluxplayer.app.core.common.CloudAccountIdentity
+        val previous = identity.active("quark")
+        identity.setActive("quark", "fixture-first")
+        try {
+            withServer(503) { server ->
+                val factory = AuthAwareDataSourceFactory(InstrumentationRegistry.getInstrumentation().context)
+                    .forCloudAccount("quark", "fixture-first")
+                identity.setActive("quark", "fixture-second")
+                QuarkAuthProvider.isActive = true
+                QuarkAuthProvider.cookie = "second-account-cookie"
+                val source = factory.createDataSource()
+                try {
+                    source.open(DataSpec(server.uri))
+                    val output = ByteArrayOutputStream()
+                    val buffer = ByteArray(32768)
+                    while (true) {
+                        val count = source.read(buffer, 0, buffer.size)
+                        if (count == C.RESULT_END_OF_INPUT) break
+                        output.write(buffer, 0, count)
+                    }
+                    assertArrayEquals(server.payload, output.toByteArray())
+                    assertTrue(server.requests.size >= 5)
+                    assertTrue(server.requests.all { it["cookie"] == "test-cookie" })
+                    assertEquals("fixture-second", identity.active("quark"))
+                } finally {
+                    source.close()
+                    QuarkAuthProvider.clear()
+                    identity.setActive("quark", "fixture-first")
+                }
+            }
+        } finally {
+            identity.setActive("quark", previous)
+        }
+    }
+
+    @Test
     fun actualHttpRangesPreserveAuthAndRecoverFromTemporaryFailure() {
         withServer(503) { server ->
             val source = AuthAwareDataSourceFactory(InstrumentationRegistry.getInstrumentation().context).createDataSource()

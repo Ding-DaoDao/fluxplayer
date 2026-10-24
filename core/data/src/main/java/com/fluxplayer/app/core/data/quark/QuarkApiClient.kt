@@ -4,6 +4,10 @@ import com.fluxplayer.app.core.common.CloudPlayHeaders
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import com.fluxplayer.app.core.data.GlobalCookieJar
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
+import com.fluxplayer.app.core.data.security.CloudSessionFence
+import com.fluxplayer.app.core.data.security.getSecret
+import com.fluxplayer.app.core.data.security.putSecret
 import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -25,16 +29,21 @@ class QuarkApiClient(
     client: OkHttpClient = CloudHttpClient.DEFAULT,
     /** 固定来源（"quark" / "uc"）。创建后不可变，避免同一实例被切来切去导致状态串号。 */
     val provider: String = "quark",
-) : BaseCloudApiClient(client) {
+) : BaseCloudApiClient(client.newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES).build()) {
     private val isUc: Boolean get() = provider == "uc"
 
     /** 本来源独立的播放鉴权状态，不再与另一家共用。 */
     private val auth: QuarkPlaybackAuth get() = quarkPlaybackAuth(provider)
 
     private var sessionContext: android.content.Context? = null
+    private var sessionRevision = CloudSessionFence.current(provider)
+    private var lastRefreshAttempt = 0L
+    private var sessionPreferences: android.content.SharedPreferences? = null
 
     fun configureSession(context: android.content.Context) {
         sessionContext = context.applicationContext
+        sessionPreferences = context.cloudPreferences(provider)
+        sessionRevision = CloudSessionFence.current(provider)
     }
 
     /**
@@ -70,7 +79,7 @@ class QuarkApiClient(
                             return url
                         }
                     }
-                } else if (context.getSharedPreferences("quark", android.content.Context.MODE_PRIVATE).getBoolean("prefer_original_playback", false)) {
+                } else if (context.cloudPreferences("quark", android.content.Context.MODE_PRIVATE).getBoolean("prefer_original_playback", false)) {
                     getOriginalPlaybackUrl(fid, name).getOrNull()?.let { return "$it#quarkPlay=true&quarkOriginal=true" }
                 }
             }
@@ -92,7 +101,30 @@ class QuarkApiClient(
     private val homeUrl: String get() = if (isUc) "https://drive.uc.cn/" else "https://pan.quark.cn/"
     private val pr: String get() = if (isUc) "UCBrowser" else "ucpro"
 
+    /** 候选 Cookie 通过已登录目录接口后才交给调用方保存，不改动现有账号。 */
+    suspend fun validateCookie(cookie: String): Result<String> = runCatching {
+        require(cookie.isNotBlank()) { "Cookie 不能为空" }
+        val revision = CloudSessionFence.current(provider)
+        val request = Request.Builder().url("$baseUrl/1/clouddrive/file/sort?pr=$pr&fr=pc&pdir_fid=0&_page=1&_size=1&_fetch_total=0")
+            .get().header("cookie", cookie).header("User-Agent", if (isUc) UC_PLAY_UA else QUARK_UA).header("referer", homeUrl).build()
+        executeRequestAndGetResponse(request).use { response ->
+            val json = JSONObject(response.body?.string().orEmpty())
+            CloudSessionFence.checkCurrent(provider, revision)
+            check(response.isSuccessful && json.optInt("code", -1) == 0 && json.optInt("status", 200) == 200 && json.optJSONObject("data") != null) { "Cookie 验证失败，请重新登录" }
+            val verified = QuarkCookieManager().apply { add(cookie) }
+            response.headers("set-cookie").forEach { raw ->
+                val pair = raw.substringBefore(';')
+                val name = pair.substringBefore('=').trim()
+                val value = pair.substringAfter('=', "").trim()
+                if (name in setOf("__pus", "__puus", "__pugs") && value.isNotBlank() && value.none { it.code < 32 || it.code == 127 }) verified.add(pair)
+            }
+            verified.get()
+        }
+    }
+
     fun setCookie(cookie: String) {
+        sessionRevision = CloudSessionFence.current(provider)
+        cookieManager.clear()
         cookieManager.add(cookie)
         val merged = cookieManager.get()
         // 只写本来源的鉴权状态，另一家不受影响
@@ -129,6 +161,7 @@ class QuarkApiClient(
 
     /** 清除内存中的 Cookie，防止退出后残留旧账号数据（来源本身不可变，无需重置） */
     fun clearCookie() {
+        CloudSessionFence.advance(provider)
         if (isUc) GlobalCookieJar.setUcCookie("") else GlobalCookieJar.setQuarkCookie("")
         cookieManager.clear()
         auth.clear()
@@ -147,7 +180,7 @@ class QuarkApiClient(
         )
     }
 
-    private fun updateCookieFromResponse(resp: okhttp3.Response, loginFailed: Boolean = false) {
+    private fun updateCookieFromResponse(resp: okhttp3.Response, loginFailed: Boolean = false, sentCookie: String = getCookie(), sentRevision: Long = sessionRevision) {
         val setCookies = resp.headers("set-cookie")
         if (setCookies.isEmpty()) return
         // 失败响应不写回会话（与 wenxi 一致），避免把过期/拒绝时下发的 cookie 存下来；
@@ -164,30 +197,72 @@ class QuarkApiClient(
             pair.takeIf { name in setOf("__pus", "__puus", "__pugs") && value.isNotEmpty() }
         }
         if (accepted.isEmpty()) return
-        accepted.forEach { cookieManager.add(it) }
-        val merged = cookieManager.get()
-        auth.cookie = merged
-        onCookieUpdated?.invoke(merged)
-        if (isUc) GlobalCookieJar.setUcCookie(merged) else GlobalCookieJar.setQuarkCookie(merged)
+        check(
+            CloudSessionFence.commit(provider, sentRevision) {
+                val prefs = sessionPreferences
+                // 另一请求已更新 Cookie 时，不让较早的响应覆盖它。
+                if (prefs != null && prefs.getSecret(provider, "cookie").orEmpty() != sentCookie) return@commit
+                if (getCookie() != sentCookie) return@commit
+                accepted.forEach { cookieManager.add(it) }
+                val merged = cookieManager.get()
+                if (prefs != null) {
+                    val editor = prefs.edit().putSecret(provider, "cookie", merged)
+                    if (accepted.any { it.startsWith("__puus=") }) editor.putLong("cookie_refreshed_at", System.currentTimeMillis())
+                    check(editor.commit()) { "保存网盘登录信息失败，请重试" }
+                }
+                auth.cookie = merged
+                onCookieUpdated?.invoke(merged)
+                if (isUc) GlobalCookieJar.setUcCookie(merged) else GlobalCookieJar.setQuarkCookie(merged)
+            },
+        ) { "网盘账号已变化，请重新操作" }
+    }
+
+    private suspend fun prepareCookie(): String {
+        CloudSessionFence.checkCurrent(provider, sessionRevision)
+        sessionPreferences?.let { prefs ->
+            val stored = prefs.getSecret(provider, "cookie").orEmpty()
+            check(stored.isNotBlank()) { "网盘账号已退出，请重新登录" }
+            if (stored != getCookie()) {
+                cookieManager.clear()
+                cookieManager.add(stored)
+            }
+            val now = System.currentTimeMillis()
+            if (now - prefs.getLong("cookie_refreshed_at", 0) >= 90 * 60 * 1000L && now - lastRefreshAttempt >= 30_000) {
+                try {
+                    refreshCookie(force = false)
+                } catch (_: java.io.IOException) { /* 暂时断网时保留已有会话，实际请求仍可重试。 */ }
+            }
+            val latest = prefs.getSecret(provider, "cookie").orEmpty()
+            if (latest != getCookie()) {
+                cookieManager.clear()
+                cookieManager.add(latest)
+            }
+        }
+        return getCookie()
     }
 
     private suspend fun apiGet(url: String, retry: Boolean = true, extraHeaders: Map<String, String> = emptyMap()): JSONObject {
+        val sentRevision = sessionRevision
+        val sentCookie = prepareCookie()
         val builder = Request.Builder().url(url).get()
         (buildHeaders() + extraHeaders).forEach { (k, v) -> builder.header(k, v) }
         val resp = executeRequestAndGetResponse(builder.build())
-        val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
+        val respBody = resp.use { it.body?.string() } ?: throw IllegalStateException("网盘响应为空")
+        CloudSessionFence.checkCurrent(provider, sentRevision)
         if (resp.code == 401 && retry && refreshCookie()) return apiGet(url, false, extraHeaders)
         if (!resp.isSuccessful) {
             throw IllegalStateException("HTTP ${resp.code} from $url: ${respBody.take(200)}")
         }
         val json = JSONObject(respBody)
         val loginFailed = json.optInt("code") == 31001 || json.optInt("status") == 401
-        updateCookieFromResponse(resp, loginFailed)
+        updateCookieFromResponse(resp, loginFailed, sentCookie, sentRevision)
         if (retry && loginFailed && refreshCookie()) return apiGet(url, false, extraHeaders)
         return json
     }
 
     private suspend fun apiPost(url: String, body: JSONObject? = null, retry: Boolean = true, extraHeaders: Map<String, String> = emptyMap()): JSONObject {
+        val sentRevision = sessionRevision
+        val sentCookie = prepareCookie()
         val builder = Request.Builder().url(url)
         if (body != null) {
             builder.post(body.toString().toRequestBody(jsonMediaType))
@@ -196,22 +271,33 @@ class QuarkApiClient(
         }
         (buildHeaders() + extraHeaders).forEach { (k, v) -> builder.header(k, v) }
         val resp = executeRequestAndGetResponse(builder.build())
-        val respBody = resp.body?.string() ?: throw IllegalStateException("Empty response from $url")
+        val respBody = resp.use { it.body?.string() } ?: throw IllegalStateException("网盘响应为空")
+        CloudSessionFence.checkCurrent(provider, sentRevision)
         if (resp.code == 401 && retry && refreshCookie()) return apiPost(url, body, false, extraHeaders)
         if (!resp.isSuccessful) {
             throw IllegalStateException("HTTP ${resp.code} from $url: ${respBody.take(200)}")
         }
         val json = JSONObject(respBody)
         val loginFailed = json.optInt("code") == 31001 || json.optInt("status") == 401
-        updateCookieFromResponse(resp, loginFailed)
+        updateCookieFromResponse(resp, loginFailed, sentCookie, sentRevision)
         if (retry && loginFailed && refreshCookie()) return apiPost(url, body, false, extraHeaders)
         return json
     }
 
-    private val cookieRefreshLock = kotlinx.coroutines.sync.Mutex()
+    private val cookieRefreshLock get() = CloudSessionFence.refreshMutex(provider)
 
-    private suspend fun refreshCookie(): Boolean = cookieRefreshLock.withLock {
-        val expected = getCookie()
+    private suspend fun refreshCookie(force: Boolean = true): Boolean = cookieRefreshLock.withLock {
+        val sentRevision = sessionRevision
+        CloudSessionFence.checkCurrent(provider, sessionRevision)
+        val prefs = sessionPreferences
+        val now = System.currentTimeMillis()
+        if (!force && prefs != null && now - prefs.getLong("cookie_refreshed_at", 0) < 90 * 60 * 1000L) return@withLock true
+        lastRefreshAttempt = now
+        val expected = prefs?.getSecret(provider, "cookie") ?: getCookie()
+        if (expected != getCookie()) {
+            cookieManager.clear()
+            cookieManager.add(expected)
+        }
         if (!expected.contains("__pus=")) return@withLock false
         val reduced = expected.split(';').filterNot { it.trim().startsWith("__puus=") }.joinToString(";")
         val request = Request.Builder().url("$baseUrl/1/clouddrive/config?pr=$pr&fr=pc")
@@ -220,8 +306,10 @@ class QuarkApiClient(
         response.use {
             check(getCookie() == expected) { "网盘账号已变化，请重新操作" }
             if (!it.isSuccessful || it.headers("set-cookie").isEmpty()) return@withLock false
-            updateCookieFromResponse(it)
-            true
+            val json = runCatching { JSONObject(it.body?.string().orEmpty()) }.getOrNull()
+            val loginFailed = json?.optInt("code") == 31001 || json?.optInt("status") == 401
+            updateCookieFromResponse(it, loginFailed, expected, sentRevision)
+            !loginFailed && getCookie() != expected
         }
     }
 

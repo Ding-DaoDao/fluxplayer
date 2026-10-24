@@ -28,6 +28,18 @@ class BackupArchiveTest {
     )
 
     @Test
+    fun completeProviderSessionMetadataSurvivesPlainBackupRoundTrip() {
+        val original = data.copy(
+            alipanConfig = com.fluxplayer.app.core.model.AlipanBackupConfig(devicePrivateKey = "private", expiresAt = 100, userId = "uid", deviceSessionExpiresAt = 200),
+            pan123Config = Pan123BackupConfig(token = "token", loginUuid = "uuid", refreshTokenExpireTime = 300, autoLoginBlocked = true),
+            quarkConfig = com.fluxplayer.app.core.model.QuarkBackupConfig(ucCookie = "cookie", tvAccessToken = "access", tvRefreshToken = "refresh", tvOwner = "owner", tvDevice = "device", tvExpiresAt = 400, tvGeneration = "generation"),
+            yun139Config = com.fluxplayer.app.core.model.Yun139BackupConfig(authorization = "auth", cookies = "cookie"),
+            cloud189Config = com.fluxplayer.app.core.model.Cloud189BackupConfig(username = "name", password = "password", autoLoginBlocked = true),
+        )
+        assertEquals(original, BackupArchiveCodec.decode(ByteArrayInputStream(BackupArchiveCodec.encode(BackupArchive(original)))).data)
+    }
+
+    @Test
     fun zipRoundTripPreservesSettingsAndBinaryOpenListData() {
         val binary = byteArrayOf(0, 1, -1, 4)
         val encoded = BackupArchiveCodec.encode(BackupArchive(data, mapOf("data.db" to binary)))

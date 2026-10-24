@@ -29,7 +29,7 @@ class VideoQualityCache @Inject constructor(
      * 缓存某个文件的清晰度选项
      */
     fun cacheQualityOptions(provider: String, fileId: String, videoName: String, options: List<QualityOption>) {
-        val key = "${provider}_$fileId"
+        val key = "${CloudAccountIdentity.cacheKey(provider)}_$fileId"
         val arr = JSONArray()
         options.forEach { opt ->
             arr.put(JSONObject().apply {
@@ -49,7 +49,7 @@ class VideoQualityCache @Inject constructor(
         if (options.isNotEmpty()) {
             val editor = prefs.edit()
             options.forEach { opt ->
-                val urlKey = "url_index_${provider}_${opt.url.hashCode()}"
+                val urlKey = "url_index_${CloudAccountIdentity.cacheKey(provider)}_${opt.url.hashCode()}"
                 editor.putString(urlKey, key)
             }
             editor.apply()
@@ -60,7 +60,7 @@ class VideoQualityCache @Inject constructor(
      * 获取缓存的清晰度选项
      */
     fun getQualityOptions(provider: String, fileId: String): List<QualityOption>? {
-        val key = "${provider}_$fileId"
+        val key = "${CloudAccountIdentity.cacheKey(provider)}_$fileId"
         val json = prefs.getString(key, null) ?: return null
         return parseOptions(json)
     }
@@ -70,7 +70,7 @@ class VideoQualityCache @Inject constructor(
      */
     fun getQualityOptionsByUrl(provider: String, playUrl: String): List<QualityOption>? {
         // 尝试通过 URL 哈希反向索引查找
-        val urlKey = "url_index_${provider}_${playUrl.hashCode()}"
+        val urlKey = "url_index_${CloudAccountIdentity.cacheKey(provider)}_${playUrl.hashCode()}"
         val cacheKey = prefs.getString(urlKey, null) ?: return null
         val json = prefs.getString(cacheKey, null) ?: return null
         return parseOptions(json)
@@ -102,7 +102,7 @@ class VideoQualityCache @Inject constructor(
      * 检查是否有缓存的画质选项（不解析完整数据，只判断 key 是否存在）
      */
     fun hasQualityOptions(provider: String, fileId: String): Boolean {
-        val key = "${provider}_$fileId"
+        val key = "${CloudAccountIdentity.cacheKey(provider)}_$fileId"
         return prefs.contains(key)
     }
 }

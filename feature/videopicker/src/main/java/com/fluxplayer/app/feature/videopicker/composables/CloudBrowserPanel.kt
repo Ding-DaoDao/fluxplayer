@@ -47,6 +47,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -129,15 +130,25 @@ fun <T> CloudBrowserPanel(
     currentFolderId: String = "",
     onPlayExtraFile: (android.net.Uri, String?) -> Unit = { _, _ -> },
     isCurrentDirectoryComplete: Boolean = false,
+    onAccountChanged: (() -> Unit)? = null,
 ) {
     // 从 navigationStack 或扁平参数获取当前目录状态
     val topEntry = navigationStack.lastOrNull()
     val curItems = topEntry?.items ?: items
     val curLoading = topEntry?.isLoading ?: isLoading
     val curError = topEntry?.error ?: error
+    var showAccounts by remember { mutableStateOf(false) }
+    val recoveryRequired by com.fluxplayer.app.core.data.cloud.CloudAccountStore.recoveryRequired.collectAsState()
+    val accountRevisions by com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.collectAsState()
+    val initialRevision = remember(cloudProviderKey) { accountRevisions[cloudProviderKey] ?: 0L }
+    val revision = accountRevisions[cloudProviderKey] ?: 0L
+    LaunchedEffect(revision, cloudProviderKey) {
+        if (revision != initialRevision) onAccountChanged?.invoke()
+    }
+    if (showAccounts) CloudAccountsDialog(cloudProviderKey) { showAccounts = false }
     var showExitConfirm by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
-    var featureAction by remember { mutableStateOf<CloudFeatureAction?>(null) }
+    var featureAction by remember(revision) { mutableStateOf<CloudFeatureAction?>(null) }
 
     val searchSession = providerFeatures?.searchSessionKey().orEmpty()
     var searchVisible by remember(searchSession, currentFolderId, isConfigured) { mutableStateOf(false) }
@@ -207,7 +218,10 @@ fun <T> CloudBrowserPanel(
         var isNearBottom by remember { mutableStateOf(false) }
         Column(modifier = Modifier.fillMaxSize()) {
             if (!isConfigured) {
-                Box(Modifier.weight(1f)) { loginContent() }
+                if (onAccountChanged != null) TextButton(onClick = { showAccounts = true }) { Text("账号管理与恢复") }
+                Box(Modifier.weight(1f)) {
+                    if (cloudProviderKey in recoveryRequired) Text("本地账号数据无法读取，请通过账号管理恢复。原数据已保留。", Modifier.padding(24.dp)) else key(revision) { loginContent() }
+                }
                 if (providerFeatures != null) {
                     TextButton(onClick = { featureAction = CloudFeatureAction.Import }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                         Text("浏览分享链接")
@@ -287,6 +301,11 @@ fun <T> CloudBrowserPanel(
                         onMenuClick = if ((onExitClick != null || providerFeatures != null) && !batchBusy) ({ showMenu = true }) else null,
                         onMenuDismiss = { showMenu = false },
                         menuContent = {
+                            if (onAccountChanged != null) DropdownMenuItem(
+                                text = { Text("账号管理与恢复") },
+                                onClick = { showMenu = false; showAccounts = true },
+                                enabled = !batchBusy,
+                            )
                             providerMenuItems.invoke({ showMenu = false })
                             if (providerFeatures != null) {
                                 HorizontalDivider()

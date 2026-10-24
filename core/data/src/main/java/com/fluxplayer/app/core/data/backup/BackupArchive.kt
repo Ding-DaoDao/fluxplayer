@@ -63,7 +63,7 @@ internal object BackupArchiveCodec {
         }
     }
 
-    /** 仅解析普通 ZIP 或 JSON 备份，不读取旧加密格式。 */
+    /** 解析解密后的 ZIP 内容，同时兼容旧版明文 JSON。 */
     fun decode(input: InputStream): BackupArchive = decodePlain(readLimited(input, MAX_ARCHIVE_BYTES))
 
     private fun decodePlain(bytes: ByteArray): BackupArchive {

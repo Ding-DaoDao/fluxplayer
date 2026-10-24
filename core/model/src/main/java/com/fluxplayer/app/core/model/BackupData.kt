@@ -21,6 +21,7 @@ data class BackupData(
     val yun139Config: Yun139BackupConfig? = null,
     val backupWebDavConfig: BackupWebDavConfig? = null,
     val onlineListeningLibrary: String? = null,
+    val cloudAccounts: String? = null,
 ) {
     companion object {
         const val CURRENT_VERSION = 3
@@ -41,6 +42,10 @@ data class AlipanBackupConfig(
     val deviceId: String? = null,
     val signature: String? = null,
     val cookies: String? = null,
+    val devicePrivateKey: String? = null,
+    val expiresAt: Long = 0,
+    val userId: String? = null,
+    val deviceSessionExpiresAt: Long = 0,
 )
 
 @Serializable
@@ -51,6 +56,9 @@ data class Cloud189BackupConfig(
     val refreshToken: String? = null,
     val expiresIn: Long = 0L,
     val cookies: String? = null,
+    val username: String? = null,
+    val password: String? = null,
+    val autoLoginBlocked: Boolean = false,
 )
 
 @Serializable
@@ -58,12 +66,24 @@ data class Pan123BackupConfig(
     val passport: String? = null,
     val password: String? = null,
     val token: String? = null,
+    val loginUuid: String? = null,
+    val refreshTokenExpireTime: Long = 0,
+    val autoLoginBlocked: Boolean = false,
+    val userId: String? = null,
 )
 
 @Serializable
 data class QuarkBackupConfig(
     val quarkCookie: String? = null,
     val ucCookie: String? = null,
+    val quarkRefreshedAt: Long = 0,
+    val ucRefreshedAt: Long = 0,
+    val tvAccessToken: String? = null,
+    val tvRefreshToken: String? = null,
+    val tvOwner: String? = null,
+    val tvDevice: String? = null,
+    val tvExpiresAt: Long = 0,
+    val tvGeneration: String? = null,
 )
 
 @Serializable
@@ -72,4 +92,5 @@ data class Yun139BackupConfig(
     val phoneNumber: String? = null,
     val userDomainId: String? = null,
     val lastRefresh: Long = 0L,
+    val cookies: String? = null,
 )

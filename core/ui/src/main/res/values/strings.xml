@@ -523,7 +523,7 @@
     <string name="resume_disabled_summary">Start from the beginning each time</string>
     <string name="backup_contents_description">Includes app and player settings, audiobook library, progress and online book cover images, WebDAV accounts, OpenList data and cloud sign-ins. Video files and video playback history are excluded. Stop the local OpenList service before backing up its data.</string>
     <string name="backup_export_local">Export backup file</string>
-    <string name="backup_export_local_desc">Choose a location to save a ZIP backup</string>
+    <string name="backup_export_local_desc">Choose a location to save a password-encrypted backup</string>
     <string name="backup_automatic_section">Automatic backup and checks</string>
     <string name="backup_auto_local">Automatically back up to the local folder</string>
     <string name="backup_auto_local_desc">Save to the chosen folder using the schedule below; can run alongside the WebDAV option</string>

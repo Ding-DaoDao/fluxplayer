@@ -60,11 +60,28 @@ class CloudAwareMediaSourceFactory(
     }
 
     fun disableCache() {
+        simpleCache = null
         cachedFactory = nonCachedFactory
     }
 
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
         val uri = mediaItem.localConfiguration?.uri ?: Uri.EMPTY
+        val ownerUri = Uri.parse(mediaItem.mediaId)
+        val ownerProvider = CloudUriScheme.getProvider(ownerUri)
+        if (ownerProvider != null && authAwareFactory is AuthAwareDataSourceFactory && uri.scheme in listOf("http", "https")) {
+            val account = ownerUri.getQueryParameter("account") ?: "legacy"
+            val scoped = authAwareFactory.forCloudAccount(ownerProvider, account)
+            val cache = simpleCache
+            val source: DataSource.Factory = if (cache != null) {
+                CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(scoped)
+                    .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                    .setCacheKeyFactory { spec -> "${mediaItem.mediaId}|${spec.uri.path}" }
+            } else scoped
+            val ownedFactory = DefaultMediaSourceFactory(source)
+            storedDrmSessionManagerProvider?.let { ownedFactory.setDrmSessionManagerProvider(it) }
+            storedLoadErrorHandlingPolicy?.let { ownedFactory.setLoadErrorHandlingPolicy(it) }
+            return ownedFactory.createMediaSource(mediaItem)
+        }
         Log.d(TAG, "createMediaSource: uri=$uri, fragment=${uri.fragment}, mediaId=${mediaItem.mediaId}")
 
         // 云盘 URI (cloud://) 理论上已被 MediaItemEnricher 预解析为 HTTP URL。

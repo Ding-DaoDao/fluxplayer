@@ -21,14 +21,14 @@ object CloudPlayHeaders {
     /** 不带来源的公共规则（其它四家网盘用这个，域名互不重叠）。 */
     private const val GLOBAL = ""
 
-    private val exactMatchers = mutableMapOf<Pair<String, String>, () -> Map<String, String>>()
-    private val suffixMatchers = mutableMapOf<Pair<String, String>, () -> Map<String, String>>()
+    private val exactMatchers = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, () -> Map<String, String>>()
+    private val suffixMatchers = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, () -> Map<String, String>>()
 
     /**
      * 明确「不需要任何认证头」的域名 → 注册它的来源。
      * 只有当前播放来源与注册来源一致时才算匿名。
      */
-    private val anonymousHosts = mutableMapOf<String, String>()
+    private val anonymousHosts = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     fun register(domain: String, headerProvider: () -> Map<String, String>) =
         registerFor(GLOBAL, domain, headerProvider)
@@ -38,7 +38,8 @@ object CloudPlayHeaders {
     }
 
     fun registerFor(provider: String, domain: String, headerProvider: () -> Map<String, String>) {
-        exactMatchers[provider to domain] = headerProvider
+        val owner = owner(provider)
+        exactMatchers[owner to domain] = bind(owner, headerProvider)
     }
 
     fun registerFor(provider: String, domain: String, headers: Map<String, String>) {
@@ -57,7 +58,8 @@ object CloudPlayHeaders {
     }
 
     fun registerSuffixFor(provider: String, suffix: String, headerProvider: () -> Map<String, String>) {
-        suffixMatchers[provider to normalizeSuffix(suffix)] = headerProvider
+        val owner = owner(provider)
+        suffixMatchers[owner to normalizeSuffix(suffix)] = bind(owner, headerProvider)
     }
 
     fun registerSuffixFor(provider: String, suffix: String, headers: Map<String, String>) {
@@ -65,28 +67,40 @@ object CloudPlayHeaders {
     }
 
     fun registerAnonymous(domain: String, provider: String) {
-        anonymousHosts[domain] = provider
+        anonymousHosts[domain] = owner(provider)
     }
 
     /** 只有当前播放来源与注册来源一致时才算明确匿名。 */
-    fun isExplicitlyAnonymous(domain: String): Boolean = anonymousHosts[domain] == activeProvider
+    fun isExplicitlyAnonymous(domain: String): Boolean = anonymousHosts[domain] == owner(CloudAccountIdentity.boundProvider() ?: activeProvider)
 
     fun getHeaders(domain: String): Map<String, String> {
         exactMatchers.entries
-            .filter { it.key.second == domain }
+            .filter { it.key.second == domain && eligible(it.key.first) }
             .minByOrNull { priority(it.key.first) }
             ?.let { return it.value.invoke() }
 
         return suffixMatchers.entries
-            .filter { domain.endsWith(it.key.second) }
+            .filter { domain.endsWith(it.key.second) && eligible(it.key.first) }
             .minWithOrNull(compareBy({ priority(it.key.first) }, { -it.key.second.length }))
             ?.value?.invoke()
             ?: emptyMap()
     }
 
-    /** 0 = 当前来源，1 = 公共规则，2 = 其它来源（兜底）。 */
-    private fun priority(provider: String): Int = when (provider) {
-        activeProvider -> 0
+    private fun owner(provider: String): String {
+        val effective = provider.ifBlank { CloudAccountIdentity.boundProvider() ?: activeProvider }
+        return if (effective.isBlank()) GLOBAL else "$effective@${CloudAccountIdentity.active(effective)}"
+    }
+    private fun bind(owner: String, headers: () -> Map<String, String>): () -> Map<String, String> {
+        if (owner == GLOBAL) return headers
+        val provider = owner.substringBefore('@')
+        val account = owner.substringAfter('@')
+        return { CloudAccountIdentity.runAs(provider, account, headers) }
+    }
+    private fun eligible(owner: String): Boolean = owner == GLOBAL ||
+        owner.substringAfter('@') == CloudAccountIdentity.active(owner.substringBefore('@'))
+
+    private fun priority(owner: String): Int = when (owner) {
+        owner(CloudAccountIdentity.boundProvider() ?: activeProvider) -> 0
         GLOBAL -> 1
         else -> 2
     }
@@ -99,8 +113,8 @@ object CloudPlayHeaders {
      */
     fun isSelfAuthenticatingUrl(url: String): Boolean {
         val uri = Uri.parse(url)
-        return uri.getQueryParameter("X-Amz-Algorithm") != null
-            || uri.getQueryParameter("OSSAccessKeyId") != null
+        return uri.getQueryParameter("X-Amz-Algorithm") != null ||
+            uri.getQueryParameter("OSSAccessKeyId") != null
     }
 
     fun clear() {

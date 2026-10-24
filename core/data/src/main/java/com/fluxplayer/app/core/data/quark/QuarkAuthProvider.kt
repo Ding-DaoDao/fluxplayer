@@ -46,11 +46,18 @@ internal const val UC_PLAY_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Apple
 
 /** 夸克的播放鉴权（与 UC 完全独立）。 */
 @Suppress("PropertyName")
-val QuarkAuthProvider = QuarkPlaybackAuth("https://drive.quark.cn/", QUARK_PLAY_UA)
+val QuarkAuthProvider: QuarkPlaybackAuth get() = quarkAccounts.current
 
 /** UC 的播放鉴权（与夸克完全独立）。 */
-val UcAuthProvider = QuarkPlaybackAuth("https://drive.uc.cn/", UC_PLAY_UA)
+val UcAuthProvider: QuarkPlaybackAuth get() = ucAccounts.current
 
 /** 按来源取对应的鉴权状态；provider 用 "uc" 之外的值一律当作夸克。 */
 fun quarkPlaybackAuth(provider: String): QuarkPlaybackAuth =
     if (provider == "uc") UcAuthProvider else QuarkAuthProvider
+
+private val quarkAccounts = com.fluxplayer.app.core.data.cloud.CloudAccountState("quark") { QuarkPlaybackAuth("https://drive.quark.cn/", QUARK_PLAY_UA) }
+private val ucAccounts = com.fluxplayer.app.core.data.cloud.CloudAccountState("uc") { QuarkPlaybackAuth("https://drive.uc.cn/", UC_PLAY_UA) }
+internal fun clearAllQuarkAccounts(provider: String? = null) {
+    if (provider == null || provider == "quark") quarkAccounts.clearAll()
+    if (provider == null || provider == "uc") ucAccounts.clearAll()
+}

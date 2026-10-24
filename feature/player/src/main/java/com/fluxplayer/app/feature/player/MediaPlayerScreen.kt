@@ -118,6 +118,7 @@ import java.io.File
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -249,9 +250,14 @@ fun MediaPlayerScreen(
         try {
             val uri = player.currentMediaItem?.localConfiguration?.uri ?: return@LaunchedEffect
             val uriStr = uri.toString()
+            val mediaId = player.currentMediaItem?.mediaId.orEmpty()
+            val ownerUri = android.net.Uri.parse(mediaId)
+            val ownerProvider = com.fluxplayer.app.core.common.CloudUriScheme.getProvider(ownerUri)
+            val ownerBindings = com.fluxplayer.app.core.common.CloudAccountIdentity.bindings.get().orEmpty() +
+                (ownerProvider?.let { mapOf(it to (ownerUri.getQueryParameter("account") ?: "legacy")) } ?: emptyMap())
             val playUrl = uriStr.substringBefore("#")
             // SharedPreferences 全量扫描 + JSON 解析在后台线程执行，避免阻塞主线程
-            val cachedOptions = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val cachedOptions = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default + com.fluxplayer.app.core.common.CloudAccountIdentity.bindings.asContextElement(ownerBindings)) {
                 val videoQualityCache = com.fluxplayer.app.core.common.VideoQualityCache(context.applicationContext)
                 val options = when {
                     uriStr.contains("#pan123Play=true#") ->
@@ -280,7 +286,7 @@ fun MediaPlayerScreen(
                         android.content.Context.MODE_PRIVATE,
                     )
                     prefs.all.entries
-                        .filter { it.key.startsWith("${provider}_") && !it.key.startsWith("url_index_") }
+                        .filter { it.key.startsWith("${com.fluxplayer.app.core.common.CloudAccountIdentity.cacheKey(provider)}_") && !it.key.startsWith("url_index_") }
                         .firstNotNullOfOrNull { (_, value) ->
                             try {
                                 val json = org.json.JSONObject(value as String)
@@ -732,7 +738,7 @@ fun MediaPlayerScreen(
                                                             val fileId = cloudMediaId.removePrefix("cloud://pan123/")
                                                                 .substringBefore("?")
                                                             val freshOptions = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                                viewModel.refreshPan123QualityUrls(fileId)
+                                                                viewModel.refreshPan123QualityUrls(fileId, android.net.Uri.parse(cloudMediaId).getQueryParameter("account") ?: "legacy")
                                                             }
                                                             val match = freshOptions?.find { it.label == option.label }
                                                             if (match != null) finalUri = match.uri

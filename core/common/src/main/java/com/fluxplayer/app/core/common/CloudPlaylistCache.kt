@@ -17,29 +17,29 @@ object CloudPlaylistCache {
     private const val URL_TTL_MS = 15 * 60 * 1000L // 15 分钟
 
     fun getResolvedUrl(provider: String, fileId: String): String? {
-        val entry = resolvedUrls[provider]?.get(fileId) ?: return null
+        val entry = resolvedUrls[CloudAccountIdentity.cacheKey(provider)]?.get(fileId) ?: return null
         if (System.currentTimeMillis() - entry.timestamp > URL_TTL_MS) {
-            resolvedUrls[provider]?.remove(fileId)
+            resolvedUrls[CloudAccountIdentity.cacheKey(provider)]?.remove(fileId)
             return null
         }
         return entry.url
     }
 
     fun putResolvedUrl(provider: String, fileId: String, url: String) {
-        resolvedUrls.getOrPut(provider) { mutableMapOf() }[fileId] =
+        resolvedUrls.getOrPut(CloudAccountIdentity.cacheKey(provider)) { mutableMapOf() }[fileId] =
             CachedUrl(url, System.currentTimeMillis())
     }
 
     fun getFileMetadata(provider: String, fileId: String): FileMetadata? {
-        return fileMetadata[provider]?.get(fileId)
+        return fileMetadata[CloudAccountIdentity.cacheKey(provider)]?.get(fileId)
     }
 
     fun putFileMetadata(provider: String, fileId: String, metadata: FileMetadata) {
-        fileMetadata.getOrPut(provider) { mutableMapOf() }[fileId] = metadata
+        fileMetadata.getOrPut(CloudAccountIdentity.cacheKey(provider)) { mutableMapOf() }[fileId] = metadata
     }
 
     fun clearResolvedUrls(provider: String) {
-        resolvedUrls.remove(provider)
+        resolvedUrls.remove(CloudAccountIdentity.cacheKey(provider))
     }
 
     fun clear() {

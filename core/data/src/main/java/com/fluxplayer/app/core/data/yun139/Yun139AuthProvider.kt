@@ -3,15 +3,49 @@ package com.fluxplayer.app.core.data.yun139
 import java.security.SecureRandom
 
 object Yun139AuthProvider {
-    @Volatile var authorization: String = ""
+    private class State {
+        @Volatile var authorization: String = ""
 
-    @Volatile var phoneNumber: String = ""
+        @Volatile var phoneNumber: String = ""
 
-    @Volatile var userDomainId: String = ""
+        @Volatile var userDomainId: String = ""
 
-    @Volatile var isActive: Boolean = false
+        @Volatile var isActive: Boolean = false
 
-    @Volatile var cookie: String = ""
+        @Volatile var cookie: String = ""
+    }
+    private val accounts = com.fluxplayer.app.core.data.cloud.CloudAccountState("yun139") { State() }
+    fun clearAll() = accounts.clearAll()
+
+    var authorization: String
+        get() = accounts.current.authorization
+        set(value) {
+            accounts.current.authorization = value
+        }
+
+    var phoneNumber: String
+        get() = accounts.current.phoneNumber
+        set(value) {
+            accounts.current.phoneNumber = value
+        }
+
+    var userDomainId: String
+        get() = accounts.current.userDomainId
+        set(value) {
+            accounts.current.userDomainId = value
+        }
+
+    var isActive: Boolean
+        get() = accounts.current.isActive
+        set(value) {
+            accounts.current.isActive = value
+        }
+
+    var cookie: String
+        get() = accounts.current.cookie
+        set(value) {
+            accounts.current.cookie = value
+        }
 
     val deviceInfo: String by lazy {
         generateDeviceInfo()

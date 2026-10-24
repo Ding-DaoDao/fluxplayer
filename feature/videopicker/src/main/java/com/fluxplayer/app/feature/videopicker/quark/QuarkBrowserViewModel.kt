@@ -1,5 +1,7 @@
 package com.fluxplayer.app.feature.videopicker.quark
 
+import kotlinx.coroutines.asContextElement
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
 import android.app.Application
 import android.content.Context
 import android.content.Intent
@@ -119,11 +121,15 @@ class QuarkBrowserViewModel @Inject constructor(
 
     // region ==================== 足迹 ====================
 
-    init {
+    private var accountRevisions = com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.value
+
+    init { observeHistory() }
+
+    private fun observeHistory() {
         viewModelScope.launch {
             playbackHistoryRepository.getAllHistoryFlow().collect { history ->
                 val latestPerDir = history
-                    .filter { it.parentPath != null }
+                    .filter { it.parentPath != null && com.fluxplayer.app.core.common.CloudAccountIdentity.isCurrentCloudUri(it.uriString) }
                     .groupBy { it.parentPath!! }
                     .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
                     .values.flatMap { item ->
@@ -145,31 +151,34 @@ class QuarkBrowserViewModel @Inject constructor(
     // region ==================== 登录 — loginWithCookie（含 driveType 和 cookie 验证） ====================
 
     fun loginWithCookie(cookie: String, driveType: String = "quark") {
-        if (driveType == "uc") com.fluxplayer.app.core.data.quark.UcTvService(getApplication()).clearAuthorization()
-        Log.d(TAG, "loginWithCookie: driveType=$driveType, cookie长度=${cookie.length}")
-        val prefName = if (driveType == "uc") UC_PREF_NAME else PREF_NAME
-        val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
-        prefs.edit().putSecret(prefName, "cookie", cookie).apply()
-
-        ensureClient(driveType)
-        apiClient.setCookie(cookie)
-        setupCookiePersistence(prefName)
-
-        // 注册缩略图 headers（浏览时 Coil 需要）。只写本来源的鉴权状态，
-        // 并用本次账号的头快照注册，不会影响另一家正在播放的请求。
-        val auth = quarkPlaybackAuth(driveType)
-        auth.cookie = cookie
-        auth.referer = if (driveType == "uc") "https://drive.uc.cn/" else "https://drive.quark.cn/"
-        auth.isActive = true
-        val headersSnapshot = apiClient.featureHeaders()
-        CloudPlayHeaders.registerSuffixFor(driveType, ".quark.cn", headersSnapshot)
-        if (driveType == "uc") {
-            CloudPlayHeaders.registerSuffixFor("uc", ".uc.cn", headersSnapshot)
+        val prefs = getApplication<Application>().cloudPreferences(driveType, Context.MODE_PRIVATE)
+        val revision = com.fluxplayer.app.core.data.security.CloudSessionFence.advance(driveType)
+        val candidate = QuarkApiClient(provider = driveType).apply { configureSession(getApplication()) }
+        val tv = if (driveType == "uc") com.fluxplayer.app.core.data.quark.UcTvService(getApplication()) else null
+        updateUiState { it.copy(isLoading = true, error = null) }
+        viewModelScope.launch {
+            val result = candidate.validateCookie(cookie)
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current(driveType) != revision) return@launch
+            result.fold(
+                onSuccess = { verified ->
+                    runCatching {
+                        check(com.fluxplayer.app.core.data.security.CloudSessionFence.commit(driveType, revision) {
+                            tv?.acceptWebCookie(verified)
+                            check(prefs.edit().putSecret(driveType, "cookie", verified).putLong("cookie_refreshed_at", System.currentTimeMillis()).commit()) { "保存登录信息失败" }
+                            candidate.setCookie(verified)
+                            apiClient = candidate
+                            val headers = candidate.featureHeaders()
+                            CloudPlayHeaders.registerSuffixFor(driveType, ".quark.cn", headers)
+                            if (driveType == "uc") CloudPlayHeaders.registerSuffixFor("uc", ".uc.cn", headers)
+                        }) { "网盘账号已变化，请重新登录" }
+                    }.onSuccess {
+                        updateUiState { it.copy(isLoggedIn = true, driveType = driveType) }
+                        loadDirectory("0")
+                    }.onFailure { error -> updateUiState { it.copy(isLoading = false, error = error.message) } }
+                },
+                onFailure = { error -> updateUiState { it.copy(isLoading = false, error = error.message) } },
+            )
         }
-
-        updateUiState { it.copy(isLoggedIn = true, driveType = driveType) }
-        Log.d(TAG, "loginWithCookie: 开始加载根目录")
-        loadDirectory("0")
     }
 
     // endregion
@@ -183,7 +192,7 @@ class QuarkBrowserViewModel @Inject constructor(
         Log.d(TAG, "setDriveType: type=$type, isSwitching=$isSwitching")
         ensureClient(type)
         val prefName = if (type == "uc") UC_PREF_NAME else PREF_NAME
-        val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
+        val prefs = getApplication<Application>().cloudPreferences(prefName, Context.MODE_PRIVATE)
         val cookie = prefs.getSecret(prefName, "cookie").orEmpty()
         // 切换 driveType 时重置状态，防止夸克/UC 之间数据泄漏
         if (isSwitching) {
@@ -192,7 +201,6 @@ class QuarkBrowserViewModel @Inject constructor(
         }
         if (cookie.isNotBlank()) {
             apiClient.setCookie(cookie)
-            setupCookiePersistence(prefName)
             // 注册缩略图 headers：只写本来源状态，用本次账号的头快照
             val auth = quarkPlaybackAuth(type)
             auth.cookie = cookie
@@ -217,24 +225,39 @@ class QuarkBrowserViewModel @Inject constructor(
 
     // region ==================== 登出 ====================
 
-    fun logout() {
+    fun reloadAccount() {
+        val provider = _uiState.value.driveType
+        val latest = com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.value
+        if ((latest[provider] ?: 0L) == (accountRevisions[provider] ?: 0L)) return
+        accountRevisions = latest
+        viewModelScope.coroutineContext[kotlinx.coroutines.Job]?.children?.filter { it !== downloadJob }?.forEach { it.cancel() }
+        resetAccount(true)
+        apiClient = QuarkApiClient(provider = provider).apply { configureSession(getApplication()) }
+        if (!com.fluxplayer.app.core.data.cloud.CloudAccountStore.consumeLogin(provider)) setDriveType(provider)
+        observeHistory()
+        observeAccountChanges()
+    }
+
+    fun logout() = resetAccount(false)
+
+    private fun resetAccount(keepCredentials: Boolean) {
         val driveType = _uiState.value.driveType
         val isUC = driveType == "uc"
 
         // 只清除当前云盘相关的 GlobalCookieJar、prefs、缓存
-        if (isUC) {
+        if (!keepCredentials && isUC) {
             GlobalCookieJar.clearHost("pc-api.uc.cn")
             GlobalCookieJar.clearHost("drive.uc.cn")
-        } else {
+        } else if (!keepCredentials) {
             GlobalCookieJar.clearHost("drive.quark.cn")
         }
 
         val prefName = if (isUC) UC_PREF_NAME else PREF_NAME
-        val prefs = getApplication<Application>().getSharedPreferences(prefName, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
-        apiClient.clearCookie()
+        val prefs = getApplication<Application>().cloudPreferences(prefName, Context.MODE_PRIVATE)
+        if (!keepCredentials) prefs.edit().clear().apply()
+        if (!keepCredentials) apiClient.clearCookie()
         // 只清本来源的播放鉴权，另一家仍在登录时不受影响
-        quarkPlaybackAuth(driveType).clear()
+        if (!keepCredentials) quarkPlaybackAuth(driveType).clear()
         directoryCache.clear()
         CloudDirectoryCache.clear(getApplication(), driveType)
 
@@ -615,13 +638,15 @@ class QuarkBrowserViewModel @Inject constructor(
         val res = _uiState.value.items.getOrNull(index) ?: return
         val provider = if (_uiState.value.driveType == "uc") "uc" else "quark"
 
+        val downloadOwner = com.fluxplayer.app.core.common.CloudAccountIdentity.active(provider)
+        val downloadClient = apiClient
         downloadJob?.cancel()
-        downloadJob = viewModelScope.launch {
+        downloadJob = viewModelScope.launch(com.fluxplayer.app.core.common.CloudAccountIdentity.bindings.asContextElement(mapOf(provider to downloadOwner))) {
             val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
                 val tv = com.fluxplayer.app.core.data.quark.UcTvService(getApplication())
                 val useTv = provider == "uc" && tv.isAuthorized()
-                val urlResult = if (useTv) runCatching { tv.download(res.path, res.size) } else apiClient.getDownloadUrl(res.path)
+                val urlResult = if (useTv) runCatching { tv.download(res.path, res.size) } else downloadClient.getDownloadUrl(res.path)
                 urlResult.fold(
                     onSuccess = { url ->
                         downloadContext.ensureActive()
@@ -631,7 +656,7 @@ class QuarkBrowserViewModel @Inject constructor(
                             url = url,
                             fileName = res.name,
                             // 用本账号客户端的头，而不是可能被另一家覆盖的全局值
-                            headers = if (useTv) emptyMap() else apiClient.featureHeaders(),
+                            headers = if (useTv) emptyMap() else downloadClient.featureHeaders(),
                             provider = provider,
                             onProgress = { event ->
                                 downloadContext.ensureActive()
@@ -728,17 +753,17 @@ class QuarkBrowserViewModel @Inject constructor(
         return crumbs
     }
 
-    /**
-     * 每次 API 响应可能携带 Set-Cookie 更新合并后的 cookie，
-     * 通过此回调实时写回 SharedPreferences，确保 CloudUriResolver 后续能读到最新 cookie。
-     */
-    private fun setupCookiePersistence(prefName: String) {
-        apiClient.onCookieUpdated = { mergedCookie ->
-            val prefs = getApplication<Application>()
-                .getSharedPreferences(prefName, Context.MODE_PRIVATE)
-            prefs.edit().putSecret(prefName, "cookie", mergedCookie).apply()
+    // endregion
+    // 账号在设置恢复或隐藏标签页期间变化时，也要刷新存活的浏览器实例。
+    private fun observeAccountChanges() {
+        viewModelScope.launch {
+            com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.collect { latest ->
+                val provider = _uiState.value.driveType
+                if ((latest[provider] ?: 0L) != (accountRevisions[provider] ?: 0L)) reloadAccount()
+            }
         }
     }
 
-    // endregion
+    init { observeAccountChanges() }
+
 }

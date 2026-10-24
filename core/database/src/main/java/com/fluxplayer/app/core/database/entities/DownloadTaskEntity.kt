@@ -1,5 +1,6 @@
 package com.fluxplayer.app.core.database.entities
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -20,6 +21,7 @@ data class DownloadTaskEntity(
     val downloadedBytes: Long = 0L,
     val status: DownloadStatus = DownloadStatus.PENDING,
     val provider: String = "",
+    @ColumnInfo(defaultValue = "'legacy'") val accountId: String = "legacy",
     val filePath: String? = null,
     val createdAt: Long,
     val completedAt: Long? = null,

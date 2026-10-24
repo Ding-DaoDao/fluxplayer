@@ -8,6 +8,9 @@ import com.fluxplayer.app.core.common.sanitizeUrl
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import com.fluxplayer.app.core.data.cloud.CloudListGate
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
+import com.fluxplayer.app.core.data.security.CloudSessionFence
+import com.fluxplayer.app.core.data.security.CloudTokenExpiry
 import com.fluxplayer.app.core.data.security.getSecret
 import com.fluxplayer.app.core.data.security.putSecret
 import java.util.UUID
@@ -120,8 +123,13 @@ class Pan123ApiClient(
     private var authToken: String? = null
     private var sessionPreferences: SharedPreferences? = null
 
+    private var accountId = com.fluxplayer.app.core.common.CloudAccountIdentity.active("pan123")
+    private fun checkAccount() {
+        check(accountId == com.fluxplayer.app.core.common.CloudAccountIdentity.active("pan123")) { "网盘账号已切换，请重新操作" }
+    }
     fun configureSession(context: Context) {
-        sessionPreferences = context.applicationContext.getSharedPreferences("pan123", Context.MODE_PRIVATE)
+        sessionPreferences = context.applicationContext.cloudPreferences("pan123", Context.MODE_PRIVATE)
+        accountId = com.fluxplayer.app.core.common.CloudAccountIdentity.active("pan123")
         val prefs = checkNotNull(sessionPreferences)
         if (prefs.getString("login_uuid", null).isNullOrBlank()) prefs.edit().putString("login_uuid", uuid).apply()
     }
@@ -149,6 +157,10 @@ class Pan123ApiClient(
     }
 
     private suspend fun webRequest(url: String, body: JSONObject? = null, retry: Boolean = true): JSONObject {
+        checkAccount()
+        val revision = CloudSessionFence.current("pan123")
+        val initial = authToken.orEmpty().removePrefix("Bearer ")
+        if (retry && sessionPreferences?.getSecret("pan123", "token")?.removePrefix("Bearer ") == initial && CloudTokenExpiry.needsRefresh(CloudTokenExpiry.fromToken(initial))) refreshSession(initial)
         val expected = authToken.orEmpty().removePrefix("Bearer ")
         val signature = Pan123WebSignature.sign(url.toHttpUrl().encodedPath, System.currentTimeMillis() / 1000, java.security.SecureRandom().nextInt(10_000_000))
         val request = Request.Builder().url(url).apply {
@@ -160,6 +172,7 @@ class Pan123ApiClient(
         val response = executeRequestAndGetResponse(request)
         val httpCode = response.code
         val text = response.use { it.body?.string() }.orEmpty()
+        CloudSessionFence.checkCurrent("pan123", revision)
         val json = try {
             JSONObject(text)
         } catch (error: Exception) {
@@ -174,6 +187,7 @@ class Pan123ApiClient(
     }
 
     private suspend fun refreshSession(expected: String): Boolean = sessionRefreshLock.withLock {
+        val revision = CloudSessionFence.current("pan123")
         val prefs = sessionPreferences ?: return@withLock false
         val stored = prefs.getSecret("pan123", "token").orEmpty().removePrefix("Bearer ")
         if (stored != expected) {
@@ -185,16 +199,23 @@ class Pan123ApiClient(
         val passport = prefs.getSecret("pan123", "passport").orEmpty()
         val password = prefs.getSecret("pan123", "password").orEmpty()
         if (passport.isBlank() || password.isBlank()) return@withLock false
-        val result = Pan123ApiClient().login(passport, password).getOrElse { error ->
+        val result = Pan123ApiClient(client).loginVerified(passport, password, prefs.getSecret("pan123", "user_id").orEmpty()).getOrElse { error ->
             if (error is kotlinx.coroutines.CancellationException) throw error
             // 自动登录失败后暂停重试，由用户重新登录恢复，防止反复提交旧密码。
-            if (prefs.getSecret("pan123", "token").orEmpty().removePrefix("Bearer ") == expected) prefs.edit().putBoolean("auto_login_blocked", true).apply()
+            CloudSessionFence.commit("pan123", revision) {
+                if (prefs.getSecret("pan123", "token").orEmpty().removePrefix("Bearer ") == expected) prefs.edit().putBoolean("auto_login_blocked", true).commit()
+            }
             throw IllegalStateException("123 自动登录失败，请重新登录", error)
         }
         check(prefs.getSecret("pan123", "token").orEmpty().removePrefix("Bearer ") == expected) { "123 账号已变化，请重新操作" }
-        prefs.edit().putSecret("pan123", "previous_token", expected).putSecret("pan123", "token", result.token).apply()
-        authToken = "Bearer ${result.token}"
-        Pan123AuthProvider.authorization = authToken.orEmpty()
+        check(
+            CloudSessionFence.commit("pan123", revision) {
+                check(prefs.getSecret("pan123", "token").orEmpty().removePrefix("Bearer ") == expected) { "123 账号已变化，请重新操作" }
+                check(prefs.edit().putSecret("pan123", "previous_token", expected).putSecret("pan123", "token", result.token).putLong("refresh_token_expire_time", result.refreshTokenExpireTime).putSecret("pan123", "user_id", result.userId).commit()) { "保存 123 登录信息失败" }
+                authToken = "Bearer ${result.token}"
+                Pan123AuthProvider.authorization = authToken.orEmpty()
+            },
+        ) { "123 账号已变化，请重新操作" }
         true
     }
 
@@ -276,6 +297,7 @@ class Pan123ApiClient(
     // region ==================== HTTP 请求 ====================
 
     private suspend fun apiPost(endpoint: String, body: JSONObject? = null): JSONObject {
+        checkAccount()
         val headers = buildHeaders()
         val requestBuilder = Request.Builder().url(endpoint)
         if (body != null) {
@@ -294,6 +316,7 @@ class Pan123ApiClient(
     }
 
     private suspend fun apiGet(endpoint: String): JSONObject {
+        checkAccount()
         val headers = buildHeaders()
         val requestBuilder = Request.Builder().url(endpoint).get()
         headers.forEach { (k, v) -> requestBuilder.header(k, v) }
@@ -320,7 +343,28 @@ class Pan123ApiClient(
     /**
      * 使用手机号+密码登录 123 云盘（Android APP API）
      */
+    suspend fun verifyImportedToken(token: String): Result<Pan123UserInfo> = runCatching {
+        val revision = CloudSessionFence.current("pan123")
+        setTokenDirectly(token)
+        val identity = getUserInfo().getOrThrow()
+        CloudSessionFence.checkCurrent("pan123", revision)
+        check(identity.uid > 0) { "123 未返回有效账号标识，请重新登录" }
+        identity
+    }
+
+    suspend fun loginVerified(passport: String, password: String, expectedUserId: String = ""): Result<LoginResult> = runCatching {
+        val revision = CloudSessionFence.current("pan123")
+        val result = login(passport, password).getOrThrow()
+        val identity = getUserInfo().getOrThrow()
+        CloudSessionFence.checkCurrent("pan123", revision)
+        check(identity.uid > 0) { "123 未返回有效账号标识，请重新登录" }
+        val userId = identity.uid.toString()
+        check(expectedUserId.isBlank() || expectedUserId == userId) { "123 登录账号校验不一致，请重新登录" }
+        result.copy(userId = userId)
+    }
+
     suspend fun login(passport: String, password: String): Result<LoginResult> = runCatching {
+        val loginRevision = CloudSessionFence.current("pan123")
         loadConfig().getOrThrow()
         val endpoint = apiEndpoint("login")
         val body = JSONObject().apply {
@@ -342,7 +386,7 @@ class Pan123ApiClient(
             throw IllegalStateException("登录响应中未找到token")
         }
         val refreshTokenExpireTime = data.optLong("refresh_token_expire_time", 0)
-        authToken = "Bearer $token"
+        check(CloudSessionFence.commit("pan123", loginRevision) { authToken = "Bearer $token" }) { "登录状态已改变，请重试" }
         LoginResult(token, refreshTokenExpireTime)
     }
 
@@ -725,7 +769,6 @@ class Pan123ApiClient(
         val endpoint = apiEndpoint("getUserInfo")
         Log.d(TAG, "getUserInfo resolved endpoint: $endpoint")
         val json = apiGet(endpoint)
-        Log.d(TAG, "getUserInfo response: $json")
         val data = json.optJSONObject("data") ?: throw IllegalStateException("No user data")
         val vipInfos = data.optJSONArray("UserVipDetailInfos")
         val firstVip = if (vipInfos != null && vipInfos.length() > 0) vipInfos.getJSONObject(0) else null

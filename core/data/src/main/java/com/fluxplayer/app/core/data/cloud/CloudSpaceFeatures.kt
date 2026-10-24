@@ -4,7 +4,7 @@ import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import org.json.JSONObject
 
 fun CloudProviderFeatures.spaceFileUri(space: CloudSpace, file: CloudRemoteFile): android.net.Uri =
-    android.net.Uri.Builder().scheme("cloud").authority(provider).appendPath(file.id)
+    android.net.Uri.Builder().scheme("cloud").authority(provider).appendQueryParameter("account", accountId).appendPath(file.id)
         .appendQueryParameter("space", space.id).appendQueryParameter("space_name", space.name)
         .appendQueryParameter("space_parent", file.parentId).appendQueryParameter("space_path", file.token)
         .appendQueryParameter("file_name", file.name).build()

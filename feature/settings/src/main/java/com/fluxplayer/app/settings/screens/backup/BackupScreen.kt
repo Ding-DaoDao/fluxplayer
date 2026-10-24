@@ -64,6 +64,9 @@ fun BackupScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val config by viewModel.config.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    var showPasswordSetup by remember { mutableStateOf(false) }
+    var backupPassword by remember { mutableStateOf("") }
+    var passwordConfirmation by remember { mutableStateOf("") }
     var showAccount by remember { mutableStateOf(false) }
     var showRemote by remember { mutableStateOf(false) }
     var showNewBackup by remember { mutableStateOf(false) }
@@ -72,7 +75,7 @@ fun BackupScreen(
     var showRetention by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf(BackupWebDavConfig()) }
     val chooseDirectory = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(viewModel::setLocalDirectory) }
-    val createFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) {
+    val createFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {
         it?.let(viewModel::createBackup)
     }
     val openFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
@@ -93,6 +96,48 @@ fun BackupScreen(
     }
     // 新的导入目标出现时清空密码输入（密码错误重试时目标不变，保留用户输入以便修改）
 
+    if (showPasswordSetup || state.passwordSetupRequired || state.passwordRequired) {
+        val restoring = state.passwordRequired
+        NextDialog(
+            onDismissRequest = {
+                if (!state.isLoading) {
+                    showPasswordSetup = false
+                    backupPassword = ""
+                    passwordConfirmation = ""
+                    viewModel.cancelPassword()
+                }
+            },
+            title = { Text(if (restoring) "解锁备份" else "设置备份密码") },
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(if (restoring) "请输入创建这份备份时使用的密码。" else "至少 8 位。本地、WebDAV 和自动备份均使用此密码。修改密码不会改变已有备份。")
+                    OutlinedTextField(value = backupPassword, onValueChange = { backupPassword = it }, label = { Text("备份密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                    if (!restoring) OutlinedTextField(value = passwordConfirmation, onValueChange = { passwordConfirmation = it }, label = { Text("确认密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                    state.passwordError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !state.isLoading && backupPassword.length >= 8 && (restoring || backupPassword == passwordConfirmation), onClick = {
+                    val password = backupPassword.toCharArray()
+                    if (restoring) viewModel.unlockBackup(password) else viewModel.setBackupPassword(password)
+                    if (!restoring) {
+                        showPasswordSetup = false
+                        backupPassword = ""
+                        passwordConfirmation = ""
+                    }
+                }) { Text(if (restoring) "解锁" else "保存") }
+            },
+            dismissButton = {
+                TextButton(enabled = !state.isLoading, onClick = {
+                    showPasswordSetup = false
+                    backupPassword = ""
+                    passwordConfirmation = ""
+                    viewModel.cancelPassword()
+                }) { Text("取消") }
+            },
+        )
+    }
+    LaunchedEffect(state.passwordRequired) { if (!state.passwordRequired) backupPassword = "" }
     FluxSettingsScaffold(
         title = stringResource(R.string.backup_and_restore),
         onNavigateUp = { if (!state.isLoading) onNavigateUp() },
@@ -106,6 +151,12 @@ fun BackupScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 12.dp),
+                )
+                ClickablePreferenceItem(
+                    title = "备份密码",
+                    description = if (state.passwordConfigured) "已设置 · 新备份将加密保存" else "先设置密码，再创建备份或启用自动备份",
+                    enabled = !state.isLoading,
+                    onClick = { showPasswordSetup = true },
                 )
                 ListSectionTitle(text = stringResource(R.string.backup_local_section))
                 ClickablePreferenceItem(
@@ -122,7 +173,7 @@ fun BackupScreen(
                     enabled = !state.isLoading,
                     isFirstItem = false,
                     onClick = {
-                        if (config.localDirectoryUri.isNotBlank()) viewModel.exportToLocalDirectory() else createFile.launch(config.generateBackupFileName())
+                        if (!state.passwordConfigured) showPasswordSetup = true else if (config.localDirectoryUri.isNotBlank()) viewModel.exportToLocalDirectory() else createFile.launch(config.generateBackupFileName())
                     },
                 )
                 HorizontalDivider()
@@ -156,7 +207,7 @@ fun BackupScreen(
                     title = stringResource(R.string.backup_upload_to_cloud),
                     description = stringResource(R.string.backup_upload_to_cloud_desc),
                     enabled = config.isConfigured && !state.isLoading,
-                    onClick = viewModel::uploadToCloud,
+                    onClick = { if (state.passwordConfigured) viewModel.uploadToCloud() else showPasswordSetup = true },
                 )
                 HorizontalDivider()
                 ClickablePreferenceItem(
@@ -178,7 +229,7 @@ fun BackupScreen(
                     enabled = config.localDirectoryUri.isNotBlank() && !state.isLoading,
                     isFirstItem = true,
                     onClick = {
-                        viewModel.updateConfigField { it.withLocalAutoBackup(!it.autoBackupToLocal) }
+                        if (!state.passwordConfigured && !config.autoBackupToLocal) showPasswordSetup = true else viewModel.updateConfigField { it.withLocalAutoBackup(!it.autoBackupToLocal) }
                     },
                 )
                 HorizontalDivider()
@@ -188,7 +239,7 @@ fun BackupScreen(
                     isChecked = config.autoBackupToRemote,
                     enabled = config.isConfigured && !state.isLoading,
                     onClick = {
-                        viewModel.updateConfigField { it.withRemoteAutoBackup(!it.autoBackupToRemote) }
+                        if (!state.passwordConfigured && !config.autoBackupToRemote) showPasswordSetup = true else viewModel.updateConfigField { it.withRemoteAutoBackup(!it.autoBackupToRemote) }
                     },
                 )
                 HorizontalDivider()

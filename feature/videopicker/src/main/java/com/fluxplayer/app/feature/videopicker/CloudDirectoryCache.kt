@@ -40,7 +40,7 @@ object CloudDirectoryCache {
      * 缓存目录列表到磁盘
      */
     fun put(context: Context, provider: String, fileId: String, items: List<WebDavResource>) {
-        val key = "dir_${provider}_${fileId}"
+        val key = "dir_${com.fluxplayer.app.core.common.CloudAccountIdentity.cacheKey(provider)}_${fileId}"
         val json = JSONArray()
         items.forEach { item ->
             json.put(
@@ -73,7 +73,7 @@ object CloudDirectoryCache {
      * @return 缓存的列表，无缓存时返回 null
      */
     fun get(context: Context, provider: String, fileId: String): List<WebDavResource>? {
-        val key = "dir_${provider}_${fileId}"
+        val key = "dir_${com.fluxplayer.app.core.common.CloudAccountIdentity.cacheKey(provider)}_${fileId}"
         val raw = ensurePrefs(context).getString(key, null) ?: return null
         return try {
             val envelope = JSONObject(raw)
@@ -109,7 +109,7 @@ object CloudDirectoryCache {
     fun clear(context: Context, provider: String) {
         val p = ensurePrefs(context)
         val editor = p.edit()
-        p.all.keys.filter { it.startsWith("dir_${provider}_") }
+        p.all.keys.filter { it.startsWith("dir_${com.fluxplayer.app.core.common.CloudAccountIdentity.cacheKey(provider)}_") }
             .forEach { editor.remove(it) }
         editor.apply()
     }

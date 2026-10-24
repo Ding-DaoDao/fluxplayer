@@ -27,14 +27,16 @@ import android.util.Log
  * **升级兼容**：识别 [SecureValueCodec.PREFIX] 前缀。旧明文照常读出，
  * 并在下次写入时自动变成密文，用户无感、无需重新登录。
  *
- * **不在本层的东西**：天翼云盘（`cloud189`）的凭证仍由它自己的 `C189AuthProvider` 明文管理，
- * 尚未迁移，所以别对 `cloud189` 用这两个扩展。
+ * 六家网盘均使用本入口；天翼旧明文在成功读取后迁移，备份恢复时重新加密。
  */
 object CredentialCrypto {
 
     private const val TAG = "CredentialCrypto"
 
-    private val codec = SecureValueCodec(AndroidKeystoreCredentialCipher()) { message, error ->
+    private val cipher = AndroidKeystoreCredentialCipher()
+    internal fun prepareForRecovery() = cipher.prepareForRecovery()
+
+    private val codec = SecureValueCodec(cipher) { message, error ->
         if (error == null) Log.w(TAG, message) else Log.w(TAG, message, error)
     }
 

@@ -47,6 +47,10 @@ class CloudProviderFeatures private constructor(
     private val searchAccount: () -> String = { "" },
     internal val manageFiles: suspend (List<CloudRemoteFile>, String?) -> Unit = { _, _ -> error("当前网盘不支持批量管理") },
 ) {
+    val accountId = com.fluxplayer.app.core.common.CloudAccountIdentity.active(provider)
+    internal fun checkAccount() {
+        check(accountId == com.fluxplayer.app.core.common.CloudAccountIdentity.active(provider)) { "账号已切换，请重新打开操作界面" }
+    }
     companion object {
         fun from(client: AliyunApiClient) = CloudProviderFeatures("alipan", { path, body, _, headers ->
             client.featureRequest(path, body ?: JSONObject(), headers)
@@ -159,7 +163,7 @@ class CloudProviderFeatures private constructor(
 
     /** 只暴露不可逆的账号空间摘要，不把令牌和 Cookie 写入历史键。 */
     fun searchSessionKey(): String = java.security.MessageDigest.getInstance("SHA-256")
-        .digest("$provider\u0000${searchAccount()}\u0000${driveId()}".toByteArray())
+        .digest("$provider\u0000$accountId\u0000${searchAccount()}\u0000${driveId()}".toByteArray())
         .joinToString("") { "%02x".format(it) }
 
     val rootId: String get() = when (provider) {
@@ -170,10 +174,12 @@ class CloudProviderFeatures private constructor(
     }
 
     suspend fun listFolders(parent: String): List<CloudRemoteFile> {
+        checkAccount()
         return listPersonalFiles(parent).filter { it.directory }
     }
 
     suspend fun listPersonalFiles(parent: String): List<CloudRemoteFile> {
+        checkAccount()
         val result = mutableListOf<CloudRemoteFile>()
         val seen = mutableSetOf<String>()
         for (page in 1..200) {
@@ -186,11 +192,12 @@ class CloudProviderFeatures private constructor(
         error("目录过大，请缩小范围")
     }
 
-    internal suspend fun post(path: String, body: JSONObject): JSONObject = call(path, body, emptyMap(), emptyMap())
-    internal suspend fun get(path: String, query: Map<String, String>, headers: Map<String, String> = emptyMap()): JSONObject = call(path, null, query, headers)
+    internal suspend fun post(path: String, body: JSONObject): JSONObject { checkAccount(); return call(path, body, emptyMap(), emptyMap()) }
+    internal suspend fun get(path: String, query: Map<String, String>, headers: Map<String, String> = emptyMap()): JSONObject { checkAccount(); return call(path, null, query, headers) }
     internal fun data(json: JSONObject): JSONObject = json.optJSONObject("data") ?: json
 
     suspend fun createShare(files: List<CloudRemoteFile>, options: CloudShareOptions): CloudCreatedShare {
+        checkAccount()
         require(files.isNotEmpty()) { "请先选择文件" }
         require(options.expiryDays == null || options.expiryDays > 0) { "分享有效期无效" }
         val ids = files.map { it.id }
@@ -274,6 +281,7 @@ class CloudProviderFeatures private constructor(
     }
 
     internal suspend fun pollTask(id: String): JSONObject {
+        checkAccount()
         repeat(40) { attempt ->
             val task = data(get("task", mapOf("task_id" to id, "retry_index" to attempt.toString())))
             val status = task.optInt("status", task.optInt("task_status", 0))
@@ -285,6 +293,7 @@ class CloudProviderFeatures private constructor(
     }
 
     suspend fun openShare(text: String, password: String): CloudShareSession {
+        checkAccount()
         legacyShare?.let { return it.open(text, password) }
         if (provider == "yun139") return mobileOpenShare(text, password)
         val domains = when (provider) {
@@ -322,6 +331,7 @@ class CloudProviderFeatures private constructor(
     }
 
     suspend fun listShare(session: CloudShareSession, parentId: String): List<CloudRemoteFile> {
+        checkAccount()
         legacyShare?.let { return it.list(session, parentId) }
         val result = mutableListOf<CloudRemoteFile>()
         val seen = mutableSetOf<String>()
@@ -405,6 +415,7 @@ class CloudProviderFeatures private constructor(
     }
 
     suspend fun saveShare(session: CloudShareSession, files: List<CloudRemoteFile>, target: String) {
+        checkAccount()
         require(files.isNotEmpty()) { "请选择文件" }
         legacyShare?.let {
             it.save(session, files, target)
@@ -466,6 +477,7 @@ class CloudProviderFeatures private constructor(
     }
 
     suspend fun upload(parent: String, source: CloudUploadSource) {
+        checkAccount()
         require(source.name.isNotBlank() && source.name.none { it == '/' || it == '\\' || it.code < 32 }) { "文件名称无效" }
         val id = CloudProviderUpload(this, httpClient).upload(parent, source)
         repeat(8) {
@@ -483,6 +495,7 @@ class CloudProviderFeatures private constructor(
 
     /** 用户明确选择转存后，从目标目录确认新增文件，再交给播放器。 */
     suspend fun transferAndResolve(session: CloudShareSession, file: CloudRemoteFile, target: String, forPlayback: Boolean = true): Pair<String, String> {
+        checkAccount()
         require(!file.directory) { "请选择文件" }
         val before = listPersonalFiles(target).map { it.id }.toSet()
         saveShare(session, listOf(file), target)
@@ -501,11 +514,13 @@ class CloudProviderFeatures private constructor(
     }
 
     suspend fun resolvePersonalFile(id: String, parent: String): String {
+        checkAccount()
         val file = listPersonalFiles(parent).singleOrNull { it.id == id && !it.directory } ?: error("文件已移动或删除，请重新从网盘打开")
         return resolvePersonal(file)
     }
 
     suspend fun resolvePersonalDownload(file: CloudRemoteFile): String {
+        checkAccount()
         require(!file.directory) { "文件夹不能直接下载" }
         val complete = if (provider == "pan123" && file.token.isBlank()) listPersonalFiles(file.parentId).single { it.id == file.id } else file
         return resolveDownload(complete)

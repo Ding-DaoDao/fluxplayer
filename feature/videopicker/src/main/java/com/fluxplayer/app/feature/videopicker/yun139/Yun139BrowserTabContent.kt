@@ -90,6 +90,7 @@ fun Yun139BrowserTabContent(
 
     Box(modifier = modifier.fillMaxSize()) {
         SharedCloudBrowserPanel(
+            onAccountChanged = viewModel::reloadAccount,
             modifier = Modifier.fillMaxSize(),
             items = state.items, breadcrumbs = state.breadcrumbs,
             isLoading = state.isLoading, isConfigured = state.isLoggedIn,

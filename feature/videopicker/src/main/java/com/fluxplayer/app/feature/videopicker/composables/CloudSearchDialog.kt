@@ -274,7 +274,7 @@ internal fun CloudSearchDialog(
                                             playLabel to {
                                                 run(replace = true) {
                                                     val uri = resolvePlay?.invoke(file) ?: kotlin.run {
-                                                        Uri.Builder().scheme("cloud").authority(features.provider).appendPath(file.id)
+                                                        Uri.Builder().scheme("cloud").authority(features.provider).appendQueryParameter("account", features.accountId).appendPath(file.id)
                                                             .appendQueryParameter("extra_parent", file.parentId).appendQueryParameter("file_name", file.name).build()
                                                     }
                                                     onPlay(uri, file.name)

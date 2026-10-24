@@ -1,5 +1,7 @@
 package com.fluxplayer.app.feature.videopicker.pan123
 
+import kotlinx.coroutines.asContextElement
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
 import android.app.Application
 import android.content.ClipboardManager
 import android.content.Context
@@ -67,7 +69,8 @@ class Pan123BrowserViewModel @Inject constructor(
 
     // region ==================== API Client ====================
 
-    val apiClient = Pan123ApiClient().apply { configureSession(application) }
+    var apiClient = Pan123ApiClient().apply { configureSession(application) }
+        private set
     private var cachedFileItems: List<Pan123FileItem> = emptyList()
     private var cachedShareFileItems: List<Pan123ShareFileItem> = emptyList()
 
@@ -117,11 +120,15 @@ class Pan123BrowserViewModel @Inject constructor(
 
     // region ==================== 足迹 ====================
 
-    init {
+    private var accountRevisions = com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.value
+
+    init { observeHistory() }
+
+    private fun observeHistory() {
         viewModelScope.launch {
             playbackHistoryRepository.getAllHistoryFlow().collect { history ->
                 val latestPerDir = history
-                    .filter { it.parentPath != null }
+                    .filter { it.parentPath != null && com.fluxplayer.app.core.common.CloudAccountIdentity.isCurrentCloudUri(it.uriString) }
                     .groupBy { it.parentPath!! }
                     .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
                     .values.flatMap { item ->
@@ -150,18 +157,19 @@ class Pan123BrowserViewModel @Inject constructor(
      * 自动恢复登录：先尝试 token，再尝试账号密码
      */
     private fun autoLogin() {
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val passport = prefs.getSecret(PREF_NAME, "passport").orEmpty()
         val password = prefs.getSecret(PREF_NAME, "password").orEmpty()
         val token = prefs.getSecret(PREF_NAME, "token").orEmpty()
         val expireTime = prefs.getLong("refresh_token_expire_time", 0)
         val now = System.currentTimeMillis() / 1000
+        val automaticLoginAllowed = !prefs.getBoolean("auto_login_blocked", false)
 
         // 优先使用 token 恢复
         if (token.isNotBlank()) {
             // token 过期且有账号密码时自动重新登录
-            if (now > expireTime && passport.isNotBlank() && password.isNotBlank()) {
-                login(passport, password)
+            if (automaticLoginAllowed && expireTime > 0 && now >= expireTime - 60 && passport.isNotBlank() && password.isNotBlank()) {
+                loginChecked(passport, password, prefs.getSecret(PREF_NAME, "user_id").orEmpty())
                 return
             }
             apiClient.setToken("Bearer $token")
@@ -173,8 +181,8 @@ class Pan123BrowserViewModel @Inject constructor(
             }
             Pan123AuthProvider.authorization = "Bearer $token"
             Pan123AuthProvider.isActive = true
-            CloudPlayHeaders.registerSuffix(".123pan.cn") { Pan123AuthProvider.getPlayHeaders() }
-            CloudPlayHeaders.registerSuffix("cjjd19.com") { Pan123AuthProvider.getPlayHeaders() }
+            CloudPlayHeaders.registerSuffixFor("pan123", ".123pan.cn") { Pan123AuthProvider.getPlayHeaders() }
+            CloudPlayHeaders.registerSuffixFor("pan123", "cjjd19.com") { Pan123AuthProvider.getPlayHeaders() }
             updateUiState { it.copy(isLoggedIn = true, isLoading = true, initializing = false) }
             syncStackTop { it.copy(isLoading = true, error = null) }
             // 从磁盘缓存预填根目录，加速子目录导航
@@ -188,8 +196,8 @@ class Pan123BrowserViewModel @Inject constructor(
         }
 
         // 尝试账号密码登录
-        if (passport.isNotBlank() && password.isNotBlank()) {
-            login(passport, password)
+        if (automaticLoginAllowed && passport.isNotBlank() && password.isNotBlank()) {
+            loginChecked(passport, password, prefs.getSecret(PREF_NAME, "user_id").orEmpty())
         } else {
             // 无任何保存的凭据，显示登录表单
             updateUiState { it.copy(initializing = false) }
@@ -198,31 +206,39 @@ class Pan123BrowserViewModel @Inject constructor(
 
     // endregion
 
-    // region ==================== 登录 — login(passport, password) ====================
+    // region ==================== 登录 — loginChecked(passport, password, prefs.getSecret(PREF_NAME, "user_id").orEmpty()) ====================
 
-    fun login(passport: String, password: String) {
+    fun login(passport: String, password: String) = loginChecked(passport, password, null)
+
+    private fun loginChecked(passport: String, password: String, expectedUserId: String?) {
+        val loginRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.advance("pan123")
+        val loginPreferences = getApplication<Application>().cloudPreferences(PREF_NAME)
         updateUiState { it.copy(isLoading = true) }
         viewModelScope.launch {
-            val result = apiClient.login(passport, password)
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("pan123") != loginRevision) return@launch
+            val result = apiClient.loginVerified(passport, password, expectedUserId.orEmpty())
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("pan123") != loginRevision) return@launch
             result.fold(
                 onSuccess = { loginResult ->
-                    val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                    val prefs = loginPreferences
                     prefs.edit()
                         .putSecret(PREF_NAME, "passport", passport)
                         .putSecret(PREF_NAME, "password", password)
                         .putSecret(PREF_NAME, "token", loginResult.token)
+                        .putSecret(PREF_NAME, "user_id", loginResult.userId)
                         .putBoolean("auto_login_blocked", false)
                         .remove("previous_token")
                         .putLong("refresh_token_expire_time", loginResult.refreshTokenExpireTime)
                         .apply()
                     Pan123AuthProvider.authorization = "Bearer ${loginResult.token}"
                     Pan123AuthProvider.isActive = true
-                    CloudPlayHeaders.registerSuffix(".123pan.cn") { Pan123AuthProvider.getPlayHeaders() }
-                    CloudPlayHeaders.registerSuffix("cjjd19.com") { Pan123AuthProvider.getPlayHeaders() }
+                    CloudPlayHeaders.registerSuffixFor("pan123", ".123pan.cn") { Pan123AuthProvider.getPlayHeaders() }
+                    CloudPlayHeaders.registerSuffixFor("pan123", "cjjd19.com") { Pan123AuthProvider.getPlayHeaders() }
                     updateUiState { it.copy(isLoading = false, isLoggedIn = true) }
                     loadDirectory("0")
                 },
                 onFailure = { e ->
+                    if (expectedUserId != null) loginPreferences.edit().putBoolean("auto_login_blocked", true).commit()
                     updateUiState {
                         it.copy(isLoading = false, initializing = false, error = "登录失败: ${e.message}")
                     }
@@ -241,48 +257,71 @@ class Pan123BrowserViewModel @Inject constructor(
             notifier.error("token 格式错误，应以 Bearer 开头")
             return
         }
-        apiClient.setTokenDirectly(trimmed)
-        // 预热 getconfig（写入静态缓存，后续播放无需再请求）
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME)
+        val revision = com.fluxplayer.app.core.data.security.CloudSessionFence.advance("pan123")
+        val candidate = Pan123ApiClient().apply { configureSession(getApplication()) }
+        updateUiState { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
-            try {
-                apiClient.loadConfig()
-            } catch (_: Exception) {}
+            val result = candidate.verifyImportedToken(trimmed)
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("pan123") != revision) return@launch
+            result.fold(
+                onSuccess = { identity ->
+                    runCatching {
+                        check(com.fluxplayer.app.core.data.security.CloudSessionFence.commit("pan123", revision) {
+                            val value = trimmed.removePrefix("Bearer ")
+                            check(prefs.edit().remove("passport").remove("password").remove("previous_token")
+                                .putSecret(PREF_NAME, "token", value).putSecret(PREF_NAME, "user_id", identity.uid.toString())
+                                .putBoolean("auto_login_blocked", false).putLong("refresh_token_expire_time", com.fluxplayer.app.core.data.security.CloudTokenExpiry.fromToken(value) / 1000).commit()) { "保存登录信息失败" }
+                            apiClient = candidate
+                            Pan123AuthProvider.authorization = trimmed
+                            Pan123AuthProvider.isActive = true
+                            CloudPlayHeaders.registerSuffixFor("pan123", ".123pan.cn") { Pan123AuthProvider.getPlayHeaders() }
+                            CloudPlayHeaders.registerSuffixFor("pan123", "cjjd19.com") { Pan123AuthProvider.getPlayHeaders() }
+                        }) { "网盘账号已变化，请重新登录" }
+                    }.onSuccess { updateUiState { it.copy(isLoggedIn = true) }; loadDirectory("0") }
+                        .onFailure { error -> updateUiState { it.copy(isLoading = false, error = error.message) } }
+                },
+                onFailure = { error -> updateUiState { it.copy(isLoading = false, initializing = false, error = error.message) } },
+            )
         }
-        val tokenValue = trimmed.removePrefix("Bearer ")
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .remove("passport")
-            .remove("password")
-            .putSecret(PREF_NAME, "token", tokenValue)
-            .apply()
-        Pan123AuthProvider.authorization = trimmed
-        Pan123AuthProvider.isActive = true
-        CloudPlayHeaders.registerSuffix(".123pan.cn") { Pan123AuthProvider.getPlayHeaders() }
-        CloudPlayHeaders.registerSuffix("cjjd19.com") { Pan123AuthProvider.getPlayHeaders() }
-        updateUiState { it.copy(isLoggedIn = true) }
-        viewModelScope.launch { loadDirectory("0") }
     }
 
     // endregion
 
     // region ==================== 登出 ====================
 
-    fun logout() {
+    fun reloadAccount() {
+        val provider = "pan123"
+        val latest = com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.value
+        if ((latest[provider] ?: 0L) == (accountRevisions[provider] ?: 0L)) return
+        accountRevisions = latest
+        viewModelScope.coroutineContext[kotlinx.coroutines.Job]?.children?.filter { it !== downloadJob }?.forEach { it.cancel() }
+        resetAccount(true)
+        apiClient = Pan123ApiClient().apply { configureSession(getApplication()) }
+        if (!com.fluxplayer.app.core.data.cloud.CloudAccountStore.consumeLogin(provider)) autoLogin()
+        observeHistory()
+        observeAccountChanges()
+    }
+
+    fun logout() = resetAccount(false)
+
+    private fun resetAccount(keepCredentials: Boolean) {
+        if (!keepCredentials) com.fluxplayer.app.core.data.security.CloudSessionFence.advance("pan123")
         loadDirectoryJob?.cancel()
         loadMoreJob?.cancel()
         loadSequence++
         loadingMore = false
-        Pan123AuthProvider.clear()
+        if (!keepCredentials) Pan123AuthProvider.clear()
 
         // 清除 OkHttp GlobalCookieJar 中旧账号的 Cookie
-        GlobalCookieJar.clearHost("api.123278.com")
-        GlobalCookieJar.clearHost("apigate.123795.com")
+        if (!keepCredentials) GlobalCookieJar.clearHost("api.123278.com")
+        if (!keepCredentials) GlobalCookieJar.clearHost("apigate.123795.com")
 
         // 重置 ApiClient 字段
         apiClient.setToken("")
 
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        if (!keepCredentials) prefs.edit().clear().apply()
         directoryCache.clear()
         directoryPaginationCache.clear()
         CloudDirectoryCache.clear(getApplication(), "pan123")
@@ -712,15 +751,17 @@ class Pan123BrowserViewModel @Inject constructor(
     fun downloadFile(index: Int) {
         val res = _uiState.value.items.getOrNull(index) ?: return
 
+        val fileItem = cachedFileItems.find { it.fileId == res.path } ?: return
+        val downloadOwner = com.fluxplayer.app.core.common.CloudAccountIdentity.active("pan123")
+        val downloadClient = apiClient
         downloadJob?.cancel()
-        downloadJob = viewModelScope.launch {
+        downloadJob = viewModelScope.launch(com.fluxplayer.app.core.common.CloudAccountIdentity.bindings.asContextElement(mapOf("pan123" to downloadOwner))) {
             val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
-                val fileItem = cachedFileItems.find { it.fileId == res.path } ?: return@launch
 
                 // 链式取下载链接：getFileDownloadInfo（完整请求体）→ 列表自带 downloadUrl
                 val downloadUrl: String
-                val infoResult = apiClient.getFileDownloadInfo(fileItem)
+                val infoResult = downloadClient.getFileDownloadInfo(fileItem)
                 downloadUrl = when {
                     infoResult.isSuccess && infoResult.getOrNull()!!.url.isNotBlank() ->
                         infoResult.getOrNull()!!.url
@@ -738,9 +779,8 @@ class Pan123BrowserViewModel @Inject constructor(
 
                 // 解析最终CDN下载地址并构建正确的下载Headers
                 // JS流程: HEAD跟随重定向 → 提取ref参数 → AES解密 → 得到Referer
-                val finalUrl = apiClient.resolveFinalDownloadUrl(downloadUrl)
-                val downloadHeaders = apiClient.buildDownloadHeaders(finalUrl)
-                Log.d(TAG, "下载: finalUrl=$finalUrl, headers=$downloadHeaders")
+                val finalUrl = downloadClient.resolveFinalDownloadUrl(downloadUrl)
+                val downloadHeaders = downloadClient.buildDownloadHeaders(finalUrl)
 
                 val completed = cloudDownloadRepository.download(
                     url = finalUrl,
@@ -1209,7 +1249,7 @@ class Pan123BrowserViewModel @Inject constructor(
             val text = clip.getItemAt(0).text?.toString() ?: return
             if (!apiClient.isShareUrl(text)) return
 
-            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val prefs = context.cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
             val lastHash = prefs.getString("lastClipboardShareHash", "") ?: ""
             val currentHash = text.hashCode().toString()
             if (lastHash == currentHash) return
@@ -1267,4 +1307,16 @@ class Pan123BrowserViewModel @Inject constructor(
     }
 
     // endregion
+    // 账号在设置恢复或隐藏标签页期间变化时，也要刷新存活的浏览器实例。
+    private fun observeAccountChanges() {
+        viewModelScope.launch {
+            com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.collect { latest ->
+                val provider = "pan123"
+                if ((latest[provider] ?: 0L) != (accountRevisions[provider] ?: 0L)) reloadAccount()
+            }
+        }
+    }
+
+    init { observeAccountChanges() }
+
 }

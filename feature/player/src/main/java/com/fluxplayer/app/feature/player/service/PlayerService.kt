@@ -508,7 +508,8 @@ class PlayerService : MediaSessionService() {
                 val provider = CloudUriScheme.getProvider(currentMediaItem.mediaId.toUri())
                 val fileId = CloudUriScheme.getFileId(currentMediaItem.mediaId.toUri())
                 if (provider == "pan123" && fileId != null) {
-                    val hlsUrl = Pan123FallbackCache.get(fileId)
+                    val owner = currentMediaItem.mediaId.toUri().getQueryParameter("account") ?: "legacy"
+                    val hlsUrl = com.fluxplayer.app.core.common.CloudAccountIdentity.runAs("pan123", owner) { Pan123FallbackCache.get(fileId) }
                     if (hlsUrl != null) {
                         Log.w(TAG, "onPlayerError: PAN123 HLS fallback - switching to HLS URL")
                         val newUri = hlsUrl + "#pan123Play=true#"

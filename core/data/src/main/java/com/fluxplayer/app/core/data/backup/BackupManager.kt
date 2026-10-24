@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
 import com.fluxplayer.app.core.data.aliyun.AliyunAuthProvider
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
 import com.fluxplayer.app.core.data.cloud189.C189AuthProvider
 import com.fluxplayer.app.core.data.openlist.OpenListManagerProvider
 import com.fluxplayer.app.core.data.openlist.OpenListServerState
@@ -53,6 +54,23 @@ class BackupManager @Inject constructor(
 ) {
     private val operationMutex = Mutex()
 
+    private val security get() = context.getSharedPreferences("backup_security", Context.MODE_PRIVATE)
+    fun hasBackupPassword(): Boolean = !security.getSecret("backup_security", "password").isNullOrBlank()
+    fun setBackupPassword(password: CharArray) {
+        require(password.size >= 8) { "备份密码至少 8 位" }
+        check(security.edit().putSecret("backup_security", "password", String(password)).commit()) { "保存备份密码失败" }
+    }
+    private fun encodeArchive(archive: BackupArchive): ByteArray {
+        val password = security.getSecret("backup_security", "password")?.toCharArray() ?: throw BackupPasswordRequired()
+        return try {
+            PasswordProtectedBackup.encrypt(BackupArchiveCodec.encode(archive), password)
+        } finally {
+            password.fill('\u0000')
+        }
+    }
+    private fun decodeArchive(bytes: ByteArray, password: CharArray?): BackupArchive =
+        ByteArrayInputStream(PasswordProtectedBackup.decrypt(bytes, password)).use { BackupArchiveCodec.decode(it) }
+
     /** 直接读取持久化设置，避免启动阶段的默认状态被误备份。 */
     private suspend fun createBackup(): BackupData = BackupData(
         appPreferences = audiobookProgressRepository.exportTo(appPreferencesDataSource.preferences.first()),
@@ -66,6 +84,7 @@ class BackupManager @Inject constructor(
         yun139Config = readYun139Config(),
         backupWebDavConfig = backupWebDavDataSource.config.first().copy(hasPendingNewBackup = false, lastSeenRemoteBackup = ""),
         onlineListeningLibrary = TingshuRepository.get(context).exportLibrary(),
+        cloudAccounts = com.fluxplayer.app.core.data.cloud.CloudAccountStore.exportData(context),
     )
 
     private suspend fun createArchive(): BackupArchive {
@@ -106,11 +125,16 @@ class BackupManager @Inject constructor(
                 backup.openListConfig?.let(::restoreOpenListConfig)
             }
             if ("cloud_credentials" !in ignoreList) {
-                backup.alipanConfig?.let(::restoreAlipanConfig)
-                backup.cloud189Config?.let(::restoreCloud189Config)
-                backup.pan123Config?.let(::restorePan123Config)
-                backup.quarkConfig?.let(::restoreQuarkConfig)
-                backup.yun139Config?.let(::restoreYun139Config)
+                if (backup.cloudAccounts != null) {
+                    com.fluxplayer.app.core.data.cloud.CloudAccountStore.importData(context, requireNotNull(backup.cloudAccounts))
+                } else {
+                    backup.alipanConfig?.let(::restoreAlipanConfig)
+                    backup.cloud189Config?.let(::restoreCloud189Config)
+                    backup.pan123Config?.let(::restorePan123Config)
+                    backup.quarkConfig?.let(::restoreQuarkConfig)
+                    backup.yun139Config?.let(::restoreYun139Config)
+                    com.fluxplayer.app.core.data.cloud.CloudAccountStore.notifyCredentialsRestored()
+                }
             }
             if ("backup_settings" !in ignoreList) {
                 backup.backupWebDavConfig?.let { restored ->
@@ -156,7 +180,7 @@ class BackupManager @Inject constructor(
         }
     }
 
-    /** 导出普通 ZIP 到用户选择的目录，无需备份密码。 */
+    /** 本地、远程和自动备份均使用同一个密码加密完整归档。 */
     suspend fun exportToDirectory(directory: Uri, fileName: String): BackupExportResult = withContext(Dispatchers.IO) {
         val parent = DocumentsContract.buildDocumentUriUsingTree(directory, DocumentsContract.getTreeDocumentId(directory))
         val target = checkNotNull(DocumentsContract.createDocument(context.contentResolver, parent, "application/zip", fileName)) { "无法在所选目录创建备份，请重新选择目录" }
@@ -171,7 +195,7 @@ class BackupManager @Inject constructor(
     suspend fun exportToUri(uri: Uri) = withContext(Dispatchers.IO) {
         operationMutex.withLock {
             val archive = createArchive()
-            val bytes = BackupArchiveCodec.encode(archive)
+            val bytes = encodeArchive(archive)
             val output = checkNotNull(context.contentResolver.openOutputStream(uri, "wt")) { "无法写入备份文件" }
             output.use {
                 it.write(bytes)
@@ -181,11 +205,21 @@ class BackupManager @Inject constructor(
         }
     }
 
-    /** 读取普通 ZIP 或 JSON 备份，不支持加密归档。 */
-    suspend fun importFromUri(uri: Uri): Result<BackupArchive> = withContext(Dispatchers.IO) {
+    /** 自动识别加密备份，并兼容旧版 ZIP 和 JSON。 */
+    suspend fun importFromUri(uri: Uri, password: CharArray? = null): Result<BackupArchive> = withContext(Dispatchers.IO) {
         backupResult {
             val input = checkNotNull(context.contentResolver.openInputStream(uri)) { "无法打开备份文件" }
-            input.use { BackupArchiveCodec.decode(it) }
+            input.use { stream ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = stream.read(buffer)
+                    if (count < 0) break
+                    require(output.size() + count <= 65 * 1024 * 1024 + 128) { "备份文件过大" }
+                    output.write(buffer, 0, count)
+                }
+                decodeArchive(output.toByteArray(), password)
+            }
         }
     }
 
@@ -195,7 +229,7 @@ class BackupManager @Inject constructor(
             operationMutex.withLock {
                 require(config.isConfigured) { "请先配置有效的 WebDAV 地址" }
                 val archive = createArchive()
-                val bytes = BackupArchiveCodec.encode(archive)
+                val bytes = encodeArchive(archive)
                 var folder = ""
                 config.subfolder.trim('/').split('/').filter { it.isNotBlank() }.forEach { part ->
                     require(part != "." && part != ".." && !part.contains('\\')) { "无效的 WebDAV 子文件夹" }
@@ -218,10 +252,11 @@ class BackupManager @Inject constructor(
     suspend fun downloadFromCloud(
         config: BackupWebDavConfig,
         path: String,
+        password: CharArray? = null,
     ): Result<BackupArchive> = withContext(Dispatchers.IO) {
         backupResult {
             val bytes = webDavRepository.downloadFile(config.url, path, config.basicAuthHeader).getOrThrow()
-            ByteArrayInputStream(bytes).use { BackupArchiveCodec.decode(it) }
+            decodeArchive(bytes, password)
         }
     }
 
@@ -306,7 +341,7 @@ class BackupManager @Inject constructor(
     // ==================== OpenList 配置 ====================
 
     private fun readOpenListConfig(): OpenListBackupConfig? {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = context.cloudPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val autoStart = prefs.getBoolean(PREF_AUTO_START, false)
         val password = prefs.getSecret(PREFS_NAME, PREF_PASSWORD)
         return if (prefs.contains(PREF_AUTO_START) || password != null) {
@@ -320,7 +355,7 @@ class BackupManager @Inject constructor(
     }
 
     private fun restoreOpenListConfig(config: OpenListBackupConfig) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = context.cloudPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         check(
             prefs.edit()
                 .putBoolean(PREF_AUTO_START, config.autoStart)
@@ -332,7 +367,7 @@ class BackupManager @Inject constructor(
     // ==================== 阿里云盘 ====================
 
     private fun readAlipanConfig(): AlipanBackupConfig? {
-        val prefs = context.getSharedPreferences(ALIPAN_PREFS, Context.MODE_PRIVATE)
+        val prefs = context.cloudPreferences(ALIPAN_PREFS, Context.MODE_PRIVATE)
         val auth = readCredential(prefs, ALIPAN_PREFS, "authorization")
         if (auth.isNullOrBlank()) return null
         // 读取 WebView Cookie（用于备份后恢复时自动续期）
@@ -347,7 +382,11 @@ class BackupManager @Inject constructor(
             refreshToken = readCredential(prefs, ALIPAN_PREFS, "refresh_token"),
             deviceId = readCredential(prefs, ALIPAN_PREFS, "device_id"),
             signature = readCredential(prefs, ALIPAN_PREFS, "signature"),
-            cookies = cookies,
+            cookies = cookies?.takeIf { it.isNotBlank() } ?: readCredential(prefs, ALIPAN_PREFS, "cookies"),
+            devicePrivateKey = readCredential(prefs, ALIPAN_PREFS, "device_private_key"),
+            expiresAt = prefs.getLong("expires_at", 0),
+            userId = readCredential(prefs, ALIPAN_PREFS, "user_id"),
+            deviceSessionExpiresAt = prefs.getLong("device_session_expires_at", 0),
         )
     }
 
@@ -361,6 +400,11 @@ class BackupManager @Inject constructor(
                 "device_id" to config.deviceId,
                 "signature" to config.signature,
                 "cookies" to config.cookies,
+                "device_private_key" to config.devicePrivateKey,
+                "expires_at" to config.expiresAt,
+                "user_id" to config.userId,
+                "device_session_expires_at" to config.deviceSessionExpiresAt,
+                "previous_authorization" to null,
             ),
         )
         // 恢复 WebView Cookie，以便 token 过期时通过 WebView 会话自动续期获取全权限 token
@@ -379,20 +423,24 @@ class BackupManager @Inject constructor(
     // ==================== 天翼云盘 ====================
 
     private fun readCloud189Config(): Cloud189BackupConfig? {
-        val prefs = context.getSharedPreferences(CLOUD189_PREFS, Context.MODE_PRIVATE)
-        val accessToken = prefs.getString("accessToken", null)
-        if (accessToken.isNullOrBlank() && prefs.getString("refreshToken", null).isNullOrBlank()) return null
+        val prefs = context.cloudPreferences(CLOUD189_PREFS, Context.MODE_PRIVATE)
+        val accessToken = readCredential(prefs, CLOUD189_PREFS, "accessToken")
+        if (accessToken.isNullOrBlank() && readCredential(prefs, CLOUD189_PREFS, "refreshToken").isNullOrBlank()) return null
         return Cloud189BackupConfig(
             accessToken = accessToken,
-            sessionKey = prefs.getString("sessionKey", null),
-            sessionSecret = prefs.getString("sessionSecret", null),
-            refreshToken = prefs.getString("refreshToken", null),
+            sessionKey = readCredential(prefs, CLOUD189_PREFS, "sessionKey"),
+            sessionSecret = readCredential(prefs, CLOUD189_PREFS, "sessionSecret"),
+            refreshToken = readCredential(prefs, CLOUD189_PREFS, "refreshToken"),
             expiresIn = prefs.getLong("expiresIn", 0),
-            cookies = prefs.getString("cookies", null),
+            cookies = readCredential(prefs, CLOUD189_PREFS, "cookies"),
+            username = readCredential(prefs, CLOUD189_PREFS, "username"),
+            password = readCredential(prefs, CLOUD189_PREFS, "password"),
+            autoLoginBlocked = prefs.getBoolean("auto_login_blocked", false),
         )
     }
 
     private fun restoreCloud189Config(config: Cloud189BackupConfig) {
+        C189AuthProvider.clear()
         saveCredentials(
             CLOUD189_PREFS,
             mapOf(
@@ -402,6 +450,9 @@ class BackupManager @Inject constructor(
                 "refreshToken" to config.refreshToken,
                 "expiresIn" to config.expiresIn,
                 "cookies" to config.cookies,
+                "username" to config.username,
+                "password" to config.password,
+                "auto_login_blocked" to config.autoLoginBlocked,
             ),
         )
         C189AuthProvider.familySessionKey = ""
@@ -420,40 +471,52 @@ class BackupManager @Inject constructor(
     // ==================== 123 云盘 ====================
 
     private fun readPan123Config(): Pan123BackupConfig? {
-        val prefs = context.getSharedPreferences(PAN123_PREFS, Context.MODE_PRIVATE)
+        val prefs = context.cloudPreferences(PAN123_PREFS, Context.MODE_PRIVATE)
         val token = readCredential(prefs, PAN123_PREFS, "token")
         if (token.isNullOrBlank()) return null
         return Pan123BackupConfig(
             passport = readCredential(prefs, PAN123_PREFS, "passport"),
             password = readCredential(prefs, PAN123_PREFS, "password"),
             token = token,
+            userId = readCredential(prefs, PAN123_PREFS, "user_id"),
+            loginUuid = prefs.getString("login_uuid", null),
+            refreshTokenExpireTime = prefs.getLong("refresh_token_expire_time", 0),
+            autoLoginBlocked = prefs.getBoolean("auto_login_blocked", false),
         )
     }
 
     private fun restorePan123Config(config: Pan123BackupConfig) {
-        saveCredentials(PAN123_PREFS, mapOf("passport" to config.passport, "password" to config.password, "token" to config.token))
+        saveCredentials(PAN123_PREFS, mapOf("user_id" to config.userId, "passport" to config.passport, "password" to config.password, "token" to config.token, "login_uuid" to config.loginUuid, "refresh_token_expire_time" to config.refreshTokenExpireTime, "auto_login_blocked" to config.autoLoginBlocked, "previous_token" to null))
     }
 
     // ==================== 夸克网盘（含 UC） ====================
 
     private fun readQuarkConfig(): QuarkBackupConfig? {
-        val quarkPrefs = context.getSharedPreferences(QUARK_PREFS, Context.MODE_PRIVATE)
-        val ucPrefs = context.getSharedPreferences(UC_PREFS, Context.MODE_PRIVATE)
+        val quarkPrefs = context.cloudPreferences(QUARK_PREFS, Context.MODE_PRIVATE)
+        val ucPrefs = context.cloudPreferences(UC_PREFS, Context.MODE_PRIVATE)
         val quarkCookie = readCredential(quarkPrefs, QUARK_PREFS, "cookie")
         val ucCookie = readCredential(ucPrefs, UC_PREFS, "cookie")
         if (quarkCookie.isNullOrBlank() && ucCookie.isNullOrBlank()) return null
-        return QuarkBackupConfig(quarkCookie = quarkCookie, ucCookie = ucCookie)
+        return QuarkBackupConfig(
+            quarkCookie = quarkCookie, ucCookie = ucCookie,
+            quarkRefreshedAt = quarkPrefs.getLong("cookie_refreshed_at", 0),
+            ucRefreshedAt = ucPrefs.getLong("cookie_refreshed_at", 0),
+            tvAccessToken = readCredential(ucPrefs, UC_PREFS, "tv_access_token"),
+            tvRefreshToken = readCredential(ucPrefs, UC_PREFS, "tv_refresh_token"),
+            tvOwner = ucPrefs.getString("tv_owner", null), tvDevice = ucPrefs.getString("tv_device", null),
+            tvExpiresAt = ucPrefs.getLong("tv_expires_at", 0), tvGeneration = ucPrefs.getString("tv_generation", null),
+        )
     }
 
     private fun restoreQuarkConfig(config: QuarkBackupConfig) {
-        config.quarkCookie?.let { saveCredentials(QUARK_PREFS, mapOf("cookie" to it)) }
-        config.ucCookie?.let { saveCredentials(UC_PREFS, mapOf("cookie" to it)) }
+        config.quarkCookie?.let { saveCredentials(QUARK_PREFS, mapOf("cookie" to it, "cookie_refreshed_at" to config.quarkRefreshedAt)) }
+        config.ucCookie?.let { saveCredentials(UC_PREFS, mapOf("cookie" to it, "cookie_refreshed_at" to config.ucRefreshedAt, "tv_access_token" to config.tvAccessToken, "tv_refresh_token" to config.tvRefreshToken, "tv_owner" to config.tvOwner, "tv_device" to config.tvDevice, "tv_expires_at" to config.tvExpiresAt, "tv_generation" to config.tvGeneration)) }
     }
 
     // ==================== Yun139 ====================
 
     private fun readYun139Config(): Yun139BackupConfig? {
-        val prefs = context.getSharedPreferences(YUN139_PREFS, Context.MODE_PRIVATE)
+        val prefs = context.cloudPreferences(YUN139_PREFS, Context.MODE_PRIVATE)
         val auth = readCredential(prefs, YUN139_PREFS, "authorization")
         if (auth.isNullOrBlank()) return null
         return Yun139BackupConfig(
@@ -461,6 +524,7 @@ class BackupManager @Inject constructor(
             phoneNumber = readCredential(prefs, YUN139_PREFS, "phoneNumber"),
             userDomainId = readCredential(prefs, YUN139_PREFS, "userDomainId"),
             lastRefresh = prefs.getLong("lastRefresh", 0),
+            cookies = readCredential(prefs, YUN139_PREFS, "cookies"),
         )
     }
 
@@ -472,9 +536,11 @@ class BackupManager @Inject constructor(
                 "phoneNumber" to config.phoneNumber,
                 "userDomainId" to config.userDomainId,
                 "lastRefresh" to config.lastRefresh,
+                "cookies" to config.cookies,
             ),
         )
         Yun139AuthProvider.authorization = config.authorization.orEmpty()
+        Yun139AuthProvider.cookie = config.cookies.orEmpty()
         Yun139AuthProvider.phoneNumber = config.phoneNumber.orEmpty()
         Yun139AuthProvider.userDomainId = config.userDomainId.orEmpty()
         Yun139AuthProvider.isActive = !config.authorization.isNullOrBlank()
@@ -485,7 +551,7 @@ class BackupManager @Inject constructor(
      *
      * 归档使用可恢复的凭证原值，不保存仅当前设备可解开的密文，
      * 所以这里要把落盘的密文解出来；恢复时再由 [saveCredentials] 重新加密写回。
-     * 未迁移的 scope（目前只有天翼 `cloud189`）按明文读。
+     * 六家网盘统一解密读取；旧明文仍按兼容规则读取。
      */
     private fun readCredential(prefs: SharedPreferences, scope: String, key: String): String? =
         if (shouldEncrypt(scope, key)) prefs.getSecret(scope, key) else prefs.getString(key, null)
@@ -496,7 +562,8 @@ class BackupManager @Inject constructor(
 
     /** 使用同步提交报告磁盘写入失败，并移除备份中缺失的旧账号字段。 */
     private fun saveCredentials(name: String, values: Map<String, Any?>) {
-        val editor = context.getSharedPreferences(name, Context.MODE_PRIVATE).edit()
+        com.fluxplayer.app.core.data.security.CloudSessionFence.advance(name)
+        val editor = context.cloudPreferences(name, Context.MODE_PRIVATE).edit()
         values.forEach { (key, value) ->
             when (value) {
                 null -> editor.remove(key)
@@ -507,6 +574,7 @@ class BackupManager @Inject constructor(
                         editor.putString(key, value)
                     }
                 is Long -> editor.putLong(key, value)
+                is Boolean -> editor.putBoolean(key, value)
             }
         }
         check(editor.commit()) { "保存账号配置失败" }
@@ -527,11 +595,11 @@ class BackupManager @Inject constructor(
 
         /**
          * 已迁移到 Android Keystore 加密存储的 prefs 文件（见 [CredentialCrypto]）。
-         * 天翼 `cloud189` 仍由自己的 `C189AuthProvider` 明文管理，暂不在列——**加进来之前
-         * 必须先把它的读写也迁移掉**，否则两边读法不一致会直接读不到凭证。
+         * 天翼读写和旧数据迁移已统一使用同一加密入口。
          */
         private val ENCRYPTED_SCOPES = setOf(
             ALIPAN_PREFS,
+            CLOUD189_PREFS,
             PAN123_PREFS,
             QUARK_PREFS,
             UC_PREFS,
@@ -540,6 +608,6 @@ class BackupManager @Inject constructor(
         )
 
         /** 非机密字段：多处按明文读写，保持原样，避免与既有读法不一致。 */
-        private val PLAINTEXT_KEYS = setOf("drive_id")
+        private val PLAINTEXT_KEYS = setOf("drive_id", "login_uuid", "tv_owner", "tv_device", "tv_generation")
     }
 }

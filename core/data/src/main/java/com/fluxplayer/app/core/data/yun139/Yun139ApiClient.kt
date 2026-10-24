@@ -2,9 +2,15 @@ package com.fluxplayer.app.core.data.yun139
 
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
+import com.fluxplayer.app.core.data.security.CloudSessionFence
+import com.fluxplayer.app.core.data.security.getSecret
+import com.fluxplayer.app.core.data.security.putSecret
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.ByteString.Companion.toByteString
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -17,6 +23,16 @@ class Yun139ApiClient(
         private const val BASE_URL = "https://personal-kd-njs.yun.139.com"
         private const val USER_BASE = "https://user-njs.yun.139.com"
         private val DEFAULT_UA = "okhttp/4.12.0"
+    }
+
+    private var preferences: android.content.SharedPreferences? = null
+    private var accountId = com.fluxplayer.app.core.common.CloudAccountIdentity.active("yun139")
+    private fun checkAccount() {
+        check(accountId == com.fluxplayer.app.core.common.CloudAccountIdentity.active("yun139")) { "网盘账号已切换，请重新操作" }
+    }
+    fun configureSession(context: android.content.Context) {
+        preferences = context.applicationContext.cloudPreferences("yun139", android.content.Context.MODE_PRIVATE)
+        accountId = com.fluxplayer.app.core.common.CloudAccountIdentity.active("yun139")
     }
 
     // region ==================== Auth helpers ====================
@@ -33,6 +49,7 @@ class Yun139ApiClient(
     }
 
     fun logout() {
+        CloudSessionFence.advance("yun139")
         Yun139AuthProvider.authorization = ""
         Yun139AuthProvider.phoneNumber = ""
         Yun139AuthProvider.userDomainId = ""
@@ -127,6 +144,10 @@ class Yun139ApiClient(
         body: JSONObject?,
         headers: Map<String, String>,
     ): JSONObject {
+        checkAccount()
+        val sentRevision = CloudSessionFence.current("yun139")
+        val sentAuthorization = headers.entries.firstOrNull { it.key.equals("authorization", true) }?.value
+        check(sentAuthorization == null || sentAuthorization == auth()) { "移动账号已变化，请重新操作" }
         val bodyStr = body?.toString() ?: ""
         val builder = Request.Builder().url(url)
             .post(bodyStr.toRequestBody(jsonMediaType))
@@ -146,6 +167,7 @@ class Yun139ApiClient(
                 response.body?.string() ?: error("移动云盘响应为空")
             }
         }
+        CloudSessionFence.checkCurrent("yun139", sentRevision)
         return JSONObject(text).also { com.fluxplayer.app.core.data.cloud.MobileCloudProtocol.checkResponse(it) }
     }
 
@@ -278,35 +300,44 @@ class Yun139ApiClient(
     // region ==================== Token 刷新 ====================
 
     suspend fun refreshToken(): Result<Unit> = runCatching {
-        val body = JSONObject().apply {
-            put("clientType", "414")
-        }
-        val loginHeaders = mapOf(
-            "x-nationcode" to "+86",
-            "x-nettype" to "1",
-            "x-deviceinfo" to devInfo(),
-            "x-yun-client-info" to devInfo(),
-            "x-yun-app-channel" to "10000023",
-            "x-huawei-channelsrc" to "10000023",
-            "x-mm-source" to "0000",
-            "x-svctype" to "1",
-            "content-type" to "application/json; charset=UTF-8",
-            "User-Agent" to DEFAULT_UA,
-            "authorization" to auth(),
-            "x-yun-uni" to uni(),
-        )
-        val json = apiPost("$USER_BASE/user/auth/refreshToken", body, loginHeaders)
-        val success = json.optBoolean("success", false) || json.optString("message", "") == "请求成功"
-        if (success) {
-            val token = json.optJSONObject("data")?.optString("token", "")
-                ?: json.optString("token", "")
-            if (token.isNotBlank()) {
-                val phone = Yun139AuthProvider.phoneNumber
-                val newAuth = "Basic " + android.util.Base64.encodeToString(
-                    "mobile:$phone:$token".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP,
-                )
-                Yun139AuthProvider.authorization = newAuth
+        val sentRevision = CloudSessionFence.current("yun139")
+        val expected = auth()
+        CloudSessionFence.refreshMutex("yun139").withLock {
+            CloudSessionFence.checkCurrent("yun139", sentRevision)
+            if (auth() != expected) return@withLock
+            val phone = Yun139AuthProvider.phoneNumber
+            val body = JSONObject().apply {
+                put("clientType", "414")
             }
+            val loginHeaders = mapOf(
+                "x-nationcode" to "+86",
+                "x-nettype" to "1",
+                "x-deviceinfo" to devInfo(),
+                "x-yun-client-info" to devInfo(),
+                "x-yun-app-channel" to "10000023",
+                "x-huawei-channelsrc" to "10000023",
+                "x-mm-source" to "0000",
+                "x-svctype" to "1",
+                "content-type" to "application/json; charset=UTF-8",
+                "User-Agent" to DEFAULT_UA,
+                "authorization" to auth(),
+                "x-yun-uni" to uni(),
+            )
+            val json = apiPost("$USER_BASE/user/auth/refreshToken", body, loginHeaders)
+            val token = json.optJSONObject("data")?.optString("token").orEmpty().ifBlank { json.optString("token") }
+            check(token.isNotBlank()) { "移动未返回续期凭据，请重新登录" }
+            val newAuth = "Basic " + "mobile:$phone:$token".toByteArray(Charsets.UTF_8).toByteString().base64()
+            check(
+                CloudSessionFence.commit("yun139", sentRevision) {
+                    check(auth() == expected) { "移动账号已变化，请重新操作" }
+                    val prefs = preferences
+                    if (prefs != null) {
+                        check(prefs.getSecret("yun139", "authorization") == expected) { "移动账号已退出，请重新登录" }
+                        check(prefs.edit().putSecret("yun139", "authorization", newAuth).putLong("lastRefresh", System.currentTimeMillis()).commit()) { "保存移动登录信息失败" }
+                    }
+                    Yun139AuthProvider.authorization = newAuth
+                },
+            ) { "移动账号已退出或发生变化" }
         }
     }
 

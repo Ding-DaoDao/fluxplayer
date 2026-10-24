@@ -1,5 +1,7 @@
 package com.fluxplayer.app.feature.videopicker.yun139
 
+import kotlinx.coroutines.asContextElement
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
 import android.app.Application
 import android.content.Context
 import android.content.Intent
@@ -65,7 +67,8 @@ class Yun139BrowserViewModel @Inject constructor(
 
     // region ==================== API Client ====================
 
-    val apiClient = Yun139ApiClient()
+    var apiClient = Yun139ApiClient().apply { configureSession(getApplication()) }
+        private set
 
     // endregion
 
@@ -109,11 +112,15 @@ class Yun139BrowserViewModel @Inject constructor(
 
     // region ==================== 足迹 ====================
 
-    init {
+    private var accountRevisions = com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.value
+
+    init { observeHistory() }
+
+    private fun observeHistory() {
         viewModelScope.launch {
             playbackHistoryRepository.getAllHistoryFlow().collect { history ->
                 val latestPerDir = history
-                    .filter { it.parentPath != null }
+                    .filter { it.parentPath != null && com.fluxplayer.app.core.common.CloudAccountIdentity.isCurrentCloudUri(it.uriString) }
                     .groupBy { it.parentPath!! }
                     .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
                     .values.flatMap { item ->
@@ -143,7 +150,7 @@ class Yun139BrowserViewModel @Inject constructor(
     }
 
     private fun autoLogin() {
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val authorization = prefs.getSecret(PREF_NAME, "authorization").orEmpty()
         val phoneNumber = prefs.getSecret(PREF_NAME, "phoneNumber").orEmpty()
         val userDomainId = prefs.getSecret(PREF_NAME, "userDomainId").orEmpty()
@@ -156,8 +163,8 @@ class Yun139BrowserViewModel @Inject constructor(
         apiClient.setToken(authorization, phoneNumber, userDomainId)
         Yun139AuthProvider.authorization = authorization
         Yun139AuthProvider.isActive = true
-        CloudPlayHeaders.registerSuffix(".139.com") { Yun139AuthProvider.getPlayHeaders() }
-        CloudPlayHeaders.registerSuffix("cmecloud.cn") { Yun139AuthProvider.getPlayHeaders() }
+        CloudPlayHeaders.registerSuffixFor("yun139", ".139.com") { Yun139AuthProvider.getPlayHeaders() }
+        CloudPlayHeaders.registerSuffixFor("yun139", "cmecloud.cn") { Yun139AuthProvider.getPlayHeaders() }
         updateUiState { it.copy(isLoggedIn = true, isLoading = true) }
         syncStackTop { it.copy(isLoading = true, error = null) }
         // 从磁盘缓存预填根目录，加速子目录导航
@@ -170,13 +177,7 @@ class Yun139BrowserViewModel @Inject constructor(
             viewModelScope.launch {
                 try {
                     val refreshResult = apiClient.refreshToken()
-                    if (refreshResult.isSuccess) {
-                        prefs.edit()
-                            .putSecret(PREF_NAME, "authorization", Yun139AuthProvider.authorization)
-                            .putLong("lastRefresh", System.currentTimeMillis())
-                            .apply()
-                        Log.d(TAG, "token auto-refreshed")
-                    }
+                    if (refreshResult.isSuccess) Log.d(TAG, "移动登录状态续期完成")
                 } catch (_: Exception) {}
             }
         }
@@ -199,13 +200,14 @@ class Yun139BrowserViewModel @Inject constructor(
                 Base64.NO_WRAP,
             )
 
+            com.fluxplayer.app.core.data.security.CloudSessionFence.advance("yun139")
             apiClient.setToken(tokenValue, phoneNumber, userDomainId)
             Yun139AuthProvider.authorization = tokenValue
             Yun139AuthProvider.isActive = true
-            CloudPlayHeaders.registerSuffix(".139.com") { Yun139AuthProvider.getPlayHeaders() }
-            CloudPlayHeaders.registerSuffix("cmecloud.cn") { Yun139AuthProvider.getPlayHeaders() }
+            CloudPlayHeaders.registerSuffixFor("yun139", ".139.com") { Yun139AuthProvider.getPlayHeaders() }
+            CloudPlayHeaders.registerSuffixFor("yun139", "cmecloud.cn") { Yun139AuthProvider.getPlayHeaders() }
 
-            val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.edit()
                 .putSecret(PREF_NAME, "authorization", tokenValue)
                 .putSecret(PREF_NAME, "phoneNumber", phoneNumber)
@@ -226,20 +228,35 @@ class Yun139BrowserViewModel @Inject constructor(
 
     // region ==================== 登出 ====================
 
-    fun logout() {
-        apiClient.logout()
+    fun reloadAccount() {
+        val provider = "yun139"
+        val latest = com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.value
+        if ((latest[provider] ?: 0L) == (accountRevisions[provider] ?: 0L)) return
+        accountRevisions = latest
+        viewModelScope.coroutineContext[kotlinx.coroutines.Job]?.children?.filter { it !== downloadJob }?.forEach { it.cancel() }
+        resetAccount(true)
+        apiClient = Yun139ApiClient().apply { configureSession(getApplication()) }
+        if (!com.fluxplayer.app.core.data.cloud.CloudAccountStore.consumeLogin(provider)) autoLogin()
+        observeHistory()
+        observeAccountChanges()
+    }
+
+    fun logout() = resetAccount(false)
+
+    private fun resetAccount(keepCredentials: Boolean) {
+        if (!keepCredentials) apiClient.logout()
         // 内存中的 Cookie 也要清掉，否则后续请求仍会带上旧账号的会话头
-        Yun139AuthProvider.clear()
+        if (!keepCredentials) Yun139AuthProvider.clear()
 
         // 清除 OkHttp GlobalCookieJar 中旧账号的 Cookie
-        GlobalCookieJar.clearHost("yun.139.com")
-        GlobalCookieJar.clearHost("api.139.com")
+        if (!keepCredentials) GlobalCookieJar.clearHost("yun.139.com")
+        if (!keepCredentials) GlobalCookieJar.clearHost("api.139.com")
 
         directoryCache.clear()
         directoryCursorCache.clear()
         CloudDirectoryCache.clear(getApplication(), "yun139")
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        if (!keepCredentials) prefs.edit().clear().apply()
         // 清除 WebView 痕迹
         try {
             val cookieManager = android.webkit.CookieManager.getInstance()
@@ -649,11 +666,13 @@ class Yun139BrowserViewModel @Inject constructor(
     fun downloadFile(index: Int) {
         val res = _uiState.value.items.getOrNull(index) ?: return
 
+        val downloadOwner = com.fluxplayer.app.core.common.CloudAccountIdentity.active("yun139")
+        val downloadClient = apiClient
         downloadJob?.cancel()
-        downloadJob = viewModelScope.launch {
+        downloadJob = viewModelScope.launch(com.fluxplayer.app.core.common.CloudAccountIdentity.bindings.asContextElement(mapOf("yun139" to downloadOwner))) {
             val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
-                val urlResult = apiClient.getDownloadUrl(res.path, res.name)
+                val urlResult = downloadClient.getDownloadUrl(res.path, res.name)
                 urlResult.fold(
                     onSuccess = { url ->
                         downloadContext.ensureActive()
@@ -749,4 +768,16 @@ class Yun139BrowserViewModel @Inject constructor(
     }
 
     // endregion
+    // 账号在设置恢复或隐藏标签页期间变化时，也要刷新存活的浏览器实例。
+    private fun observeAccountChanges() {
+        viewModelScope.launch {
+            com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.collect { latest ->
+                val provider = "yun139"
+                if ((latest[provider] ?: 0L) != (accountRevisions[provider] ?: 0L)) reloadAccount()
+            }
+        }
+    }
+
+    init { observeAccountChanges() }
+
 }

@@ -3,6 +3,7 @@ package com.fluxplayer.app.core.data.quark
 import android.content.Context
 import android.util.Base64
 import com.fluxplayer.app.core.data.CloudHttpClient
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
 import com.fluxplayer.app.core.data.security.getSecret
 import com.fluxplayer.app.core.data.security.putSecret
 import java.security.MessageDigest
@@ -18,7 +19,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
 class UcTvService(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences("uc", Context.MODE_PRIVATE)
+    private val preferences = context.applicationContext.cloudPreferences("uc", Context.MODE_PRIVATE)
     private val client = CloudHttpClient.DEFAULT.newBuilder().followRedirects(false).followSslRedirects(false).build()
 
     data class Authorization(val device: String, val queryToken: String, val image: ByteArray, val expiresAt: Long, val owner: String, val revision: String)
@@ -34,6 +35,11 @@ class UcTvService(context: Context) {
 
     fun isAuthorized(): Boolean = owner().isNotBlank() && preferences.getString("tv_owner", "") == owner() &&
         !preferences.getSecret("uc", "tv_refresh_token").isNullOrBlank()
+
+    fun acceptWebCookie(cookie: String) {
+        val next = Regex("(?:^|;\\s*)__uid=([^;]+)").find(cookie)?.groupValues?.get(1).orEmpty()
+        if (next.isBlank() || next != owner()) clearAuthorization()
+    }
 
     fun clearAuthorization() {
         preferences.edit().remove("tv_owner").remove("tv_device").remove("tv_expires_at")

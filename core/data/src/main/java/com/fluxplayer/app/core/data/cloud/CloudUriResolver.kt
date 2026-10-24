@@ -18,7 +18,6 @@ import com.fluxplayer.app.core.data.pan123.Pan123AuthProvider
 import com.fluxplayer.app.core.data.quark.QuarkApiClient
 import com.fluxplayer.app.core.data.quark.quarkPlaybackAuth
 import com.fluxplayer.app.core.data.security.getSecret
-import com.fluxplayer.app.core.data.security.putSecret
 import com.fluxplayer.app.core.data.yun139.Yun139ApiClient
 import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -65,7 +64,29 @@ class CloudUriResolver @Inject constructor(
     suspend fun resolve(uri: Uri): Uri? {
         if (!CloudUriScheme.isCloudUri(uri)) return null
         val provider = CloudUriScheme.getProvider(uri) ?: return null
+        if (provider !in CloudAccountStore.providers) return null
+        val account = uri.getQueryParameter("account") ?: "legacy"
+        return CloudAccountScope.withAccount(context, provider, account) { resolveOwned(uri) }
+    }
+
+    private suspend fun resolveOwned(uri: Uri): Uri? {
+        val provider = checkNotNull(CloudUriScheme.getProvider(uri))
         val fileId = CloudUriScheme.getFileId(uri) ?: return null
+        val prefs = context.cloudPreferences(provider)
+        when (provider) {
+            "cloud189" -> C189AuthProvider.initialize(context)
+            "alipan" -> {
+                AliyunAuthProvider.authorization = prefs.getSecret(provider, "authorization").orEmpty()
+                AliyunAuthProvider.isActive = AliyunAuthProvider.authorization.isNotBlank()
+            }
+            "yun139" -> {
+                Yun139ApiClient().apply {
+                    configureSession(context)
+                    setToken(prefs.getSecret(provider, "authorization").orEmpty(), prefs.getSecret(provider, "phoneNumber").orEmpty(), prefs.getSecret(provider, "userDomainId").orEmpty())
+                }
+                Yun139AuthProvider.cookie = prefs.getSecret(provider, "cookies").orEmpty()
+            }
+        }
         selectPlaybackProvider(provider)
 
         if (uri.getQueryParameter("space") != null || uri.getQueryParameter("extra_parent") != null) {
@@ -102,7 +123,7 @@ class CloudUriResolver @Inject constructor(
                 Log.d(TAG, "resolve: CloudPlaylistCache hit but quality options missing for $fileId, backfilling...")
                 scope.launch {
                     try {
-                        resolveUrl(provider, fileId)
+                        CloudAccountScope.withAccount(context, provider, uri.getQueryParameter("account") ?: "legacy") { resolveUrl(provider, fileId) }
                         Log.d(TAG, "resolve: quality options backfilled for $fileId")
                     } catch (e: Exception) {
                         Log.w(TAG, "resolve: backfill quality options failed for $fileId: ${e.message}")
@@ -118,7 +139,7 @@ class CloudUriResolver @Inject constructor(
     }
 
     private fun extraFeatures(provider: String): CloudProviderFeatures? {
-        val prefs = context.getSharedPreferences(provider, Context.MODE_PRIVATE)
+        val prefs = context.cloudPreferences(provider, Context.MODE_PRIVATE)
         return when (provider) {
             "alipan" -> {
                 val auth = prefs.getSecret(provider, "authorization").orEmpty()
@@ -150,7 +171,6 @@ class CloudUriResolver @Inject constructor(
                     QuarkApiClient(provider = provider).apply {
                         configureSession(context)
                         setCookie(cookie)
-                        onCookieUpdated = { merged -> prefs.edit().putSecret(provider, "cookie", merged).apply() }
                     },
                     provider,
                 )
@@ -160,6 +180,7 @@ class CloudUriResolver @Inject constructor(
                 if (token.isBlank()) return null
                 CloudProviderFeatures.from(
                     Yun139ApiClient().apply {
+                        configureSession(context)
                         setToken(token, prefs.getSecret(provider, "phoneNumber").orEmpty(), prefs.getSecret(provider, "userDomainId").orEmpty())
                         Yun139AuthProvider.cookie = prefs.getSecret(provider, "cookies").orEmpty()
                     },
@@ -178,8 +199,12 @@ class CloudUriResolver @Inject constructor(
      * 刷新 123 云盘画质 URL（鉴权 token 可能过期，切换画质前调用）
      * 返回新的 QualityOption 列表，同时更新 VideoQualityCache
      */
-    suspend fun refreshPan123QualityUrls(fileId: String): List<VideoQualityCache.QualityOption>? {
-        val prefs = context.getSharedPreferences("pan123", Context.MODE_PRIVATE)
+    suspend fun refreshPan123QualityUrls(fileId: String, accountId: String = com.fluxplayer.app.core.common.CloudAccountIdentity.active("pan123")): List<VideoQualityCache.QualityOption>? {
+        return CloudAccountScope.withAccount(context, "pan123", accountId) { refreshPan123QualityUrlsOwned(fileId) }
+    }
+
+    private suspend fun refreshPan123QualityUrlsOwned(fileId: String): List<VideoQualityCache.QualityOption>? {
+        val prefs = context.cloudPreferences("pan123", Context.MODE_PRIVATE)
         val token = prefs.getSecret("pan123", "token").orEmpty()
         if (token.isBlank()) {
             Log.w(TAG, "refreshPan123QualityUrls: token is blank")
@@ -247,7 +272,7 @@ class CloudUriResolver @Inject constructor(
     private suspend fun resolvePan123(fileId: String): String? {
         Log.d(TAG, "========== resolvePan123 START: fileId=$fileId ==========")
 
-        val prefs = context.getSharedPreferences("pan123", Context.MODE_PRIVATE)
+        val prefs = context.cloudPreferences("pan123", Context.MODE_PRIVATE)
         val token = prefs.getSecret("pan123", "token").orEmpty()
         if (token.isBlank()) {
             Log.e(TAG, "resolvePan123: token is BLANK! Cannot proceed.")
@@ -376,7 +401,7 @@ class CloudUriResolver @Inject constructor(
     }
 
     private suspend fun resolveQuark(fileId: String): String? {
-        val prefs = context.getSharedPreferences("quark", Context.MODE_PRIVATE)
+        val prefs = context.cloudPreferences("quark", Context.MODE_PRIVATE)
         val cookie = prefs.getSecret("quark", "cookie").orEmpty()
         if (cookie.isBlank() || !cookie.contains("__uid=")) {
             Log.w(TAG, "resolveQuark: cookie invalid")
@@ -386,7 +411,6 @@ class CloudUriResolver @Inject constructor(
         val client = QuarkApiClient(provider = "quark")
         client.setCookie(cookie)
         // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
-        client.onCookieUpdated = { merged -> prefs.edit().putSecret("quark", "cookie", merged).apply() }
         selectPlaybackProvider("quark")
         // 只同步本次播放那一家（夸克/UC 已各有独立鉴权），另一家的状态保持不动。
         useQuarkAuthProviderFor(client, cookie, "quark")
@@ -419,7 +443,7 @@ class CloudUriResolver @Inject constructor(
     }
 
     private suspend fun resolveUC(fileId: String): String? {
-        val prefs = context.getSharedPreferences("uc", Context.MODE_PRIVATE)
+        val prefs = context.cloudPreferences("uc", Context.MODE_PRIVATE)
         val cookie = prefs.getSecret("uc", "cookie").orEmpty()
         if (cookie.isBlank() || !cookie.contains("__uid=")) return null
 
@@ -438,7 +462,6 @@ class CloudUriResolver @Inject constructor(
         val client = QuarkApiClient(provider = "uc")
         client.setCookie(cookie)
         // API 响应中的 Set-Cookie 实时写回 SharedPreferences，防止后续操作使用过期的旧 cookie
-        client.onCookieUpdated = { merged -> prefs.edit().putSecret("uc", "cookie", merged).apply() }
         selectPlaybackProvider("uc")
         useQuarkAuthProviderFor(client, cookie, "uc")
 
@@ -493,7 +516,7 @@ class CloudUriResolver @Inject constructor(
         CloudPlayHeaders.registerSuffix(".139.com") { Yun139AuthProvider.getPlayHeaders() }
 
         val fileMetadata = CloudPlaylistCache.getFileMetadata("yun139", fileId)
-        val client = Yun139ApiClient()
+        val client = Yun139ApiClient().apply { configureSession(context) }
 
         val playUrl = client.getVideoPreviewUrl(fileId).getOrNull()
         if (playUrl != null) return playUrl + "#yun139Play=true#"
@@ -508,7 +531,7 @@ class CloudUriResolver @Inject constructor(
     private suspend fun resolveAlipan(fileId: String): String? {
         if (!AliyunAuthProvider.isActive) return null
 
-        val prefs = context.getSharedPreferences("alipan", Context.MODE_PRIVATE)
+        val prefs = context.cloudPreferences("alipan", Context.MODE_PRIVATE)
         val auth = prefs.getSecret("alipan", "authorization").orEmpty()
         if (auth.isBlank()) return null
 

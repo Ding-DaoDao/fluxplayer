@@ -1,5 +1,7 @@
 package com.fluxplayer.app.feature.videopicker.aliyun
 
+import kotlinx.coroutines.asContextElement
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
 import android.app.Application
 import android.content.Context
 import android.content.Intent
@@ -65,7 +67,8 @@ class AliyunBrowserViewModel @Inject constructor(
 
     // region ==================== API Client & Auth ====================
 
-    val apiClient = AliyunApiClient().apply { configureSession(application) }
+    var apiClient = AliyunApiClient().apply { configureSession(application) }
+        private set
     val authProvider = AliyunAuthProvider
 
     // endregion
@@ -116,11 +119,15 @@ class AliyunBrowserViewModel @Inject constructor(
 
     // region ==================== 足迹 ====================
 
-    init {
+    private var accountRevisions = com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.value
+
+    init { observeHistory() }
+
+    private fun observeHistory() {
         viewModelScope.launch {
             playbackHistoryRepository.getAllHistoryFlow().collect { history ->
                 val latestPerDir = history
-                    .filter { it.parentPath != null }
+                    .filter { it.parentPath != null && com.fluxplayer.app.core.common.CloudAccountIdentity.isCurrentCloudUri(it.uriString) }
                     .groupBy { it.parentPath!! }
                     .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
                     .values.flatMap { item ->
@@ -141,30 +148,37 @@ class AliyunBrowserViewModel @Inject constructor(
 
     // region ==================== 登录 — loginWithAuthorization ====================
 
-    fun loginWithAuthorization(auth: String, defaultDriveId: String = "", refreshToken: String = "") {
+    fun loginWithAuthorization(auth: String, defaultDriveId: String = "", refreshToken: String = "", expiresAt: Long = 0) {
+        val loginRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.advance("alipan")
         apiClient.authorization = auth
         AliyunAuthProvider.authorization = auth
         AliyunAuthProvider.isActive = true
-        CloudPlayHeaders.registerSuffix(".alipan.com") { AliyunAuthProvider.getPlayHeaders() }
-        CloudPlayHeaders.registerSuffix("aliyundrive.net") { AliyunAuthProvider.getPlayHeaders() }
+        CloudPlayHeaders.registerSuffixFor("alipan", ".alipan.com") { AliyunAuthProvider.getPlayHeaders() }
+        CloudPlayHeaders.registerSuffixFor("alipan", "aliyundrive.net") { AliyunAuthProvider.getPlayHeaders() }
         if (defaultDriveId.isNotBlank()) apiClient.driveId = defaultDriveId
 
         updateUiState { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("alipan") != loginRevision) return@launch
             val result = withTimeoutOrNull(20_000L) { apiClient.getUserDriveInfo() }
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("alipan") != loginRevision) return@launch
             when {
                 result == null -> {
                     updateUiState { it.copy(isLoggedIn = false, isLoading = false, error = "连接超时，请检查网络后重试") }
                 }
                 result.isSuccess -> {
                     val driveInfo = result.getOrNull()
-                    val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                    val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
                     val driveId = defaultDriveId.ifEmpty { driveInfo?.let { resolveDefaultDrive(it) } ?: "" }
                     apiClient.driveId = driveId
                     prefs.edit()
                         .putSecret(PREF_NAME, "authorization", auth)
                         .putString("drive_id", driveId)
                         .putSecret(PREF_NAME, "refresh_token", refreshToken)
+                        .putLong("expires_at", expiresAt.takeIf { it > 0 } ?: com.fluxplayer.app.core.data.security.CloudTokenExpiry.fromToken(auth))
+                        .remove("previous_authorization")
+                        .remove("user_id")
+                        .putLong("device_session_expires_at", 0)
                         .putSecret(PREF_NAME, "device_id", apiClient.getDeviceId())
                         .putSecret(PREF_NAME, "signature", apiClient.getSignature())
                         .apply()
@@ -234,7 +248,7 @@ class AliyunBrowserViewModel @Inject constructor(
             if (signature.isNotBlank()) apiClient.setSignature(signature)
 
             // 不传 defaultDriveId，由 loginWithAuthorization 从 getUserDriveInfo 解析（首次默认资源盘）
-            loginWithAuthorization(auth, defaultDriveId = "", refreshToken)
+            loginWithAuthorization(auth, defaultDriveId = "", refreshToken, expiresAt = com.fluxplayer.app.core.data.security.CloudTokenExpiry.fromResponse(json, accessToken))
         } catch (_: Exception) {
             updateUiState { it.copy(error = "登录信息解析失败，请重试") }
         }
@@ -247,7 +261,7 @@ class AliyunBrowserViewModel @Inject constructor(
     fun tryRestoreSession() {
         if (_uiState.value.isLoggedIn) return
 
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val auth = prefs.getSecret(PREF_NAME, "authorization").orEmpty()
         if (auth.isBlank()) {
             updateUiState { it.copy(isLoggedIn = false) }
@@ -270,8 +284,8 @@ class AliyunBrowserViewModel @Inject constructor(
 
         AliyunAuthProvider.authorization = auth
         AliyunAuthProvider.isActive = true
-        CloudPlayHeaders.registerSuffix(".alipan.com") { AliyunAuthProvider.getPlayHeaders() }
-        CloudPlayHeaders.registerSuffix("aliyundrive.net") { AliyunAuthProvider.getPlayHeaders() }
+        CloudPlayHeaders.registerSuffixFor("alipan", ".alipan.com") { AliyunAuthProvider.getPlayHeaders() }
+        CloudPlayHeaders.registerSuffixFor("alipan", "aliyundrive.net") { AliyunAuthProvider.getPlayHeaders() }
 
         // 恢复 WebView Cookie（备份恢复时 CookieManager 可能为空，从 SharedPreferences 补回）
         val savedCookies = prefs.getSecret(PREF_NAME, "cookies")
@@ -322,23 +336,39 @@ class AliyunBrowserViewModel @Inject constructor(
 
     // region ==================== 登出 ====================
 
-    fun logout() {
+    fun reloadAccount() {
+        val provider = "alipan"
+        val latest = com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.value
+        if ((latest[provider] ?: 0L) == (accountRevisions[provider] ?: 0L)) return
+        accountRevisions = latest
+        viewModelScope.coroutineContext[kotlinx.coroutines.Job]?.children?.filter { it !== downloadJob }?.forEach { it.cancel() }
+        resetAccount(true)
+        apiClient = AliyunApiClient().apply { configureSession(getApplication()) }
+        if (!com.fluxplayer.app.core.data.cloud.CloudAccountStore.consumeLogin(provider)) tryRestoreSession()
+        observeHistory()
+        observeAccountChanges()
+    }
+
+    fun logout() = resetAccount(false)
+
+    private fun resetAccount(keepCredentials: Boolean) {
+        if (!keepCredentials) com.fluxplayer.app.core.data.security.CloudSessionFence.advance("alipan")
         loadSequence++
         loadDirectoryJob?.cancel()
         loadMoreJob?.cancel()
         loadingMore = false
-        AliyunAuthProvider.clear()
+        if (!keepCredentials) AliyunAuthProvider.clear()
 
         // 清除 OkHttp GlobalCookieJar 中旧账号的 Cookie
-        GlobalCookieJar.clearHost("api.alipan.com")
-        GlobalCookieJar.clearHost("www.alipan.com")
+        if (!keepCredentials) GlobalCookieJar.clearHost("api.alipan.com")
+        if (!keepCredentials) GlobalCookieJar.clearHost("www.alipan.com")
 
         // 重置 ApiClient 自身字段
         apiClient.authorization = ""
         apiClient.driveId = ""
 
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        if (!keepCredentials) prefs.edit().clear().apply()
         directoryCache.clear()
         CloudDirectoryCache.clear(getApplication(), "alipan")
         // 清除 WebView 痕迹（cookie、localStorage、缓存等）
@@ -358,7 +388,7 @@ class AliyunBrowserViewModel @Inject constructor(
 
     private suspend fun refreshDriveInfo() {
         val result = apiClient.getUserDriveInfo().getOrNull() ?: return
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val savedDriveId = prefs.getString("drive_id", "")
         val driveId = if (savedDriveId.isNullOrBlank()) resolveDefaultDrive(result) else savedDriveId
         apiClient.driveId = driveId
@@ -399,7 +429,7 @@ class AliyunBrowserViewModel @Inject constructor(
 
     fun switchDrive(driveId: String) {
         apiClient.driveId = driveId
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString("drive_id", driveId).apply()
         updateUiState { it.copy(currentDriveId = driveId) }
         loadDirectory("root")
@@ -410,7 +440,7 @@ class AliyunBrowserViewModel @Inject constructor(
     // region ==================== 重新登录触发 ====================
 
     fun triggerReLogin() {
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         AliyunAuthProvider.clear()
         directoryCache.clear()
@@ -818,11 +848,13 @@ class AliyunBrowserViewModel @Inject constructor(
     fun downloadFile(index: Int) {
         val res = _uiState.value.items.getOrNull(index) ?: return
 
+        val downloadOwner = com.fluxplayer.app.core.common.CloudAccountIdentity.active("alipan")
+        val downloadClient = apiClient
         downloadJob?.cancel()
-        downloadJob = viewModelScope.launch {
+        downloadJob = viewModelScope.launch(com.fluxplayer.app.core.common.CloudAccountIdentity.bindings.asContextElement(mapOf("alipan" to downloadOwner))) {
             val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
-                val urlResult = apiClient.getDownloadUrl(res.path)
+                val urlResult = downloadClient.getDownloadUrl(res.path)
                 urlResult.fold(
                     onSuccess = { url ->
                         downloadContext.ensureActive()
@@ -935,4 +967,16 @@ class AliyunBrowserViewModel @Inject constructor(
     }
 
     // endregion
+    // 账号在设置恢复或隐藏标签页期间变化时，也要刷新存活的浏览器实例。
+    private fun observeAccountChanges() {
+        viewModelScope.launch {
+            com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.collect { latest ->
+                val provider = "alipan"
+                if ((latest[provider] ?: 0L) != (accountRevisions[provider] ?: 0L)) reloadAccount()
+            }
+        }
+    }
+
+    init { observeAccountChanges() }
+
 }

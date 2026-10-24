@@ -10,24 +10,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/**
- * 基于 Android Keystore 的凭证加解密：AES-256-GCM，密钥不可导出。
- *
- * 这里的密钥绑定设备，用于加密
- * **落盘的登录凭证**（Cookie / access token / 账号密码）。落盘格式见 [SecureValueCodec]。
- *
- * 三个必须守住的点：
- *
- * 1. **绝不加 `setUserAuthenticationRequired(true)`**：那会让密钥在用户改锁屏密码时被系统
- *    **必然**作废（`KeyPermanentlyInvalidatedException`），等于把老用户的账号全废掉。
- * 2. **条目坏了要自愈**：删掉坏条目 → 生成新密钥 → 原样重跑一次。否则「每一次」读写都失败。
- * 3. **删条目之前先确认 Keystore 可达**：如果连 `KeyStore.load` 都进不去（设备还没解锁），
- *    那只是**暂时**读不到，此时删键会把用户本来还能解开的凭证全部作废。这种抛
- *    [CredentialKeyException.Unavailable]，让调用方原样失败、下次再试。
- *
- * 本类**不抛裸的 java.security 异常**给调用方——上游常见的崩溃就是主线程被
- * `InvalidKeyException` / `KeystoreException` 击穿。失败一律转成 [CredentialKeyException]。
- */
+/** Android Keystore 保护本机凭证；故障时保留原密钥与密文，由密码恢复流程显式修复。 */
 internal class AndroidKeystoreCredentialCipher : CredentialCipher {
 
     @Volatile
@@ -61,42 +44,34 @@ internal class AndroidKeystoreCredentialCipher : CredentialCipher {
         }
     }
 
-    /**
-     * 跑一次加解密；遇到「条目坏了」先删掉坏条目，再原样重跑一次。
-     *
-     * 重试必须落在**整段流程**外面，而不是只重试 `key()`：部分机型把「操作初始化失败」推迟到
-     * `doFinal` 才报，只重试取密钥接不住。
-     */
+    /** 密钥读取或解密失败时保留条目，交由恢复界面处理，不能自动删除。 */
     private inline fun <T> withRetry(block: () -> T): T = try {
         block()
-    } catch (first: Throwable) {
-        if (!isKeyProblem(first)) throw first
-        discardStaleEntry()
-        try {
-            block()
-        } catch (second: Throwable) {
-            throw if (isKeyProblem(second)) PermanentlyInvalid(second) else second
+    } catch (error: Throwable) {
+        cachedKey = null
+        if (error is android.security.keystore.KeyPermanentlyInvalidatedException || error is java.security.UnrecoverableKeyException) {
+            throw CredentialKeyException.PermanentlyInvalid(describe(error), error)
+        }
+        if (isKeyProblem(error)) throw CredentialKeyException.Unavailable(describe(error), error)
+        throw error
+    }
+
+    private fun key(): SecretKey {
+        cachedKey?.let { return it }
+        return synchronized(this) {
+            cachedKey ?: loadOrCreateKey().also { cachedKey = it }
         }
     }
 
-    /** 取密钥：缓存 → Keystore 已有 → 新建。失败一律转成 [CredentialKeyException]。 */
-    private fun key(): SecretKey {
-        cachedKey?.let { return it }
-        synchronized(this) {
-            cachedKey?.let { return it }
-            val loaded = try {
-                loadOrCreateKey()
-            } catch (first: Throwable) {
-                if (!isKeyProblem(first)) throw first
-                discardStaleEntry()
-                try {
-                    loadOrCreateKey()
-                } catch (second: Throwable) {
-                    throw if (isKeyProblem(second)) PermanentlyInvalid(second) else second
-                }
-            }
-            cachedKey = loaded
-            return loaded
+    /** 仅在密码恢复校验成功且原文件已存档后显式调用。 */
+    @Synchronized
+    internal fun prepareForRecovery() {
+        try {
+            encrypt("recovery-check", "cloud_recovery.check")
+        } catch (_: CredentialKeyException.PermanentlyInvalid) {
+            val store = KeyStore.getInstance(KEYSTORE).apply { load(null) }
+            store.deleteEntry(KEY_ALIAS)
+            cachedKey = null
         }
     }
 
@@ -116,25 +91,6 @@ internal class AndroidKeystoreCredentialCipher : CredentialCipher {
         )
         return generator.generateKey()
     }
-
-    /**
-     * 删掉不可用的 Keystore 条目。
-     *
-     * 删之前先确认 Keystore **可达**：进不去就说明只是暂时读不到，抛 [CredentialKeyException.Unavailable]
-     * 让调用方原样失败，而不是把用户凭证毁掉。
-     */
-    private fun discardStaleEntry() {
-        val keyStore = try {
-            KeyStore.getInstance(KEYSTORE).apply { load(null) }
-        } catch (error: Throwable) {
-            throw CredentialKeyException.Unavailable(describe(error), error)
-        }
-        cachedKey = null
-        runCatching { keyStore.deleteEntry(KEY_ALIAS) }
-    }
-
-    private fun PermanentlyInvalid(error: Throwable) =
-        CredentialKeyException.PermanentlyInvalid(describe(error), error)
 
     private fun encode(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)
 

@@ -32,7 +32,11 @@ import com.fluxplayer.app.core.data.yun139.Yun139AuthProvider
 class AuthAwareDataSourceFactory(
     private val context: Context,
     private val userAgent: String = "NextPlayer",
+    private val cloudProvider: String? = null,
+    private val cloudAccount: String? = null,
 ) : DataSource.Factory {
+
+    fun forCloudAccount(provider: String, account: String) = AuthAwareDataSourceFactory(context, userAgent, provider, account)
 
     private val httpFactory = DefaultHttpDataSource.Factory()
         .setUserAgent(userAgent)
@@ -49,6 +53,8 @@ class AuthAwareDataSourceFactory(
                     fileDelegate = FileDataSource(),
                     contentDelegate = ContentDataSource(context),
                     assetDelegate = AssetDataSource(context),
+                    cloudProvider = cloudProvider,
+                    cloudAccount = cloudAccount,
                 )
             },
         )
@@ -64,6 +70,8 @@ private class AuthAwareDataSource(
     private val fileDelegate: DataSource,
     private val contentDelegate: DataSource,
     private val assetDelegate: DataSource,
+    private val cloudProvider: String? = null,
+    private val cloudAccount: String? = null,
 ) : DataSource {
 
     private var activeDelegate: DataSource? = null
@@ -82,7 +90,11 @@ private class AuthAwareDataSource(
         assetDelegate.addTransferListener(transferListener)
     }
 
-    override fun open(dataSpec: DataSpec): Long {
+    override fun open(dataSpec: DataSpec): Long = if (cloudProvider != null && cloudAccount != null) {
+        com.fluxplayer.app.core.common.CloudAccountIdentity.runAs(cloudProvider, cloudAccount) { openOwned(dataSpec) }
+    } else openOwned(dataSpec)
+
+    private fun openOwned(dataSpec: DataSpec): Long {
         val uri = dataSpec.uri
         val scheme = uri.scheme ?: ""
 
@@ -265,25 +277,26 @@ private class AuthAwareDataSource(
             // HLS .ts 分片兜底：当 fragment 和 CloudPlayHeaders 域名均未命中时，
             // 为当前 active 的云盘注入基础认证头，防止 CDN 边缘节点拒绝请求。
             // 由解析器单独记录当前播放来源，各家账号的登录态可以同时保留。
-            if (CloudPlayHeaders.activeProvider in setOf("quark", "uc") && quarkPlaybackAuth(CloudPlayHeaders.activeProvider).isActive) {
-                val auth = quarkPlaybackAuth(CloudPlayHeaders.activeProvider)
+            val playbackProvider = cloudProvider ?: CloudPlayHeaders.activeProvider
+            if (playbackProvider in setOf("quark", "uc") && quarkPlaybackAuth(playbackProvider).isActive) {
+                val auth = quarkPlaybackAuth(playbackProvider)
                 http.setRequestProperty("Cookie", auth.cookie)
                 http.setRequestProperty("User-Agent", auth.userAgent)
-            } else if (CloudPlayHeaders.activeProvider == "alipan" && AliyunAuthProvider.isActive) {
+            } else if (playbackProvider == "alipan" && AliyunAuthProvider.isActive) {
                 http.setRequestProperty("Authorization", AliyunAuthProvider.authorization)
                 http.setRequestProperty("Referer", "https://www.alipan.com/")
                 http.setRequestProperty("User-Agent", AliyunAuthProvider.userAgent)
-            } else if (CloudPlayHeaders.activeProvider == "pan123" && Pan123AuthProvider.isActive) {
+            } else if (playbackProvider == "pan123" && Pan123AuthProvider.isActive) {
                 Log.d(TAG, "applyHttpAuth: FALLBACK - Pan123AuthProvider.isActive, setting headers")
                 Log.d(TAG, "applyHttpAuth: FALLBACK - referer=${Pan123AuthProvider.referer}, ua=${Pan123AuthProvider.userAgent}")
                 http.setRequestProperty("Referer", Pan123AuthProvider.referer)
                 http.setRequestProperty("User-Agent", Pan123AuthProvider.userAgent)
                 http.setRequestProperty("X-MF-PAN-RANGE", "1")
                 Log.d(TAG, "applyHttpAuth: FALLBACK - Pan123 headers SET")
-            } else if (CloudPlayHeaders.activeProvider == "cloud189" && C189AuthProvider.isActive) {
+            } else if (playbackProvider == "cloud189" && C189AuthProvider.isActive) {
                 http.setRequestProperty("Cookie", "COOKIE_LOGIN_USER=${C189AuthProvider.accessToken}")
                 http.setRequestProperty("User-Agent", C189AuthProvider.userAgent)
-            } else if (CloudPlayHeaders.activeProvider == "yun139" && Yun139AuthProvider.isActive) {
+            } else if (playbackProvider == "yun139" && Yun139AuthProvider.isActive) {
                 http.setRequestProperty("Authorization", Yun139AuthProvider.authorization)
                 http.setRequestProperty("x-yun-device-id", Yun139AuthProvider.deviceInfo)
                 http.setRequestProperty("x-yun-api-version", "v2")

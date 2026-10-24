@@ -5,6 +5,9 @@ import android.content.SharedPreferences
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
 import com.fluxplayer.app.core.data.cloud.CloudListGate
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
+import com.fluxplayer.app.core.data.security.CloudSessionFence
+import com.fluxplayer.app.core.data.security.CloudTokenExpiry
 import com.fluxplayer.app.core.data.security.getSecret
 import com.fluxplayer.app.core.data.security.putSecret
 import kotlinx.coroutines.sync.Mutex
@@ -41,8 +44,13 @@ class AliyunApiClient(
     fun getDeviceId(): String = xDeviceId
     fun getSignature(): String = xSignature
 
+    private var accountId = com.fluxplayer.app.core.common.CloudAccountIdentity.active("alipan")
+    private fun checkAccount() {
+        check(accountId == com.fluxplayer.app.core.common.CloudAccountIdentity.active("alipan")) { "网盘账号已切换，请重新操作" }
+    }
     fun configureSession(context: Context) {
-        sessionPreferences = context.applicationContext.getSharedPreferences("alipan", Context.MODE_PRIVATE)
+        sessionPreferences = context.applicationContext.cloudPreferences("alipan", Context.MODE_PRIVATE)
+        accountId = com.fluxplayer.app.core.common.CloudAccountIdentity.active("alipan")
     }
 
     internal suspend fun featureRequest(path: String, body: JSONObject, headers: Map<String, String> = emptyMap()): JSONObject {
@@ -69,6 +77,14 @@ class AliyunApiClient(
     )
 
     private suspend fun apiPost(url: String, body: JSONObject? = null, extraHeaders: Map<String, String> = emptyMap(), retry: Boolean = true): JSONObject {
+        checkAccount()
+        val revision = CloudSessionFence.current("alipan")
+        val initial = authorization
+        val prefs = sessionPreferences
+        if (retry && prefs?.getSecret("alipan", "authorization") == initial) {
+            if (CloudTokenExpiry.needsRefresh(prefs.getLong("expires_at", CloudTokenExpiry.fromToken(initial)))) refreshSession(initial)
+            if (!prefs.getSecret("alipan", "device_private_key").isNullOrBlank() && CloudTokenExpiry.needsRefresh(prefs.getLong("device_session_expires_at", 0))) renewDeviceSession(authorization)
+        }
         val expected = authorization
         val builder = Request.Builder().url(url)
         builder.post((body ?: JSONObject()).toString().toRequestBody(jsonMediaType))
@@ -77,6 +93,7 @@ class AliyunApiClient(
         val resp = executeRequestAndGetResponse(builder.build())
         val httpCode = resp.code
         val respBody = resp.use { it.body?.string() } ?: throw IllegalStateException("阿里云盘响应为空")
+        CloudSessionFence.checkCurrent("alipan", revision)
         val json = try {
             JSONObject(respBody)
         } catch (error: Exception) {
@@ -106,6 +123,7 @@ class AliyunApiClient(
     }
 
     private suspend fun refreshSession(expected: String): Boolean = sessionMutex.withLock {
+        val owner = CloudSessionFence.current("alipan")
         val prefs = sessionPreferences ?: return@withLock false
         val stored = prefs.getSecret("alipan", "authorization").orEmpty()
         if (stored != expected) {
@@ -124,14 +142,27 @@ class AliyunApiClient(
         check(token.isNotBlank()) { "阿里登录凭据已失效，请重新登录" }
         check(prefs.getSecret("alipan", "authorization") == expected) { "阿里账号已变化，请重新操作" }
         val renewed = "${result.optString("token_type", "Bearer")} $token"
-        prefs.edit().putSecret("alipan", "previous_authorization", expected).putSecret("alipan", "authorization", renewed)
-            .putSecret("alipan", "refresh_token", result.optString("refresh_token").ifBlank { refresh }).apply()
-        authorization = renewed
-        AliyunAuthProvider.authorization = renewed
+        check(
+            CloudSessionFence.commit("alipan", owner) {
+                check(prefs.getSecret("alipan", "authorization") == expected) { "阿里账号已变化，请重新操作" }
+                val userId = result.optString("user_id")
+                val previousUser = prefs.getSecret("alipan", "user_id").orEmpty()
+                check(userId.isBlank() || previousUser.isBlank() || userId == previousUser) { "阿里续期返回的账号不一致" }
+                check(
+                    prefs.edit().putSecret("alipan", "previous_authorization", expected).putSecret("alipan", "authorization", renewed)
+                        .putSecret("alipan", "refresh_token", result.optString("refresh_token").ifBlank { refresh })
+                        .putSecret("alipan", "user_id", userId.ifBlank { previousUser })
+                        .putLong("expires_at", CloudTokenExpiry.fromResponse(result, token)).commit(),
+                ) { "保存阿里登录信息失败" }
+                authorization = renewed
+                AliyunAuthProvider.authorization = renewed
+            },
+        ) { "阿里账号已变化，请重新操作" }
         true
     }
 
     private suspend fun renewDeviceSession(expected: String) = sessionMutex.withLock {
+        val revision = CloudSessionFence.current("alipan")
         val prefs = sessionPreferences ?: error("阿里设备会话已失效，请重新登录")
         check(authorization == expected && prefs.getSecret("alipan", "authorization") == expected) { "阿里账号已变化，请重试" }
         val identityRequest = Request.Builder().url("https://user.aliyundrive.com/v2/user/get")
@@ -147,9 +178,14 @@ class AliyunApiClient(
         val response = JSONObject(executeRequest(request.build()))
         check(response.optBoolean("result")) { "阿里设备会话创建失败，请重新登录" }
         check(prefs.getSecret("alipan", "authorization") == expected) { "阿里账号已变化，请重新操作" }
-        xDeviceId = device
-        xSignature = signed.first
-        prefs.edit().putSecret("alipan", "device_private_key", key).putSecret("alipan", "device_id", device).putSecret("alipan", "signature", signed.first).apply()
+        check(
+            CloudSessionFence.commit("alipan", revision) {
+                xDeviceId = device
+                xSignature = signed.first
+                prefs.edit().putSecret("alipan", "device_private_key", key).putSecret("alipan", "device_id", device).putSecret("alipan", "signature", signed.first)
+                    .putSecret("alipan", "user_id", userId).putLong("device_session_expires_at", System.currentTimeMillis() + 25 * 60 * 1000L).apply()
+            },
+        ) { "阿里账号已变化，请重新操作" }
     }
 
     private fun buildListBody(

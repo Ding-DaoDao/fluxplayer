@@ -676,8 +676,8 @@ class PlayerViewModel @Inject constructor(
      * 刷新 123 云盘画质 URL（鉴权 token 可能过期）
      * 返回新的 QualityOption 列表，同时更新 VideoQualityCache
      */
-    suspend fun refreshPan123QualityUrls(fileId: String): List<QualityOption>? {
-        val freshOptions = cloudUriResolver.refreshPan123QualityUrls(fileId) ?: return null
+    suspend fun refreshPan123QualityUrls(fileId: String, accountId: String = com.fluxplayer.app.core.common.CloudAccountIdentity.active("pan123")): List<QualityOption>? {
+        val freshOptions = cloudUriResolver.refreshPan123QualityUrls(fileId, accountId) ?: return null
         return freshOptions.map { QualityOption(label = it.label, uri = android.net.Uri.parse(it.url)) }
     }
 

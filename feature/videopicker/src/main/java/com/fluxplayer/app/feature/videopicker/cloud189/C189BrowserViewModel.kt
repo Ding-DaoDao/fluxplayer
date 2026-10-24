@@ -1,5 +1,7 @@
 package com.fluxplayer.app.feature.videopicker.cloud189
 
+import kotlinx.coroutines.asContextElement
+import com.fluxplayer.app.core.data.cloud.cloudPreferences
 import android.app.Application
 import android.content.ClipboardManager
 import android.content.Context
@@ -66,7 +68,8 @@ class C189BrowserViewModel @Inject constructor(
 
     // region ==================== API Client ====================
 
-    val apiClient = C189ApiClient()
+    var apiClient = C189ApiClient()
+        private set
 
     // endregion
 
@@ -94,13 +97,18 @@ class C189BrowserViewModel @Inject constructor(
     private val _downloadProgress = MutableStateFlow<DownloadProgressData?>(null)
     val downloadProgress: StateFlow<DownloadProgressData?> = _downloadProgress.asStateFlow()
 
-    init {
-        C189AuthProvider.initialize(application)
+    private var accountRevisions = com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.value
+
+    init { observeHistory() }
+
+    private fun observeHistory() {
+        C189AuthProvider.initialize(getApplication())
+        apiClient = C189ApiClient()
 
         viewModelScope.launch {
             playbackHistoryRepository.getAllHistoryFlow().collect { history ->
                 val latestPerDir = history
-                    .filter { it.parentPath != null }
+                    .filter { it.parentPath != null && com.fluxplayer.app.core.common.CloudAccountIdentity.isCurrentCloudUri(it.uriString) }
                     .groupBy { it.parentPath!! }
                     .mapValues { (_, list) -> list.maxByOrNull { it.lastPlayedTime }!! }
                     .values.flatMap { item ->
@@ -203,10 +211,15 @@ class C189BrowserViewModel @Inject constructor(
      * 成功后自动加载根目录文件列表
      */
     fun loginByPassword(phone: String, password: String) {
+        val loginRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.advance("cloud189")
+        apiClient = C189ApiClient()
+        apiClient.clearCookies()
         android.util.Log.d(TAG, "loginByPassword called phone=${phone.take(3)}**** pwdLen=${password.length}")
         updateUiState { it.copy(loginLoading = true, error = null) }
         viewModelScope.launch {
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189") != loginRevision) return@launch
             val result = apiClient.loginByPassword(phone, password)
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189") != loginRevision) return@launch
             result.fold(
                 onSuccess = {
                     android.util.Log.d(TAG, "loginByPassword SUCCESS, saving tokens")
@@ -262,13 +275,19 @@ class C189BrowserViewModel @Inject constructor(
     // region ==================== 登录 — loginBySms (短信验证码登录) ====================
 
     fun loginBySms(phone: String, smsCode: String) {
+        val loginRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.advance("cloud189")
+        apiClient = C189ApiClient()
+        apiClient.clearCookies()
         android.util.Log.d(TAG, "loginBySms called phone=${phone.take(3)}****")
         updateUiState { it.copy(loginLoading = true, error = null) }
         viewModelScope.launch {
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189") != loginRevision) return@launch
             val result = apiClient.loginBySms(phone, smsCode)
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189") != loginRevision) return@launch
             result.fold(
                 onSuccess = {
                     android.util.Log.d(TAG, "loginBySms SUCCESS, saving tokens")
+                    C189AuthProvider.forgetPassword(C189AuthProvider.snapshot())
                     saveTokens()
                     updateUiState {
                         it.copy(isLoggedIn = true, loginLoading = false, smsCodeSent = false)
@@ -293,10 +312,16 @@ class C189BrowserViewModel @Inject constructor(
     // region ==================== 登录 — loginWithCookies (Cookie登录备用) ====================
 
     fun loginWithCookies(cookies: String) {
+        val loginRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.advance("cloud189")
+        apiClient = C189ApiClient()
+        apiClient.clearCookies()
         updateUiState { it.copy(loginLoading = true) }
         viewModelScope.launch {
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189") != loginRevision) return@launch
             val ok = apiClient.loginByCookies(cookies)
+            if (com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189") != loginRevision) return@launch
             if (ok) {
+                C189AuthProvider.forgetPassword(C189AuthProvider.snapshot())
                 saveTokens()
                 updateUiState { it.copy(isLoggedIn = true, loginLoading = false) }
                 loadDirectory("-11")
@@ -314,17 +339,34 @@ class C189BrowserViewModel @Inject constructor(
 
     // region ==================== 登出 ====================
 
-    fun logout() {
+    fun reloadAccount() {
+        val provider = "cloud189"
+        val latest = com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.value
+        if ((latest[provider] ?: 0L) == (accountRevisions[provider] ?: 0L)) return
+        accountRevisions = latest
+        viewModelScope.coroutineContext[kotlinx.coroutines.Job]?.children?.filter { it !== downloadJob }?.forEach { it.cancel() }
+        resetAccount(true)
+        C189AuthProvider.initialize(getApplication())
+        apiClient = C189ApiClient()
+        if (!com.fluxplayer.app.core.data.cloud.CloudAccountStore.consumeLogin(provider)) tryRestoreSession()
+        observeHistory()
+        observeAccountChanges()
+    }
+
+    fun logout() = resetAccount(false)
+
+    private fun resetAccount(keepCredentials: Boolean) {
+        if (!keepCredentials) com.fluxplayer.app.core.data.security.CloudSessionFence.advance("cloud189")
         restoreSessionJob?.cancel()
         loadDirectoryJob?.cancel()
         loadMoreJob?.cancel()
-        C189AuthProvider.logout()
+        if (!keepCredentials) C189AuthProvider.logout()
 
         // 清除 OkHttp GlobalCookieJar 中旧账号的 Cookie
-        GlobalCookieJar.clearHost("cloud.189.cn")
-        GlobalCookieJar.clearHost("api.cloud.189.cn")
-        GlobalCookieJar.clearHost("m.cloud.189.cn")
-        GlobalCookieJar.clearHost("open.e.189.cn")
+        if (!keepCredentials) GlobalCookieJar.clearHost("cloud.189.cn")
+        if (!keepCredentials) GlobalCookieJar.clearHost("api.cloud.189.cn")
+        if (!keepCredentials) GlobalCookieJar.clearHost("m.cloud.189.cn")
+        if (!keepCredentials) GlobalCookieJar.clearHost("open.e.189.cn")
 
         directoryCache.clear()
         CloudDirectoryCache.clear(getApplication(), "cloud189")
@@ -729,11 +771,13 @@ class C189BrowserViewModel @Inject constructor(
     fun downloadFile(index: Int) {
         val res = _uiState.value.items.getOrNull(index) ?: return
 
+        val downloadOwner = com.fluxplayer.app.core.common.CloudAccountIdentity.active("cloud189")
+        val downloadClient = apiClient
         downloadJob?.cancel()
-        downloadJob = viewModelScope.launch {
+        downloadJob = viewModelScope.launch(com.fluxplayer.app.core.common.CloudAccountIdentity.bindings.asContextElement(mapOf("cloud189" to downloadOwner))) {
             val downloadContext = kotlinx.coroutines.currentCoroutineContext()
             try {
-                val urlResult = apiClient.getDownloadUrl(res.path)
+                val urlResult = downloadClient.getDownloadUrl(res.path)
                 urlResult.fold(
                     onSuccess = { url ->
                         downloadContext.ensureActive()
@@ -854,7 +898,7 @@ class C189BrowserViewModel @Inject constructor(
 
     /** 静默签到（登录后自动调用，同一天只签一次） */
     fun autoSign() {
-        val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val today = LocalDate.now().toString()
         val lastSignDay = prefs.getString("lastSignDay", "") ?: ""
         if (lastSignDay == today) return
@@ -875,7 +919,7 @@ class C189BrowserViewModel @Inject constructor(
     /** 手动签到（菜单点击） */
     fun manualSign() {
         val app = getApplication<Application>()
-        val prefs = app.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val prefs = app.cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val today = LocalDate.now().toString()
         val lastSignDay = prefs.getString("lastSignDay", "") ?: ""
 
@@ -1343,7 +1387,7 @@ class C189BrowserViewModel @Inject constructor(
             if (!apiClient.isShareUrl(text)) return
 
             // 去重：不重复弹窗
-            val prefs = getApplication<Application>().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val prefs = getApplication<Application>().cloudPreferences(PREF_NAME, Context.MODE_PRIVATE)
             val lastPrompted = prefs.getString("lastClipboardPrompt", "") ?: ""
             if (lastPrompted == text) return
 
@@ -1356,4 +1400,16 @@ class C189BrowserViewModel @Inject constructor(
     }
 
     // endregion
+    // 账号在设置恢复或隐藏标签页期间变化时，也要刷新存活的浏览器实例。
+    private fun observeAccountChanges() {
+        viewModelScope.launch {
+            com.fluxplayer.app.core.data.cloud.CloudAccountStore.revisions.collect { latest ->
+                val provider = "cloud189"
+                if ((latest[provider] ?: 0L) != (accountRevisions[provider] ?: 0L)) reloadAccount()
+            }
+        }
+    }
+
+    init { observeAccountChanges() }
+
 }

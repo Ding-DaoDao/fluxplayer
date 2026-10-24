@@ -104,6 +104,7 @@ class CloudDownloadRepository @Inject constructor(
             fileSize = 0L,
             status = DownloadStatus.DOWNLOADING,
             provider = provider,
+            accountId = com.fluxplayer.app.core.common.CloudAccountIdentity.active(if (provider == "aliyun") "alipan" else provider),
             createdAt = System.currentTimeMillis(),
         )
         val taskId = withContext(NonCancellable) { downloadTaskDao.insert(task) }

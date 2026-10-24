@@ -22,11 +22,9 @@ object CloudUriScheme {
     fun getCloudFolder(uri: Uri): String? = uri.getQueryParameter("folder")
 
     fun buildCloudUri(provider: String, fileId: String, folder: String = ""): Uri {
-        val base = "$SCHEME://$provider/$fileId"
-        return if (folder.isNotEmpty()) {
-            Uri.parse(base).buildUpon().appendQueryParameter("folder", folder).build()
-        } else {
-            Uri.parse(base)
-        }
+        val builder = Uri.parse("$SCHEME://$provider/$fileId").buildUpon()
+            .appendQueryParameter("account", CloudAccountIdentity.active(provider))
+        if (folder.isNotEmpty()) builder.appendQueryParameter("folder", folder)
+        return builder.build()
     }
 }

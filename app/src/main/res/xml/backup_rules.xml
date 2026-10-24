@@ -3,6 +3,8 @@
    避免凭证通过 Google Auto Backup 外泄。
 -->
 <full-backup-content>
+    <!-- 多账号配置文件名包含账号 ID，统一排除 SharedPreferences。 -->
+    <exclude domain="sharedpref" path="."/>
     <exclude domain="sharedpref" path="openlist_prefs.xml"/>
     <exclude domain="sharedpref" path="alipan.xml"/>
     <exclude domain="sharedpref" path="cloud189.xml"/>

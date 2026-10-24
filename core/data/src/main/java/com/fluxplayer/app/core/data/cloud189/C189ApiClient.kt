@@ -3,7 +3,6 @@ package com.fluxplayer.app.core.data.cloud189
 import android.util.Log
 import com.fluxplayer.app.core.data.BaseCloudApiClient
 import com.fluxplayer.app.core.data.CloudHttpClient
-import com.fluxplayer.app.core.data.GlobalCookieJar
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.MessageDigest
@@ -23,7 +22,7 @@ import org.json.JSONObject
 
 class C189ApiClient(
     client: OkHttpClient = CloudHttpClient.DEFAULT,
-) : BaseCloudApiClient(client) {
+) : BaseCloudApiClient(client.newBuilder().cookieJar(com.fluxplayer.app.core.data.security.CloudSessionCookieJar("cloud189", client.cookieJar)).build()) {
 
     companion object {
         private const val TAG = "C189Api"
@@ -117,6 +116,7 @@ class C189ApiClient(
         queryParams: Map<String, String> = emptyMap(),
         retry: Boolean = true,
     ): JSONObject {
+        val requestRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189")
         val credentials = C189AuthProvider.snapshot()
         val sk = credentials.sessionKey
         val ss = credentials.sessionSecret
@@ -154,6 +154,7 @@ class C189ApiClient(
         val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
         val error = responseError(body, resp.code)
         resp.close()
+        com.fluxplayer.app.core.data.security.CloudSessionFence.checkCurrent("cloud189", requestRevision)
         if (error != null) {
             if (retry && error.authentication && (refreshSessionAndSync(credentials) || refreshAccessToken(credentials))) {
                 return signedGet(path, queryParams, false)
@@ -169,6 +170,7 @@ class C189ApiClient(
         formParams: Map<String, String> = emptyMap(),
         retry: Boolean = true,
     ): JSONObject {
+        val requestRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189")
         val credentials = C189AuthProvider.snapshot()
         val sk = credentials.sessionKey
         val ss = credentials.sessionSecret
@@ -204,6 +206,7 @@ class C189ApiClient(
         val body = resp.body?.string() ?: throw IllegalStateException("Empty response")
         val error = responseError(body, resp.code)
         resp.close()
+        com.fluxplayer.app.core.data.security.CloudSessionFence.checkCurrent("cloud189", requestRevision)
         if (error != null) {
             if (retry && error.authentication && (refreshSessionAndSync(credentials) || refreshAccessToken(credentials))) {
                 return signedPost(path, formParams, false)
@@ -219,6 +222,7 @@ class C189ApiClient(
         formParams: Map<String, String>,
         retry: Boolean = true,
     ): JSONObject {
+        val requestRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189")
         val credentials = C189AuthProvider.snapshot()
         val at = credentials.accessToken
         if (at.isBlank()) throw IllegalStateException("未登录或 AccessToken 为空")
@@ -251,6 +255,7 @@ class C189ApiClient(
 
         val error = responseError(respBody, resp.code)
         resp.close()
+        com.fluxplayer.app.core.data.security.CloudSessionFence.checkCurrent("cloud189", requestRevision)
         if (error != null) {
             if (retry && error.authentication && (refreshAccessToken(credentials))) {
                 return openApiPost(actionPath, formParams, false)
@@ -266,6 +271,7 @@ class C189ApiClient(
         queryParams: Map<String, String>,
         retry: Boolean = true,
     ): JSONObject {
+        val requestRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189")
         val credentials = C189AuthProvider.snapshot()
         val at = credentials.accessToken
         if (at.isBlank()) throw IllegalStateException("未登录或 AccessToken 为空")
@@ -296,6 +302,7 @@ class C189ApiClient(
 
         val error = responseError(respBody, resp.code)
         resp.close()
+        com.fluxplayer.app.core.data.security.CloudSessionFence.checkCurrent("cloud189", requestRevision)
         if (error != null) {
             if (retry && error.authentication && (refreshAccessToken(credentials))) {
                 return openApiGet(actionPath, queryParams, false)
@@ -308,6 +315,7 @@ class C189ApiClient(
     // ==================== 登录 ====================
 
     suspend fun loginByCookies(cookies: String): Boolean {
+        val loginRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189")
         val expected = C189AuthProvider.snapshot()
         try {
             val date = buildDateHeader()
@@ -333,8 +341,13 @@ class C189ApiClient(
             val key = json.optString("sessionKey", "")
             val secret = json.optString("sessionSecret", "")
             if (token.isBlank() || key.isBlank() || secret.isBlank()) return false
-            restoreCookies(cookies)
-            return C189AuthProvider.replaceIfCurrent(expected, C189AuthProvider.Credentials(token, key, secret, json.optString("refreshToken", "")))
+            var accepted = false
+            return com.fluxplayer.app.core.data.security.CloudSessionFence.commit("cloud189", loginRevision) {
+                if (C189AuthProvider.snapshot() === expected) {
+                    restoreCookies(cookies + ";" + saveCookies())
+                    accepted = C189AuthProvider.replaceIfCurrent(expected, C189AuthProvider.Credentials(token, key, secret, json.optString("refreshToken", "")))
+                }
+            } && accepted
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -344,6 +357,7 @@ class C189ApiClient(
     }
 
     suspend fun loginByPassword(phone: String, password: String): Result<String> = runCatching {
+        val loginRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189")
         val expected = C189AuthProvider.snapshot()
         val ua = C189AuthProvider.userAgent
         val appKey = "8025431004"
@@ -487,17 +501,12 @@ class C189ApiClient(
         val accessToken = atJson.optString("accessToken", "")
         if (accessToken.isBlank()) throw IllegalStateException("[Step5] 换取 accessToken 失败: ${atBody.take(200)}")
 
-        check(
-            C189AuthProvider.replaceIfCurrent(
-                expected,
-                C189AuthProvider.Credentials(
-                    accessToken = accessToken,
-                    sessionKey = sessionKey,
-                    sessionSecret = sessionSecret,
-                    refreshToken = refreshToken,
-                ),
-            ),
-        ) { "登录状态已改变，请重试" }
+        val loggedIn = C189AuthProvider.Credentials(accessToken, sessionKey, sessionSecret, refreshToken)
+        var accepted = false
+        check(com.fluxplayer.app.core.data.security.CloudSessionFence.commit("cloud189", loginRevision) {
+            accepted = C189AuthProvider.replaceIfCurrent(expected, loggedIn)
+            if (accepted) check(C189AuthProvider.savePassword(loggedIn, phone, password)) { "保存天翼自动登录信息失败" }
+        } && accepted) { "登录状态已改变，请重试" }
 
         "ok"
     }
@@ -585,6 +594,7 @@ class C189ApiClient(
      * @return 成功返回 "ok", 失败抛异常
      */
     suspend fun loginBySms(phone: String, smsCode: String): Result<String> = runCatching {
+        val loginRevision = com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189")
         val expected = C189AuthProvider.snapshot()
         // 1) 获取 RSA 公钥
         val (pubKey, pre) = encryptConfForSms()
@@ -654,9 +664,10 @@ class C189ApiClient(
 
         // 5) 用 accessToken 换取 sessionKey (login4MergedClient)
         val session = login4MergedClient(smsAccessToken)
-        check(C189AuthProvider.replaceIfCurrent(expected, session.copy(refreshToken = smsRefreshToken))) {
-            "登录状态已改变，请重试"
-        }
+        var accepted = false
+        check(com.fluxplayer.app.core.data.security.CloudSessionFence.commit("cloud189", loginRevision) {
+            accepted = C189AuthProvider.replaceIfCurrent(expected, session.copy(refreshToken = smsRefreshToken))
+        } && accepted) { "登录状态已改变，请重试" }
 
         "ok"
     }
@@ -865,7 +876,10 @@ class C189ApiClient(
         public: Boolean = false,
         extraHeaders: Map<String, String> = emptyMap(),
         jsonPayload: JSONObject? = null,
+        retry: Boolean = true,
     ): JSONObject {
+        val expected = C189AuthProvider.snapshot()
+        val revision = com.fluxplayer.app.core.data.security.CloudSessionFence.current("cloud189")
         val url = okhttp3.HttpUrl.Builder().scheme("https").host("cloud.189.cn").addPathSegments("api/$path")
         if (!post) params.forEach { (key, value) -> url.addQueryParameter(key, value) }
         url.addQueryParameter("noCache", System.currentTimeMillis().toString())
@@ -882,13 +896,36 @@ class C189ApiClient(
             request.post(if (jsonBody || jsonPayload != null) payload.toString().toRequestBody(jsonMediaType) else params.entries.joinToString("&") { "${it.key}=${URLEncoder.encode(it.value, "UTF-8")}" }.toRequestBody(formUrlEncoded))
         }
         val response = executeRequestAndGetResponse(request.build())
-        return response.use {
-            val body = it.body?.string().orEmpty()
-            responseError(body, it.code)?.let { error -> throw error }
-            check(it.isSuccessful) { "天翼网页接口请求失败（HTTP ${it.code}）" }
-            JSONObject(body)
+        val code = response.code
+        val text = response.use { it.body?.string().orEmpty() }
+        com.fluxplayer.app.core.data.security.CloudSessionFence.checkCurrent("cloud189", revision)
+        val error = responseError(text, code)
+        if (error != null) {
+            if (!public && retry && error.authentication && renewWebSession(expected, revision)) {
+                return webFeatureRequest(path, params, post, jsonBody, public, extraHeaders, jsonPayload, retry = false)
+            }
+            throw error
         }
+        check(code in 200..299) { "天翼网页接口请求失败（HTTP $code）" }
+        if (!public) C189AuthProvider.persist()
+        return JSONObject(text)
     }
+
+    private suspend fun renewWebSession(expected: C189AuthProvider.Credentials, revision: Long): Boolean =
+        com.fluxplayer.app.core.data.security.CloudSessionFence.refreshMutex("cloud189-web").withLock {
+            com.fluxplayer.app.core.data.security.CloudSessionFence.checkCurrent("cloud189", revision)
+            if (C189AuthProvider.snapshot() !== expected) return@withLock C189AuthProvider.hasValidSession()
+            val saved = C189AuthProvider.passwordFor(expected)
+            if (saved == null) return@withLock refreshAccessToken(expected)
+            val result = loginByPassword(saved.first, saved.second)
+            if (result.isFailure) {
+                val cause = result.exceptionOrNull()
+                if (cause is CancellationException) throw cause
+                C189AuthProvider.blockPassword(expected)
+                return@withLock false
+            }
+            true
+        }
 
     private suspend fun familyAccessToken(): String = familyAccessMutex.withLock {
         val expected = C189AuthProvider.snapshot()
@@ -954,35 +991,9 @@ class C189ApiClient(
         return if (post) openApiPost(path, params) else openApiGet(path, params)
     }
 
-    /** 保存 GlobalCookieJar 中所有 cloud.189.cn 相关 Cookie 为字符串 */
-    fun saveCookies(): String {
-        val sb = StringBuilder()
-        for (host in listOf("cloud.189.cn", "api.cloud.189.cn", "m.cloud.189.cn", "open.e.189.cn")) {
-            val cookies = GlobalCookieJar.loadForRequest(okhttp3.HttpUrl.Builder().scheme("https").host(host).build())
-            if (cookies.isNotEmpty()) {
-                sb.append(cookies.joinToString(";") { "${it.name}=${it.value}" })
-                sb.append(";")
-            }
-        }
-        return sb.toString()
-    }
-
-    /** 恢复 Cookie 到 GlobalCookieJar（app 重启后调用） */
-    fun restoreCookies(cookies: String) {
-        if (cookies.isBlank()) return
-        for (part in cookies.split(";")) {
-            val idx = part.indexOf('=')
-            if (idx > 0) {
-                val name = part.substring(0, idx).trim()
-                val value = part.substring(idx + 1).trim()
-                if (name.isNotBlank() && value.isNotBlank()) {
-                    for (host in listOf("cloud.189.cn", "api.cloud.189.cn", "m.cloud.189.cn", "open.e.189.cn")) {
-                        GlobalCookieJar.setCookie(host, name, value)
-                    }
-                }
-            }
-        }
-    }
+    fun clearCookies() = C189Cookies.clear()
+    fun saveCookies(): String = C189Cookies.save()
+    fun restoreCookies(cookies: String) = C189Cookies.restore(cookies)
 
     // ==================== 文件操作 API ====================
 

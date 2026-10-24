@@ -22,33 +22,39 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.fluxplayer.app.core.common.CloudAccountIdentity
+import com.fluxplayer.app.core.data.cloud.CloudAccountScope
 import com.fluxplayer.app.core.data.quark.UcTvService
 import com.fluxplayer.app.core.ui.components.NextDialog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 @Composable
-fun UcTvAuthorizationDialog(service: UcTvService, onDismiss: () -> Unit) {
+fun UcTvAuthorizationDialog(service: UcTvService, accountId: String = CloudAccountIdentity.active("uc"), accountName: String? = null, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     var retry by remember { mutableIntStateOf(0) }
     var authorization by remember { mutableStateOf<UcTvService.Authorization?>(null) }
     var message by remember { mutableStateOf("正在获取二维码") }
     var complete by remember { mutableStateOf(false) }
-    LaunchedEffect(retry) {
-        authorization = null
-        message = "正在获取二维码"
-        try {
-            val qr = service.beginAuthorization()
-            authorization = qr
-            message = "请使用当前网页登录的 UC 账号扫码确认"
-            while (!service.pollAuthorization(qr)) delay(2000)
-            complete = true
+    LaunchedEffect(retry, accountId) {
+        CloudAccountScope.withAccount(context, "uc", accountId) {
             authorization = null
-            message = "授权完成，播放时将优先选择 TV 最高可用画质"
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            message = error.message ?: "授权失败，请重试"
+            message = "正在获取二维码"
+            try {
+                val qr = service.beginAuthorization()
+                authorization = qr
+                message = "请使用${accountName ?: "当前网页登录的 UC 账号"}扫码确认"
+                while (!service.pollAuthorization(qr)) delay(2000)
+                complete = true
+                authorization = null
+                message = "授权完成，播放时将优先选择 TV 最高可用画质"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                message = error.message ?: "授权失败，请重试"
+            }
         }
     }
     NextDialog(
